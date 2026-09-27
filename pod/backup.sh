@@ -23,3 +23,21 @@ for f in os.listdir(stage):
 print("verified", len(remote), "files")
 PY
 echo "BACKUP_OK $TS-$LABEL $(du -sh $STAGE | cut -f1)" >> eval/progress.log
+# Second copy on GitHub (private repo, write-only deploy key scoped to this one repo). Results only: summaries, patches,
+# traces, logs; the tarballs stay on HF. A failed push is a loud alert, not a reason to keep a paid pod running,
+# because the HF copy above is already verified.
+if [ -f /root/.ssh/g4_deploy ] && [ -d .git ]; then
+  BR="pod/$TS-$LABEL"
+  export GIT_SSH_COMMAND="ssh -i /root/.ssh/g4_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+  git -c user.email=admin@carsonrodrigues.com -c user.name="Carson Rodrigues (pod)" checkout -q -B "$BR" &&
+  git add -A -f eval/runs eval/progress.log eval/alerts.log pod submissions 2>/dev/null
+  git -c user.email=admin@carsonrodrigues.com -c user.name="Carson Rodrigues (pod)" commit -q -m "pod results $LABEL $TS" >/dev/null 2>&1
+  if git push -q git@github.com:rodriguescarson/gemma-swe-agent.git "HEAD:refs/heads/$BR" > /root/github_push.log 2>&1 &&
+     git ls-remote git@github.com:rodriguescarson/gemma-swe-agent.git "refs/heads/$BR" | grep -q "$(git rev-parse HEAD)"; then
+    echo "GITHUB_OK $BR" >> eval/progress.log
+  else
+    echo "ALERT GITHUB_PUSH_FAILED $BR (HF copy verified) $(tail -1 /root/github_push.log)" | tee -a eval/progress.log >> eval/alerts.log
+  fi
+else
+  echo "ALERT GITHUB_SKIPPED no deploy key or no .git" | tee -a eval/progress.log >> eval/alerts.log
+fi
