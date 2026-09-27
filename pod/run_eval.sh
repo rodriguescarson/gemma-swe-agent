@@ -4,6 +4,19 @@ set -uo pipefail
 source /root/hvenv/bin/activate; cd /root/g4
 export OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://127.0.0.1:8100/v1}
 SUB=$1; RUN=$2; MIN=$3; CALLS=$4; TURNS=$5; TO=$6; CONC=$7; shift 7
+# Faithful budget (2026-09-27): the Kaggle scorer takes the four limits from the bundle's eval_config.yaml, so use them
+# whenever the bundle has one; CLI numbers are only a fallback. (Fair runs v4-v8 used 6 min/110 calls vs 5/70 on Kaggle.)
+if [ "${FAITHFUL:-1}" = 1 ] && [ -f "$SUB/eval_config.yaml" ]; then
+  eval "$(python3 - "$SUB/eval_config.yaml" <<'PY'
+import re, sys
+t = open(sys.argv[1]).read()
+for key, var in (("max_time_minutes", "MIN"), ("max_tool_calls", "CALLS"), ("max_turns", "TURNS"), ("timeout_seconds", "TO")):
+    m = re.search(rf"^\s*{key}\s*:\s*([0-9.]+)", t, re.M)
+    if m: print(f"{var}={m.group(1)}")
+PY
+)"
+fi
+echo "BUDGET $RUN min=$MIN calls=$CALLS turns=$TURNS timeout=$TO" >> eval/progress.log
 OUT=eval/runs/$RUN; mkdir -p $OUT
 IDS=(); [ $# -gt 0 ] && IDS=(--task-ids "$@")
 echo "START $RUN $(date -u +%FT%TZ)" >> eval/progress.log

@@ -94,3 +94,13 @@ def test_backup_pushes_results_to_github_after_hf():
     assert s.index("hf upload") < s.index("git push") and "g4_deploy" in s and "GITHUB_OK" in s
     assert "git ls-remote" in s          # verify the branch landed, not just that push returned 0
     assert "eval/runs" in s and "-f" in s  # eval/runs is gitignored locally, so it must be force-added
+
+def test_run_eval_uses_bundle_eval_config(tmp_path):
+    # the scorer reads the bundle's eval_config.yaml; local runs must not silently use looser CLI limits
+    import subprocess
+    s = (POD / "run_eval.sh").read_text()
+    body = s[s.index("if [ \"${FAITHFUL"):s.index('echo "BUDGET')]
+    (tmp_path / "eval_config.yaml").write_text("evaluation:\n  timeout_seconds: 180\n  max_tool_calls: 70\n  max_time_minutes: 5\n  max_turns: 150\n")
+    script = f'SUB={tmp_path}; MIN=6; CALLS=110; TURNS=220; TO=99\n{body}\necho "$MIN $CALLS $TURNS $TO"'
+    out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True).stdout.split()
+    assert out == ["5", "70", "150", "180"]
