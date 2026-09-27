@@ -1,0 +1,1274 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "user",
+      "message": "You are evaluating a software engineering task for repository fastapi/fastapi.\n\nProblem Statement:\n\ud83d\udc1b Fix OpenAPI duplication of `anyOf` refs for app-level responses with specified `content` and `model` as `Union`\n\n## Summary\r\n\r\nFixes an issue where defining app-level `responses={...}` with a `Union` of Pydantic models **and** specifying `[\"content\"][...][\"examples\"]` causes the generated OpenAPI schema to accumulate duplicate `$ref` entries in the `anyOf` array.\r\n\r\n\r\n\r\n## Minimal reproducible example\r\n\r\n<details open>\r\n<summary> <code>app.py</code> </summary>\r\n\r\n```python\r\nfrom fastapi import FastAPI\r\nfrom pydantic import BaseModel\r\n\r\n\r\nclass ModelA(BaseModel):\r\n    a: str\r\n\r\n\r\nclass ModelB(BaseModel):\r\n    b: str\r\n\r\n\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'model': ModelA | ModelB,\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}}\r\n            }}\r\n        }\r\n    }\r\n)\r\n\r\n\r\n@app.get('/route1')\r\ndef route1():\r\n    return \"test\"\r\n\r\n@app.get('/route2')\r\ndef route2():\r\n    return \"test\"\r\n\r\n@app.get('/route3')\r\ndef route2():\r\n    return \"test\"\r\n```\r\n</details>\r\n\r\n<details open>\r\n<summary>Generated <code>/openapi.json</code> excerpt (<code>paths[\"/route1\"][\"get\"][\"responses\"]</code>)</summary>\r\n\r\n```json\r\n{\r\n  \"500\": {\r\n    \"description\": \"Internal Server Error\",\r\n    \"content\": {\r\n      \"application/json\": {\r\n        \"schema\": {\r\n          \"anyOf\": [\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" }\r\n          ]\r\n        }\r\n       }\r\n     }\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAs you can see, the `$ref`s are duplicated three times within `anyOf`. \r\n\r\nThis appears to be an unintended behavior, since FastAPI\u2019s documentation does not indicate that specifying both a `model` and `content` is prohibited. The generated schema is still valid, but the duplication grows with teh route count and produces excessively large `anyOf` lists for bigger applications.\r\n\r\n\r\n<details open>\r\n<summary> <h2>Root Cause</h2> </summary>\r\n\r\n[Relevant Code Snippet](https://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L416)\r\n\r\nFirst, `additional_response` is taken from the `route` object:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L379\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n    'model': ModelA | ModelB,\r\n    'content': {\"application/json\": {\r\n        'examples': {\"Case A\": {\"value\": \"a\"}}\r\n    }}\r\n}\r\n```\r\n</details>\r\n\r\n `additional_response` is *shallowly* `.copy()`ed into `process_response`:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L380\r\n\r\nNow, `id(process_response['content']) == id(additional_response['content'])`, so when `process_response['content']` is modified, the `route.responses` object inadvertently modified as well. And, since the response was defined within `FastAPI(...)`, all the routes share the same `route.responses` object.\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L401-L406\r\n\r\n`deep_dict_update()` will combine `anyOf` segments together:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/utils.py#L227-L242\r\n\r\nWhen this method is called the second time (for the second route), `additional_response` will now already contain the schema definition from the first route:\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n  'model': ModelA | ModelB,\r\n  'content': {\"application/json\": {\r\n      'examples': {\"Case A\": {\"value\": \"a\"}}\r\n  }},\r\n  'schema\": {\r\n    \"anyOf\": [\r\n      { \"$ref\": \"#/components/schemas/ModelA\" },\r\n      { \"$ref\": \"#/components/schemas/ModelB\" }\r\n    ]\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAnd, for each subsequent route, the additional \"anyOf\" elements will keep appending to the same array.\r\n\r\n</details>\r\n\r\n<details open>\r\n<summary> <h2> Workaround (before fix) </h2> </summary>\r\n\r\nDefine the schema manually instead of using `model`:\r\n\r\n```python\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}},\r\n                'schema': {\r\n                    \"anyOf\": [\r\n                        model.model_json_schema() for model in [ModelA, ModelB]\r\n                    ]\r\n                }\r\n            }}\r\n        }\r\n    }\r\n)\r\n```\r\n\r\n</details>\r\n\r\n## Additional Information\r\n<details>\r\n<summary> Full <code>openapi.json</code> </summary>\r\n\r\n```json\r\n{\r\n  \"openapi\": \"3.1.0\",\r\n  \"info\": {\r\n    \"title\": \"FastAPI\",\r\n    \"version\": \"0.1.0\"\r\n  },\r\n  \"paths\": {\r\n    \"/route1\": {\r\n      \"get\": {\r\n        \"summary\": \"Route1\",\r\n        \"operationId\": \"route1_route1_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route2\": {\r\n      \"get\": {\r\n        \"summary\": \"Route2\",\r\n        \"operationId\": \"route2_route2_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route3\": {\r\n      \"get\": {\r\n        \"summary\": \"Route3\",\r\n        \"operationId\": \"route3_route3_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    }\r\n  },\r\n  \"components\": {\r\n    \"schemas\": {\r\n      \"ModelA\": {\r\n        \"properties\": {\r\n          \"a\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"A\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"a\"\r\n        ],\r\n        \"title\": \"ModelA\"\r\n      },\r\n      \"ModelB\": {\r\n        \"properties\": {\r\n          \"b\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"B\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"b\"\r\n        ],\r\n        \"title\": \"ModelB\"\r\n      }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n</details>\n\n## Task Budget (Session terminates when any budget is exhausted)\n- Time allowance: 6.0 minutes\n- Tool calls allowance: 110 calls\n- Max loop iterations: 220 turns\n\n## Execution Environment Rules\n- Single command timeout: 180 seconds (commands exceeding this fail without ending the session)\n- Command output limit: 5000 characters\n- File view limit: 150 lines per read_file call\n- File character limit: 10000 characters per read_file call\n- Environment is offline (no network/PyPI access). All repository and test dependencies are ALREADY pre-installed. Do NOT attempt to run pip install or download packages.\n\n## Instructions:\n0. All source code is under `/workspace`. Do NOT search outside `/workspace` (e.g. `/usr/`, `/wheels/`, system site-packages). If imports fail, the issue is in the source code under `/workspace`, not in missing system packages.\n1. Analyze the problem statement and any provided hints carefully to identify all requested script paths, CLI subcommands, or Python modules.\n2. Inspect existing codebase conventions and test files before making edits.\n3. Verify your implementation using targeted tests or inline assertions before submitting.\n4. Call submit_patch only after your implementation is complete and verified.\n5. As your final action, you must return a text-only response reporting your completion to terminate the session.\n## Code Intelligence Tools\nThis repository has pre-built code graph and embedding data. Use these tools for fast, targeted navigation:\n- `search_similar_code(query)`: Find semantically similar functions/classes by keyword.\n- `get_code_neighbors(node)`: Find callers, callees, and definitions related to a symbol.\n- `get_code_subgraph(nodes)`: Get the induced subgraph for a set of symbols.\n\n## Workspace Layout\nThe repository is located at `/workspace`. Here is the directory tree (up to 3 levels):\n```\n.\n./.git\n./.github\n./.github/DISCUSSION_TEMPLATE\n./.github/DISCUSSION_TEMPLATE/questions.yml\n./.github/DISCUSSION_TEMPLATE/translations.yml\n./.github/FUNDING.yml\n./.github/ISSUE_TEMPLATE\n./.github/ISSUE_TEMPLATE/config.yml\n./.github/ISSUE_TEMPLATE/privileged.yml\n./.github/dependabot.yml\n./.github/labeler.yml\n./.github/workflows\n./.github/workflows/add-to-project.yml\n./.github/workflows/build-docs.yml\n./.github/workflows/contributors.yml\n./.github/workflows/deploy-docs.yml\n./.github/workflows/detect-conflicts.yml\n./.github/workflows/issue-manager.yml\n./.github/workflows/label-approved.yml\n./.github/workflows/labeler.yml\n./.github/workflows/latest-changes.yml\n./.github/workflows/notify-translations.yml\n./.github/workflows/people.yml\n./.github/workflows/pre-commit.yml\n./.github/workflows/publish.yml\n./.github/workflows/smokeshow.yml\n./.github/workflows/sponsors.yml\n./.github/workflows/test-redistribute.yml\n./.github/workflows/test.yml\n./.github/workflows/topic-repos.yml\n./.github/workflows/translate.yml\n./.gitignore\n./.pdm-build\n./.pdm-build/.gitignore\n./.pdm-build/fastapi.pth\n./.pre-commit-config.yaml\n./CITATION.cff\n./CONTRIBUTING.md\n./LICENSE\n./README.md\n./SECURITY.md\n./conftest.py\n./docs\n./docs/de\n./docs/de/docs\n./docs/de/llm-prompt.md\n./docs/de/mkdocs.yml\n./docs/en\n./docs/en/data\n./docs/en/docs\n./docs/en/mkdocs.env.yml\n./docs/en/mkdocs.yml\n./docs/en/overrides\n./docs/es\n./docs/es/docs\n./docs/es/llm-prompt.md\n./docs/es/mkdocs.yml\n./docs/fr\n./docs/fr/docs\n./docs/fr/llm-prompt.md\n./docs/fr/mkdocs.yml\n./docs/ja\n./docs/ja/docs\n./docs/ja/llm-prompt.md\n./docs/ja/mkdocs.yml\n./docs/ko\n./docs/ko/docs\n./docs/ko/llm-prompt.md\n./docs/ko/mkdocs.yml\n./docs/language_names.yml\n./docs/missing-translation.md\n./docs/pt\n./docs/pt/docs\n./docs/pt/llm-prompt.md\n./docs/pt/mkdocs.yml\n./docs/ru\n./docs/ru/docs\n./docs/ru/llm-prompt.md\n./docs/ru/mkdocs.yml\n./docs/tr\n./docs/tr/docs\n./docs/tr/llm-prompt.md\n./docs/tr/mkdocs.yml\n./docs/uk\n./docs/uk/docs\n./docs/uk/llm-prompt.md\n./docs/uk/mkdocs.yml\n./docs/zh\n./docs/zh-hant\n./docs/zh-hant/docs\n./docs/zh-hant/llm-prompt.md\n./docs/zh-hant/mkdocs.yml\n./docs/zh/docs\n./docs/zh/llm-prompt.md\n./docs/zh/mkdocs.yml\n./docs_src\n./docs_src/additional_responses\n./docs_src/additional_responses/__init__.py\n./docs_src/additional_responses/tutorial001_py39.py\n./docs_src/additional_responses/tutorial002_py310.py\n./docs_src/additional_responses/tutorial002_py39.py\n./docs_src/additional_responses/tutorial003_py39.py\n./docs_src/additional_responses/tutorial004_py310.py\n./docs_src/additional_responses/tutorial004_py39.py\n./docs_src/additional_status_codes\n./docs_src/additional_status_codes/__init__.py\n./docs_src/additional_status_codes/tutorial001_an_py310.py\n./docs_src/additional_status_codes/tutorial001_an_py39.py\n./docs_src/additional_status_codes/tutorial001_py310.py\n./docs_src/additional_status_codes/tutorial001_py39.py\n./docs_src/advanced_middleware\n./docs_src/advanced_middleware/__init__.py\n./docs_src/advanced_middleware/tutorial001_py39.py\n./docs_src/advanced_middleware/tutorial002_py39.py\n./docs_src/advanced_middleware/tutorial003_py39.py\n./docs_src/app_testing\n./docs_src/app_testing/__init__.py\n./docs_src/app_testing/app_a_py39\n./docs_src/app_testing/app_b_an_py310\n./docs_src/app_testing/app_b_an_py39\n./docs_src/app_testing/app_b_py310\n./docs_src/app_testing/app_b_py39\n./docs_src/app_testing/tutorial001_py39.py\n./docs_src/app_testing/tutorial002_py39.py\n./docs_src/app_testing/tutorial003_py39.py\n./docs_src/app_testing/tutorial004_py39.py\n./docs_src/async_tests\n./docs_src/async_tests/__init__.py\n./docs_src/async_tests/app_a_py39\n./docs_src/authentication_error_status_code\n./docs_src/authentication_error_status_code/__init__.py\n./docs_src/authentication_error_status_code/tutorial001_an_py39.py\n./docs_src/background_tasks\n./docs_src/background_tasks/__init__.py\n./docs_src/background_tasks/tutorial001_py39.py\n./docs_src/background_tasks/tutorial002_an_py310.py\n./docs_src/background_tasks/tutorial002_an_py39.py\n./docs_src/background_tasks/tutorial002_py310.py\n./docs_src/background_tasks/tutorial002_py39.py\n./docs_src/behind_a_proxy\n./docs_src/behind_a_proxy/__init__.py\n./docs_src/behind_a_proxy/tutorial001_01_py39.py\n./docs_src/behind_a_proxy/tutorial001_py39.py\n./docs_src/behind_a_proxy/tutorial002_py39.py\n./docs_src/behind_a_proxy/tutorial003_py39.py\n./docs_src/behind_a_proxy/tutorial004_py39.py\n./docs_src/bigger_applications\n./docs_src/bigger_applications/__init__.py\n./docs_src/bigger_applications/app_an_py39\n```\n",
+      "extra": {
+        "event_type": "task_prompt",
+        "elapsed_s": 6.061175584793091,
+        "timestamp": 1790436759.9972718,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/investigate.py \"Fix OpenAPI duplication of anyOf refs for app-level responses with specified content and model as Union\""
+          },
+          "extra": {
+            "elapsed_s": 9.474962711334229,
+            "timestamp": 1790436763.411059,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 10827,
+              "completion_tokens": 46,
+              "cached_tokens": 0,
+              "total_tokens": 10873
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"python3: can't open file '/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/tmp/swe/investigate.py': [Errno 2] No such file or directory\\n\", \"details\": {\"stdout\": \"\", \"stderr\": \"python3: can't open file '/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/tmp/swe/investigate.py': [Errno 2] No such file or directory\\n\", \"exit_code\": 2}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 9.493593215942383,
+          "timestamp": 1790436763.4296894,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 10827,
+        "completion_tokens": 46,
+        "cached_tokens": 0,
+        "total_tokens": 10873
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 9.474962711334229,
+        "timestamp": 1790436763.411059,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_3",
+          "function_name": "read_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "start_line": 376,
+            "end_line": 416
+          },
+          "extra": {
+            "elapsed_s": 10.23678731918335,
+            "timestamp": 1790436764.1728835,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 11044,
+              "completion_tokens": 42,
+              "cached_tokens": 0,
+              "total_tokens": 11086
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"content\": \"                for (\\n                    additional_status_code,\\n                    additional_response,\\n                ) in route.responses.items():\\n                    process_response = additional_response.copy()\\n                    process_response.pop(\\\"model\\\", None)\\n                    status_code_key = str(additional_status_code).upper()\\n                    if status_code_key == \\\"DEFAULT\\\":\\n                        status_code_key = \\\"default\\\"\\n                    openapi_response = operation_responses.setdefault(\\n                        status_code_key, {}\\n                    )\\n                    assert isinstance(process_response, dict), (\\n                        \\\"An additional response must be a dict\\\"\\n                    )\\n                    field = route.response_fields.get(additional_status_code)\\n                    additional_field_schema: Optional[dict[str, Any]] = None\\n                    if field:\\n                        additional_field_schema = get_schema_from_model_field(\\n                            field=field,\\n                            model_name_map=model_name_map,\\n                            field_mapping=field_mapping,\\n                            separate_input_output_schemas=separate_input_output_schemas,\\n                        )\\n                        media_type = route_response_media_type or \\\"application/json\\\"\\n                        additional_schema = (\\n                            process_response.setdefault(\\\"content\\\", {})\\n                            .setdefault(media_type, {})\\n                            .setdefault(\\\"schema\\\", {})\\n                        )\\n                        deep_dict_update(additional_schema, additional_field_schema)\\n                    status_text: Optional[str] = status_code_ranges.get(\\n                        str(additional_status_code).upper()\\n                    ) or http.client.responses.get(int(additional_status_code))\\n                    description = (\\n                        process_response.get(\\\"description\\\")\\n                        or openapi_response.get(\\\"description\\\")\\n                        or status_text\\n                        or \\\"Additional Response\\\"\\n                    )\\n                    deep_dict_update(openapi_response, process_response)\", \"start_line\": 376, \"end_line\": 416, \"total_lines\": 567, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 10.238763093948364,
+          "timestamp": 1790436764.1748593,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11044,
+        "completion_tokens": 42,
+        "cached_tokens": 0,
+        "total_tokens": 11086
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 10.23678731918335,
+        "timestamp": 1790436764.1728835,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 4,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_5",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 242,
+            "filepath": "fastapi/utils.py",
+            "start_line": 227
+          },
+          "extra": {
+            "elapsed_s": 11.075114727020264,
+            "timestamp": 1790436765.011211,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 11640,
+              "completion_tokens": 40,
+              "cached_tokens": 0,
+              "total_tokens": 11680
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"ValueError\", \"error_message\": \"start_line (227) cannot be greater than end_line (164)\", \"details\": {}}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 11.07898736000061,
+          "timestamp": 1790436765.0150836,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11640,
+        "completion_tokens": 40,
+        "cached_tokens": 0,
+        "total_tokens": 11680
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 11.075114727020264,
+        "timestamp": 1790436765.011211,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 5,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_7",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "grep -n \"def deep_dict_update\" fastapi/utils.py"
+          },
+          "extra": {
+            "elapsed_s": 11.708940982818604,
+            "timestamp": 1790436765.6450372,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 11739,
+              "completion_tokens": 34,
+              "cached_tokens": 0,
+              "total_tokens": 11773
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"131:def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 11.715691089630127,
+          "timestamp": 1790436765.6517873,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11739,
+        "completion_tokens": 34,
+        "cached_tokens": 0,
+        "total_tokens": 11773
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 11.708940982818604,
+        "timestamp": 1790436765.6450372,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 6,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_9",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 160,
+            "filepath": "fastapi/utils.py",
+            "start_line": 131
+          },
+          "extra": {
+            "elapsed_s": 12.370519399642944,
+            "timestamp": 1790436766.3066156,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 11845,
+              "completion_tokens": 36,
+              "cached_tokens": 0,
+              "total_tokens": 11881
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/utils.py\", \"content\": \"def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:\\n    for key, value in update_dict.items():\\n        if (\\n            key in main_dict\\n            and isinstance(main_dict[key], dict)\\n            and isinstance(value, dict)\\n        ):\\n            deep_dict_update(main_dict[key], value)\\n        elif (\\n            key in main_dict\\n            and isinstance(main_dict[key], list)\\n            and isinstance(update_dict[key], list)\\n        ):\\n            main_dict[key] = main_dict[key] + update_dict[key]\\n        else:\\n            main_dict[key] = value\\n\\n\\ndef get_value_or_default(\\n    first_item: Union[DefaultPlaceholder, DefaultType],\\n    *extra_items: Union[DefaultPlaceholder, DefaultType],\\n) -> Union[DefaultPlaceholder, DefaultType]:\\n    \\\"\\\"\\\"\\n    Pass items or `DefaultPlaceholder`s by descending priority.\\n\\n    The first one to _not_ be a `DefaultPlaceholder` will be returned.\\n\\n    Otherwise, the first item (a `DefaultPlaceholder`) will be returned.\\n    \\\"\\\"\\\"\\n    items = (first_item,) + extra_items\", \"start_line\": 131, \"end_line\": 160, \"total_lines\": 164, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 12.373326539993286,
+          "timestamp": 1790436766.3094227,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11845,
+        "completion_tokens": 36,
+        "cached_tokens": 0,
+        "total_tokens": 11881
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 12.370519399642944,
+        "timestamp": 1790436766.3066156,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 7,
+      "source": "agent",
+      "message": "```python\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_count = len(responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\nprint(f\"anyOf count: {any_of_count}\")\nassert any_of_count == 2, f\"Expected 2 items in anyOf, got {any_of_count}\"\n```\n\nFILES: fastapi/openapi/utils.py:380\nROOT CAUSE: `process_response = additional_response.copy()` is a shallow copy. When `additional_response` contains a nested dictionary (like `content`), both `process_response['content']` and `additional_response['content']` point to the same object. Subsequent calls to `deep_dict_update` on this shared object for multiple routes cause `anyOf` lists to accumulate duplicates.\nCHANGE: Replace `process_response = additional_response.copy()` with `import copy` and `process_response = copy.deepcopy(additional_response)`. Since `copy` is already used in some files or available, adding it to imports and using `deepcopy` will prevent shared mutable state.\nTEST: A new test file implementing the minimal reproducible example provided in the issue.",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "metrics": {
+        "prompt_tokens": 12277,
+        "completion_tokens": 468,
+        "cached_tokens": 0,
+        "total_tokens": 12745
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 19.192933797836304,
+        "timestamp": 1790436773.12903,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 8,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_12",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "write_file /tmp/reproduce_issue.py <<EOF\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_count = len(responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\nprint(f\"anyOf count: {any_of_count}\")\nassert any_of_count == 2, f\"Expected 2 items in anyOf, got {any_of_count}\"\nEOF\npython3 /tmp/reproduce_issue.py\n"
+          },
+          "extra": {
+            "elapsed_s": 25.82308030128479,
+            "timestamp": 1790436779.7591765,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 5497,
+              "completion_tokens": 321,
+              "cached_tokens": 0,
+              "total_tokens": 5818
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"/bin/bash: line 1: write_file: command not found\\npython3: can't open file '/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/tmp/reproduce_issue.py': [Errno 2] No such file or directory\\n\", \"details\": {\"stdout\": \"\", \"stderr\": \"/bin/bash: line 1: write_file: command not found\\npython3: can't open file '/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/tmp/reproduce_issue.py': [Errno 2] No such file or directory\\n\", \"exit_code\": 2}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 25.843266010284424,
+          "timestamp": 1790436779.7793622,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5497,
+        "completion_tokens": 321,
+        "cached_tokens": 0,
+        "total_tokens": 5818
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 25.82308030128479,
+        "timestamp": 1790436779.7591765,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 9,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_14",
+          "function_name": "write_file",
+          "arguments": {
+            "content": "from fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_count = len(responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\nprint(f\"anyOf count: {any_of_count}\")\nassert any_of_count == 2, f\"Expected 2 items in anyOf, got {any_of_count}\"\n",
+            "filepath": "/tmp/reproduce_issue.py"
+          },
+          "extra": {
+            "elapsed_s": 30.879215002059937,
+            "timestamp": 1790436784.8153112,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 6025,
+              "completion_tokens": 310,
+              "cached_tokens": 0,
+              "total_tokens": 6335
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"FileWriteError\", \"error_message\": \"Path traversal detected: '/tmp/reproduce_issue.py' escapes workspace root.\"}",
+        "extra": {
+          "tool_name": "write_file",
+          "elapsed_s": 30.882608890533447,
+          "timestamp": 1790436784.818705,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6025,
+        "completion_tokens": 310,
+        "cached_tokens": 0,
+        "total_tokens": 6335
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 30.879215002059937,
+        "timestamp": 1790436784.8153112,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 10,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_16",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"from fastapi import FastAPI; from pydantic import BaseModel; class ModelA(BaseModel): a: str; class ModelB(BaseModel): b: str; app = FastAPI(responses={500: {'model': ModelA | ModelB, 'content': {'application/json': {'examples': {'Case A': {'value': 'a'}}}}}}); @app.get('/r1')\\ndef r1(): return 't'; @app.get('/r2')\\ndef r2(): return 't'; @app.get('/r3')\\ndef r3(): return 't'; schema = app.openapi(); print(len(schema['paths']['/r1']['get']['responses']['500']['content']['application/json']['schema']['anyOf']))\""
+          },
+          "extra": {
+            "elapsed_s": 33.71488952636719,
+            "timestamp": 1790436787.6509857,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 6389,
+              "completion_tokens": 188,
+              "cached_tokens": 0,
+              "total_tokens": 6577
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"  File \\\"<string>\\\", line 1\\n    from fastapi import FastAPI; from pydantic import BaseModel; class ModelA(BaseModel): a: str; class ModelB(BaseModel): b: str; app = FastAPI(responses={500: {'model': ModelA | ModelB, 'content': {'application/json': {'examples': {'Case A': {'value': 'a'}}}}}}); @app.get('/r1')\\\\ndef r1(): return 't'; @app.get('/r2')\\\\ndef r2(): return 't'; @app.get('/r3')\\\\ndef r3(): return 't'; schema = app.openapi(); print(len(schema['paths']['/r1']['get']['responses']['500']['content']['application/json']['schema']['anyOf']))\\n                                                                 ^^^^^\\nSyntaxError: invalid syntax\\n\", \"details\": {\"stdout\": \"\", \"stderr\": \"  File \\\"<string>\\\", line 1\\n    from fastapi import FastAPI; from pydantic import BaseModel; class ModelA(BaseModel): a: str; class ModelB(BaseModel): b: str; app = FastAPI(responses={500: {'model': ModelA | ModelB, 'content': {'application/json': {'examples': {'Case A': {'value': 'a'}}}}}}); @app.get('/r1')\\\\ndef r1(): return 't'; @app.get('/r2')\\\\ndef r2(): return 't'; @app.get('/r3')\\\\ndef r3(): return 't'; schema = app.openapi(); print(len(schema['paths']['/r1']['get']['responses']['500']['content']['application/json']['schema']['anyOf']))\\n                                                                 ^^^^^\\nSyntaxError: invalid syntax\\n\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 33.73347306251526,
+          "timestamp": 1790436787.6695693,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6389,
+        "completion_tokens": 188,
+        "cached_tokens": 0,
+        "total_tokens": 6577
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 33.71488952636719,
+        "timestamp": 1790436787.6509857,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 11,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_18",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "cat <<EOF > reproduce_issue.py\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_count = len(responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\nprint(f\"anyOf count: {any_of_count}\")\nassert any_of_count == 2, f\"Expected 2 items in anyOf, got {any_of_count}\"\nEOF\npython3 reproduce_issue.py\n"
+          },
+          "extra": {
+            "elapsed_s": 38.956809282302856,
+            "timestamp": 1790436792.8929055,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 7024,
+              "completion_tokens": 316,
+              "cached_tokens": 0,
+              "total_tokens": 7340
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/workspace/reproduce_issue.py\\\", line 39, in <module>\\n    assert any_of_count == 2, f\\\"Expected 2 items in anyOf, got {any_of_count}\\\"\\n           ^^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 items in anyOf, got 6\\n\", \"details\": {\"stdout\": \"anyOf count: 6\\n\", \"stderr\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/workspace/reproduce_issue.py\\\", line 39, in <module>\\n    assert any_of_count == 2, f\\\"Expected 2 items in anyOf, got {any_of_count}\\\"\\n           ^^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 items in anyOf, got 6\\n\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 39.31554436683655,
+          "timestamp": 1790436793.2516406,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7024,
+        "completion_tokens": 316,
+        "cached_tokens": 0,
+        "total_tokens": 7340
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 38.956809282302856,
+        "timestamp": 1790436792.8929055,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 12,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_20",
+          "function_name": "read_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "start_line": 370,
+            "end_line": 420
+          },
+          "extra": {
+            "elapsed_s": 40.16940140724182,
+            "timestamp": 1790436794.1054976,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 7643,
+              "completion_tokens": 38,
+              "cached_tokens": 0,
+              "total_tokens": 7681
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"content\": \"                    status_code, {}\\n                ).setdefault(\\\"content\\\", {}).setdefault(route_response_media_type, {})[\\n                    \\\"schema\\\"\\n                ] = response_schema\\n            if route.responses:\\n                operation_responses = operation.setdefault(\\\"responses\\\", {})\\n                for (\\n                    additional_status_code,\\n                    additional_response,\\n                ) in route.responses.items():\\n                    process_response = additional_response.copy()\\n                    process_response.pop(\\\"model\\\", None)\\n                    status_code_key = str(additional_status_code).upper()\\n                    if status_code_key == \\\"DEFAULT\\\":\\n                        status_code_key = \\\"default\\\"\\n                    openapi_response = operation_responses.setdefault(\\n                        status_code_key, {}\\n                    )\\n                    assert isinstance(process_response, dict), (\\n                        \\\"An additional response must be a dict\\\"\\n                    )\\n                    field = route.response_fields.get(additional_status_code)\\n                    additional_field_schema: Optional[dict[str, Any]] = None\\n                    if field:\\n                        additional_field_schema = get_schema_from_model_field(\\n                            field=field,\\n                            model_name_map=model_name_map,\\n                            field_mapping=field_mapping,\\n                            separate_input_output_schemas=separate_input_output_schemas,\\n                        )\\n                        media_type = route_response_media_type or \\\"application/json\\\"\\n                        additional_schema = (\\n                            process_response.setdefault(\\\"content\\\", {})\\n                            .setdefault(media_type, {})\\n                            .setdefault(\\\"schema\\\", {})\\n                        )\\n                        deep_dict_update(additional_schema, additional_field_schema)\\n                    status_text: Optional[str] = status_code_ranges.get(\\n                        str(additional_status_code).upper()\\n                    ) or http.client.responses.get(int(additional_status_code))\\n                    description = (\\n                        process_response.get(\\\"description\\\")\\n                        or openapi_response.get(\\\"description\\\")\\n                        or status_text\\n                        or \\\"Additional Response\\\"\\n                    )\\n                    deep_dict_update(openapi_response, process_response)\\n                    openapi_response[\\\"description\\\"] = description\\n            http422 = \\\"422\\\"\\n            all_route_params = get_flat_params(route.dependant)\\n            if (all_route_params or route.body_field) and not any(\", \"start_line\": 370, \"end_line\": 420, \"total_lines\": 567, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 40.17265748977661,
+          "timestamp": 1790436794.1087537,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7643,
+        "completion_tokens": 38,
+        "cached_tokens": 0,
+        "total_tokens": 7681
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 40.16940140724182,
+        "timestamp": 1790436794.1054976,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 13,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_22",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 50,
+            "filepath": "fastapi/openapi/utils.py",
+            "start_line": 1
+          },
+          "extra": {
+            "elapsed_s": 40.97289776802063,
+            "timestamp": 1790436794.908994,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 8378,
+              "completion_tokens": 35,
+              "cached_tokens": 0,
+              "total_tokens": 8413
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"content\": \"import http.client\\nimport inspect\\nimport warnings\\nfrom collections.abc import Sequence\\nfrom typing import Any, Optional, Union, cast\\n\\nfrom fastapi import routing\\nfrom fastapi._compat import (\\n    ModelField,\\n    Undefined,\\n    get_compat_model_name_map,\\n    get_definitions,\\n    get_schema_from_model_field,\\n    lenient_issubclass,\\n)\\nfrom fastapi.datastructures import DefaultPlaceholder\\nfrom fastapi.dependencies.models import Dependant\\nfrom fastapi.dependencies.utils import (\\n    _get_flat_fields_from_params,\\n    get_flat_dependant,\\n    get_flat_params,\\n    get_validation_alias,\\n)\\nfrom fastapi.encoders import jsonable_encoder\\nfrom fastapi.exceptions import FastAPIDeprecationWarning\\nfrom fastapi.openapi.constants import METHODS_WITH_BODY, REF_PREFIX\\nfrom fastapi.openapi.models import OpenAPI\\nfrom fastapi.params import Body, ParamTypes\\nfrom fastapi.responses import Response\\nfrom fastapi.types import ModelNameMap\\nfrom fastapi.utils import (\\n    deep_dict_update,\\n    generate_operation_id_for_path,\\n    is_body_allowed_for_status_code,\\n)\\nfrom pydantic import BaseModel\\nfrom starlette.responses import JSONResponse\\nfrom starlette.routing import BaseRoute\\nfrom typing_extensions import Literal\\n\\nvalidation_error_definition = {\\n    \\\"title\\\": \\\"ValidationError\\\",\\n    \\\"type\\\": \\\"object\\\",\\n    \\\"properties\\\": {\\n        \\\"loc\\\": {\\n            \\\"title\\\": \\\"Location\\\",\\n            \\\"type\\\": \\\"array\\\",\\n            \\\"items\\\": {\\\"anyOf\\\": [{\\\"type\\\": \\\"string\\\"}, {\\\"type\\\": \\\"integer\\\"}]},\\n        },\\n        \\\"msg\\\": {\\\"title\\\": \\\"Message\\\", \\\"type\\\": \\\"string\\\"},\", \"start_line\": 1, \"end_line\": 50, \"total_lines\": 567, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 40.97708249092102,
+          "timestamp": 1790436794.9131787,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8378,
+        "completion_tokens": 35,
+        "cached_tokens": 0,
+        "total_tokens": 8413
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 40.97289776802063,
+        "timestamp": 1790436794.908994,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 14,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_24",
+          "function_name": "edit_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "new_string": "import copy\nimport http.client",
+            "old_string": "import http.client"
+          },
+          "extra": {
+            "elapsed_s": 41.92491269111633,
+            "timestamp": 1790436795.861009,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 8970,
+              "completion_tokens": 47,
+              "cached_tokens": 0,
+              "total_tokens": 9017
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"occurrences\": 1, \"strategy\": \"exact\", \"diff\": \"--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -1,3 +1,4 @@\\n+import copy\\n import http.client\\n import inspect\\n import warnings\\n\", \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 41.933371782302856,
+          "timestamp": 1790436795.869468,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8970,
+        "completion_tokens": 47,
+        "cached_tokens": 0,
+        "total_tokens": 9017
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 41.92491269111633,
+        "timestamp": 1790436795.861009,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 15,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_26",
+          "function_name": "edit_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "new_string": "                    process_response = copy.deepcopy(additional_response)",
+            "old_string": "                    process_response = additional_response.copy()"
+          },
+          "extra": {
+            "elapsed_s": 42.95592904090881,
+            "timestamp": 1790436796.8920252,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 9135,
+              "completion_tokens": 60,
+              "cached_tokens": 0,
+              "total_tokens": 9195
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"occurrences\": 1, \"strategy\": \"exact\", \"diff\": \"--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -378,7 +378,7 @@\\n                     additional_status_code,\\n                     additional_response,\\n                 ) in route.responses.items():\\n-                    process_response = additional_response.copy()\\n+                    process_response = copy.deepcopy(additional_response)\\n                     process_response.pop(\\\"model\\\", None)\\n                     status_code_key = str(additional_status_code).upper()\\n                     if status_code_key == \\\"DEFAULT\\\":\\n\", \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 42.96511459350586,
+          "timestamp": 1790436796.9012108,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 9135,
+        "completion_tokens": 60,
+        "cached_tokens": 0,
+        "total_tokens": 9195
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 42.95592904090881,
+        "timestamp": 1790436796.8920252,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 16,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_28",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 reproduce_issue.py"
+          },
+          "extra": {
+            "elapsed_s": 43.460665464401245,
+            "timestamp": 1790436797.3967617,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 9400,
+              "completion_tokens": 21,
+              "cached_tokens": 0,
+              "total_tokens": 9421
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"anyOf count: 2\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 43.771568775177,
+          "timestamp": 1790436797.707665,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 9400,
+        "completion_tokens": 21,
+        "cached_tokens": 0,
+        "total_tokens": 9421
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 43.460665464401245,
+        "timestamp": 1790436797.3967617,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 17,
+      "source": "agent",
+      "message": "I fixed the OpenAPI duplication issue by replacing the shallow copy of `additional_response` with a deep copy in `fastapi/openapi/utils.py`. When app-level responses are defined with both a `model` (especially a `Union`) and `content`, the shallow copy caused subsequent routes to mutate the same shared `content` dictionary, leading to accumulated `anyOf` references.\n\nChanges:\n- `fastapi/openapi/utils.py`: Added `import copy` and changed `process_response = additional_response.copy()` to `process_response = copy.deepcopy(additional_response)`.\n\nThe fix was verified using the provided minimal reproducible example.",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "metrics": {
+        "prompt_tokens": 9470,
+        "completion_tokens": 145,
+        "cached_tokens": 0,
+        "total_tokens": 9615
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 46.19507932662964,
+        "timestamp": 1790436800.1311755,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 18,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_31",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "git diff"
+          },
+          "extra": {
+            "elapsed_s": 47.71692705154419,
+            "timestamp": 1790436801.6530232,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 5382,
+              "completion_tokens": 16,
+              "cached_tokens": 0,
+              "total_tokens": 5398
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"diff --git a/fastapi/openapi/utils.py b/fastapi/openapi/utils.py\\nindex 75ff2610..d56027b5 100644\\n--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -1,3 +1,4 @@\\n+import copy\\n import http.client\\n import inspect\\n import warnings\\n@@ -377,7 +378,7 @@ def get_openapi_path(\\n                     additional_status_code,\\n                     additional_response,\\n                 ) in route.responses.items():\\n-                    process_response = additional_response.copy()\\n+                    process_response = copy.deepcopy(additional_response)\\n                     process_response.pop(\\\"model\\\", None)\\n                     status_code_key = str(additional_status_code).upper()\\n                     if status_code_key == \\\"DEFAULT\\\":\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 47.732537269592285,
+          "timestamp": 1790436801.6686335,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5382,
+        "completion_tokens": 16,
+        "cached_tokens": 0,
+        "total_tokens": 5398
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 47.71692705154419,
+        "timestamp": 1790436801.6530232,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 19,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_33",
+          "function_name": "write_file",
+          "arguments": {
+            "content": "from fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_count = len(responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\nprint(f\"anyOf count: {any_of_count}\")\nassert any_of_count == 2, f\"Expected 2 items in anyOf, got {any_of_count}\"\n",
+            "filepath": "/tmp/swe/test_repro.py"
+          },
+          "extra": {
+            "elapsed_s": 52.33803033828735,
+            "timestamp": 1790436806.2741265,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 5668,
+              "completion_tokens": 312,
+              "cached_tokens": 0,
+              "total_tokens": 5980
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"FileWriteError\", \"error_message\": \"Path traversal detected: '/tmp/swe/test_repro.py' escapes workspace root.\"}",
+        "extra": {
+          "tool_name": "write_file",
+          "elapsed_s": 52.34135365486145,
+          "timestamp": 1790436806.2774498,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5668,
+        "completion_tokens": 312,
+        "cached_tokens": 0,
+        "total_tokens": 5980
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 52.33803033828735,
+        "timestamp": 1790436806.2741265,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 20,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_35",
+          "function_name": "write_file",
+          "arguments": {
+            "content": "from fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\n# Manually trigger OpenAPI generation\nopenapi_schema = app.openapi()\n# Check for all routes to ensure no accumulation\nfor path in openapi_schema[\"paths\"]:\n    for method in openapi_schema[\"paths\"][path]:\n        responses = openapi_schema[\"paths\"][path][method][\"responses\"]\n        if \"500\" in responses:\n            any_of_count = len(responses[\"500\"][\"content\"][\"application/json\"][\"schema\"][\"anyOf\"])\n            print(f\"Path {path}, method {method}, anyOf count: {any_of_count}\")\n            assert any_of_count == 2, f\"Expected 2 items in anyOf for {path}, got {any_of_count}\"\n\nprint(\"Verification successful!\")\n",
+            "filepath": "repro_test.py"
+          },
+          "extra": {
+            "elapsed_s": 58.06346082687378,
+            "timestamp": 1790436811.999557,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 6036,
+              "completion_tokens": 364,
+              "cached_tokens": 0,
+              "total_tokens": 6400
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"repro_test.py\", \"size\": 1142}",
+        "extra": {
+          "tool_name": "write_file",
+          "elapsed_s": 58.07311391830444,
+          "timestamp": 1790436812.00921,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6036,
+        "completion_tokens": 364,
+        "cached_tokens": 0,
+        "total_tokens": 6400
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 58.06346082687378,
+        "timestamp": 1790436811.999557,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 21,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_37",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 repro_test.py"
+          },
+          "extra": {
+            "elapsed_s": 58.56396198272705,
+            "timestamp": 1790436812.5000582,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 6439,
+              "completion_tokens": 21,
+              "cached_tokens": 0,
+              "total_tokens": 6460
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"Path /route1, method get, anyOf count: 2\\nPath /route2, method get, anyOf count: 2\\nPath /route3, method get, anyOf count: 2\\nVerification successful!\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 58.87060022354126,
+          "timestamp": 1790436812.8066964,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6439,
+        "completion_tokens": 21,
+        "cached_tokens": 0,
+        "total_tokens": 6460
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 58.56396198272705,
+        "timestamp": 1790436812.5000582,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 22,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_39",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -m pytest tests/test_openapi.py"
+          },
+          "extra": {
+            "elapsed_s": 59.79965543746948,
+            "timestamp": 1790436813.7357516,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 6554,
+              "completion_tokens": 26,
+              "cached_tokens": 0,
+              "total_tokens": 6580
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"[2026-09-26 15:33:33,955] WARNING in core: flasgger is not installed; serving the static landing page at / and skipping the Swagger UI and /spec.json.\\n/root/buildenv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \\\"asyncio_default_fixture_loop_scope\\\" is unset.\\nThe event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \\\"function\\\", \\\"class\\\", \\\"module\\\", \\\"package\\\", \\\"session\\\"\\n\\n  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))\\nERROR: file or directory not found: tests/test_openapi.py\\n\\n\", \"details\": {\"stdout\": \"============================= test session starts ==============================\\nplatform linux -- Python 3.12.13, pytest-8.3.4, pluggy-1.6.0\\nrootdir: /tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/workspace\\nconfigfile: pytest.ini\\nplugins: timeout-2.1.0, asyncio-1.3.0, httpbin-2.1.0, inline-snapshot-0.35.4\\nasyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\\ncollected 0 items\\n\\n============================ no tests ran in 0.07s =============================\\n\", \"stderr\": \"[2026-09-26 15:33:33,955] WARNING in core: flasgger is not installed; serving the static landing page at / and skipping the Swagger UI and /spec.json.\\n/root/buildenv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \\\"asyncio_default_fixture_loop_scope\\\" is unset.\\nThe event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \\\"function\\\", \\\"class\\\", \\\"module\\\", \\\"package\\\", \\\"session\\\"\\n\\n  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))\\nERROR: file or directory not found: tests/test_openapi.py\\n\\n\", \"exit_code\": 4}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 60.32395315170288,
+          "timestamp": 1790436814.2600493,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6554,
+        "completion_tokens": 26,
+        "cached_tokens": 0,
+        "total_tokens": 6580
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 59.79965543746948,
+        "timestamp": 1790436813.7357516,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 23,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_41",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "run_command python3 -m pytest tests/test_openapi.py | head -60"
+          },
+          "extra": {
+            "elapsed_s": 61.25559997558594,
+            "timestamp": 1790436815.1916962,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7313,
+              "completion_tokens": 38,
+              "cached_tokens": 0,
+              "total_tokens": 7351
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"\", \"stderr\": \"/bin/bash: line 1: run_command: command not found\\n\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 61.265573263168335,
+          "timestamp": 1790436815.2016695,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7313,
+        "completion_tokens": 38,
+        "cached_tokens": 0,
+        "total_tokens": 7351
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 61.25559997558594,
+        "timestamp": 1790436815.1916962,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 24,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_43",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "run_command python3 -m pytest tests/test_openapi.py | head -60"
+          },
+          "extra": {
+            "elapsed_s": 61.98200821876526,
+            "timestamp": 1790436815.9181044,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7406,
+              "completion_tokens": 38,
+              "cached_tokens": 0,
+              "total_tokens": 7444
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"\", \"stderr\": \"/bin/bash: line 1: run_command: command not found\\n\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 61.990859508514404,
+          "timestamp": 1790436815.9269557,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7406,
+        "completion_tokens": 38,
+        "cached_tokens": 0,
+        "total_tokens": 7444
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 61.98200821876526,
+        "timestamp": 1790436815.9181044,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 25,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_45",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "find tests -name \"*openapi*\""
+          },
+          "extra": {
+            "elapsed_s": 62.42555212974548,
+            "timestamp": 1790436816.3616483,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7499,
+              "completion_tokens": 21,
+              "cached_tokens": 0,
+              "total_tokens": 7520
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"tests/test_deprecated_openapi_prefix.py\\ntests/test_duplicate_models_openapi.py\\ntests/test_openapi_examples.py\\ntests/test_openapi_model_description_trim_on_formfeed.py\\ntests/test_openapi_query_parameter_extension.py\\ntests/test_openapi_route_extensions.py\\ntests/test_openapi_schema_type.py\\ntests/test_openapi_separate_input_output_schemas.py\\ntests/test_openapi_servers.py\\ntests/test_security_oauth2_authorization_code_bearer_scopes_openapi.py\\ntests/test_security_oauth2_authorization_code_bearer_scopes_openapi_simple.py\\ntests/test_top_level_security_scheme_in_openapi.py\\ntests/test_tutorial/test_conditional_openapi\\ntests/test_tutorial/test_extending_openapi\\ntests/test_tutorial/test_openapi_callbacks\\ntests/test_tutorial/test_openapi_webhooks\\ntests/test_tutorial/test_separate_openapi_schemas\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 62.4360089302063,
+          "timestamp": 1790436816.3721051,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7499,
+        "completion_tokens": 21,
+        "cached_tokens": 0,
+        "total_tokens": 7520
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 62.42555212974548,
+        "timestamp": 1790436816.3616483,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 26,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_47",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -m pytest tests/test_openapi_examples.py"
+          },
+          "extra": {
+            "elapsed_s": 63.03393316268921,
+            "timestamp": 1790436816.9700294,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7821,
+              "completion_tokens": 28,
+              "cached_tokens": 0,
+              "total_tokens": 7849
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"============================= test session starts ==============================\\nplatform linux -- Python 3.12.13, pytest-8.3.4, pluggy-1.6.0\\nrootdir: /tmp/swegemma_sandbox_c4580cc5-e50_8vgdqhi2/workspace\\nconfigfile: pytest.ini\\nplugins: timeout-2.1.0, asyncio-1.3.0, httpbin-2.1.0, inline-snapshot-0.35.4\\nasyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function\\ncollected 2 items\\n\\ntests/test_openapi_examples.py ..                                        [100%]\\n\\n============================== 2 passed in 0.34s ===============================\\n\", \"stderr\": \"[2026-09-26 15:33:37,201] WARNING in core: flasgger is not installed; serving the static landing page at / and skipping the Swagger UI and /spec.json.\\n/root/buildenv/lib/python3.12/site-packages/pytest_asyncio/plugin.py:247: PytestDeprecationWarning: The configuration option \\\"asyncio_default_fixture_loop_scope\\\" is unset.\\nThe event loop scope for asynchronous fixtures will default to the fixture caching scope. Future versions of pytest-asyncio will default the loop scope for asynchronous fixtures to function scope. Set the default fixture loop scope explicitly in order to avoid unexpected behavior in the future. Valid fixture loop scopes are: \\\"function\\\", \\\"class\\\", \\\"module\\\", \\\"package\\\", \\\"session\\\"\\n\\n  warnings.warn(PytestDeprecationWarning(_DEFAULT_FIXTURE_LOOP_SCOPE_UNSET))\\n\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 63.879220962524414,
+          "timestamp": 1790436817.8153172,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7821,
+        "completion_tokens": 28,
+        "cached_tokens": 0,
+        "total_tokens": 7849
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 63.03393316268921,
+        "timestamp": 1790436816.9700294,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 27,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_49",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "rm repro_test.py"
+          },
+          "extra": {
+            "elapsed_s": 64.39888262748718,
+            "timestamp": 1790436818.3349788,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 8321,
+              "completion_tokens": 20,
+              "cached_tokens": 0,
+              "total_tokens": 8341
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 64.40607285499573,
+          "timestamp": 1790436818.342169,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8321,
+        "completion_tokens": 20,
+        "cached_tokens": 0,
+        "total_tokens": 8341
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 64.39888262748718,
+        "timestamp": 1790436818.3349788,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 28,
+      "source": "agent",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_51",
+          "function_name": "submit_patch",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 64.66939759254456,
+            "timestamp": 1790436818.6054938,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 8382,
+              "completion_tokens": 9,
+              "cached_tokens": 0,
+              "total_tokens": 8391
+            },
+            "model_version": "gemma-4-31b-it-qat-w4a16-ct"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"patch_size\": 1807, \"files_changed\": 2}",
+        "extra": {
+          "tool_name": "submit_patch",
+          "elapsed_s": 64.70076990127563,
+          "timestamp": 1790436818.636866,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8382,
+        "completion_tokens": 9,
+        "cached_tokens": 0,
+        "total_tokens": 8391
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 64.66939759254456,
+        "timestamp": 1790436818.6054938,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 29,
+      "source": "agent",
+      "message": "The fix replaces a shallow copy with a deep copy in `fastapi/openapi/utils.py` to prevent mutable state sharing of `additional_response['content']` across multiple routes, which previously caused duplicate `$ref` entries in `anyOf` schemas. This was verified using a reproduction script and by running existing tests.",
+      "model_name": "gemma-4-31b-it-qat-w4a16-ct",
+      "metrics": {
+        "prompt_tokens": 8433,
+        "completion_tokens": 72,
+        "cached_tokens": 0,
+        "total_tokens": 8505
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 65.78664708137512,
+        "timestamp": 1790436819.7227433,
+        "author": "verifier"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 232557,
+    "total_completion_tokens": 3112,
+    "total_cached_tokens": 0,
+    "total_tokens": 235669,
+    "total_steps": 29
+  }
+}

@@ -1,0 +1,84 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index ef3f5641..e3451f4b 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -192,7 +192,11 @@ def get_flat_params(dependant: Dependant) -> List[ModelField]:
+ 
+ def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
+     signature = inspect.signature(call)
+-    globalns = getattr(call, "__globals__", {})
++    # Follow __wrapped__ chain to find original function's globals
++    curr = call
++    while hasattr(curr, "__wrapped__"):
++        curr = curr.__wrapped__
++    globalns = getattr(curr, "__globals__", {})
+     typed_params = [
+         inspect.Parameter(
+             name=param.name,
+diff --git a/tests/test_wrapped_method_forward_reference.py b/tests/test_wrapped_method_forward_reference.py
+new file mode 100644
+index 00000000..0ffcd50b
+--- /dev/null
++++ b/tests/test_wrapped_method_forward_reference.py
+@@ -0,0 +1,61 @@
++import functools
++from typing import ForwardRef, Any
++from fastapi.dependencies.utils import get_typed_signature
++import inspect
++import pytest
++
++def test_wrapped_method_type_inference():
++    class Target:
++        pass
++
++    def my_endpoint(x: "Target"):
++        return {"x": x}
++
++    def wrapper(func):
++        @functools.wraps(func)
++        def wrapped(*args, **kwargs):
++            return func(*args, **kwargs)
++        return wrapped
++
++    wrapped_endpoint = wrapper(my_endpoint)
++    
++    # Save Target
++    saved_target = Target
++    
++    # We need Target to be missing from the globals that wrapped_endpoint.__globals__ uses.
++    # wrapped_endpoint is defined in this function's scope? No, the wrapper function's scope.
++    # Actually, wrapper is defined in test_wrapped_method_type_inference.
++    # wrapper.__globals__ is the module globals.
++    # wrapped is defined inside wrapper, so wrapped.__globals__ is wrapper.__globals__ (module globals).
++    
++    # Let's just use a separate module for the wrapped function.
++    import types
++    mod = types.ModuleType("mod")
++    mod.Target = Target
++    exec("def my_endpoint(x: 'Target'): pass", mod.__dict__)
++    my_endpoint = mod.my_endpoint
++    
++    def wrapper(func):
++        @functools.wraps(func)
++        def wrapped(*args, **kwargs):
++            return func(*args, **kwargs)
++        return wrapped
++    
++    wrapped_endpoint = wrapper(my_endpoint)
++    
++    # wrapped_endpoint.__globals__ is the current module's globals.
++    # my_endpoint.__globals__ is mod.__dict__.
++    # 'Target' is in mod.__dict__, but not in current module's globals.
++    
++    try:
++        sig = get_typed_signature(wrapped_endpoint)
++        # If it works, it should have resolved 'Target' to the class Target.
++        # However, because we are in a test, we just check it doesn't raise NameError
++        # and that it's actually the class.
++        assert sig.parameters['x'].annotation is Target
++    except NameError as e:
++        pytest.fail(f"Raised NameError: {e}")
++
++if __name__ == "__main__":
++    import pytest
++    pytest.main([__file__])

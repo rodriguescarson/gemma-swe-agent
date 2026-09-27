@@ -1,0 +1,67 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index e5ac51d5..0da45263 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -730,7 +730,11 @@ def _get_multidict_value(
+     field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None
+ ) -> Any:
+     alias = alias or get_validation_alias(field)
+-    if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict, Headers)):
++    if (
++        is_sequence_field(field)
++        and not (hasattr(field.field_info, "metadata") and Json in field.field_info.metadata)
++        and isinstance(values, (ImmutableMultiDict, Headers))
++    ):
+         value = values.getlist(alias)
+     else:
+         value = values.get(alias, None)
+diff --git a/test_reproduce_issue.py b/test_reproduce_issue.py
+new file mode 100644
+index 00000000..0f0a00ca
+--- /dev/null
++++ b/test_reproduce_issue.py
+@@ -0,0 +1,44 @@
++
++from fastapi import FastAPI, Form
++from fastapi.testclient import TestClient
++from pydantic import Json
++from typing import Annotated, List
++
++app = FastAPI()
++
++@app.post("/upload")
++def upload(
++    tags: Annotated[Json[List[str]], Form()]
++):
++    return {"tags": tags}
++
++client = TestClient(app)
++
++def test_json_list_form():
++    # Client sends a JSON string in a form field
++    response = client.post(
++        "/upload", 
++        data={"tags": '["abc", "def"]'}
++    )
++    assert response.status_code == 200
++    assert response.json() == {"tags": ["abc", "def"]}
++
++def test_json_scalar_form():
++    @app.post("/scalar")
++    def scalar(val: Annotated[Json[int], Form()]):
++        return {"val": val}
++    
++    response = client.post("/scalar", data={"val": "123"})
++    assert response.status_code == 200
++    assert response.json() == {"val": 123}
++
++if __name__ == "__main__":
++    import pytest
++    # We can't easily run pytest here, so we just run the functions
++    try:
++        test_json_list_form()
++        test_json_scalar_form()
++        print("Tests passed!")
++    except Exception as e:
++        print(f"Tests failed: {e}")
++        exit(1)

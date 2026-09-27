@@ -1,0 +1,145 @@
+diff --git a/fastapi/dependencies/models.py b/fastapi/dependencies/models.py
+index d6359c0f..7fc640bb 100644
+--- a/fastapi/dependencies/models.py
++++ b/fastapi/dependencies/models.py
+@@ -45,9 +45,14 @@ class Dependant:
+ 
+     @cached_property
+     def cache_key(self) -> DependencyCacheKey:
++        if self.security_scopes_param_name:
++            return (
++                self.call,
++                tuple(sorted(set(self.security_scopes or []))),
++                self.computed_scope or "",
++            )
+         return (
+             self.call,
+-            tuple(sorted(set(self.security_scopes or []))),
+             self.computed_scope or "",
+         )
+ 
+diff --git a/tests/test_dependencies/test_cache_scopes.py b/tests/test_dependencies/test_cache_scopes.py
+new file mode 100644
+index 00000000..dbc30510
+--- /dev/null
++++ b/tests/test_dependencies/test_cache_scopes.py
+@@ -0,0 +1,119 @@
++import pytest
++from fastapi import FastAPI, Depends, Security
++from fastapi.security import OAuth2PasswordBearer
++from fastapi.testclient import TestClient
++from fastapi.security import SecurityScopes
++
++app = FastAPI()
++oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
++
++# A dependency that does NOT use scopes
++# It should be cached once per request, regardless of the scopes requested by the endpoint.
++dep_no_scopes_count = 0
++def dep_no_scopes():
++    global dep_no_scopes_count
++    dep_no_scopes_count += 1
++    return "no_scopes"
++
++# A dependency that DOES use scopes
++# It should be cached per set of scopes.
++dep_with_scopes_count = 0
++def dep_with_scopes(scopes: SecurityScopes):
++    global dep_with_scopes_count
++    dep_with_scopes_count += 1
++    return f"with_scopes_{scopes.scopes}"
++
++# A dependency that doesn't use scopes but depends on one that does
++dep_sub_scopes_count = 0
++def dep_sub_scopes(sub = Depends(dep_with_scopes)):
++    global dep_sub_scopes_count
++    dep_sub_scopes_count += 1
++    return f"sub_scopes_{sub}"
++
++# A dependency that doesn't use scopes and its sub-dependencies don't either
++dep_no_sub_scopes_count = 0
++def dep_no_sub_scopes(sub = Depends(dep_no_scopes)):
++    global dep_no_sub_scopes_count
++    dep_no_sub_scopes_count += 1
++    return f"no_sub_scopes_{sub}"
++
++@app.get("/no-scopes")
++async def endpoint_no_scopes(
++    d1 = Depends(dep_no_scopes),
++    d2 = Depends(dep_no_scopes)
++):
++    return {"d1": d1, "d2": d2}
++
++@app.get("/with-scopes")
++async def endpoint_with_scopes(
++    d1 = Security(dep_with_scopes, scopes=["scope1"]),
++    d2 = Security(dep_with_scopes, scopes=["scope1"]),
++):
++    return {"d1": d1, "d2": d2}
++
++@app.get("/mixed-scopes")
++async def endpoint_mixed_scopes(
++    d1 = Security(dep_with_scopes, scopes=["scope1"]),
++    d2 = Security(dep_with_scopes, scopes=["scope2"]),
++):
++    return {"d1": d1, "d2": d2}
++
++@app.get("/sub-scopes")
++async def endpoint_sub_scopes(
++    d1 = Security(dep_sub_scopes, scopes=["scope1"]),
++    d2 = Security(dep_sub_scopes, scopes=["scope1"]),
++):
++    return {"d1": d1, "d2": d2}
++
++@app.get("/no-sub-scopes")
++async def endpoint_no_sub_scopes(
++    d1 = Security(dep_no_sub_scopes, scopes=["scope1"]),
++    d2 = Security(dep_no_sub_scopes, scopes=["scope2"]),
++):
++    return {"d1": d1, "d2": d2}
++
++client = TestClient(app)
++
++def test_cache_no_scopes():
++    global dep_no_scopes_count
++    dep_no_scopes_count = 0
++    response = client.get("/no-scopes")
++    assert response.status_code == 200
++    assert dep_no_scopes_count == 1
++
++def test_cache_with_scopes_same():
++    global dep_with_scopes_count
++    dep_with_scopes_count = 0
++    response = client.get("/with-scopes", headers={"Authorization": "Bearer token"})
++    assert response.status_code == 200
++    assert dep_with_scopes_count == 1
++
++def test_cache_with_scopes_different():
++    global dep_with_scopes_count
++    dep_with_scopes_count = 0
++    response = client.get("/mixed-scopes", headers={"Authorization": "Bearer token"})
++    assert response.status_code == 200
++    assert dep_with_scopes_count == 2
++
++def test_cache_sub_scopes_same():
++    global dep_with_scopes_count, dep_sub_scopes_count
++    dep_with_scopes_count = 0
++    dep_sub_scopes_count = 0
++    response = client.get("/sub-scopes", headers={"Authorization": "Bearer token"})
++    assert response.status_code == 200
++    assert dep_with_scopes_count == 1
++    assert dep_sub_scopes_count == 1
++
++def test_cache_no_sub_scopes_different_endpoint_scopes():
++    global dep_no_scopes_count, dep_no_sub_scopes_count
++    dep_no_scopes_count = 0
++    dep_no_sub_scopes_count = 0
++    # Endpoint requests scope1 and scope2 for the same dependency
++    # but that dependency doesn't use scopes.
++    # It should be cached once.
++    response = client.get("/no-sub-scopes", headers={"Authorization": "Bearer token"})
++    assert response.status_code == 200
++    # dep_no_sub_scopes doesn't use scopes, but it's called twice with different scopes.
++    # If it's cached correctly, it should only be executed once.
++    assert dep_no_sub_scopes_count == 1
++    assert dep_no_scopes_count == 1

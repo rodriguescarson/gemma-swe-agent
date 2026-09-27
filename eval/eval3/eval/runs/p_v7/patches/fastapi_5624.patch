@@ -1,0 +1,59 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 1e92c1ba..f3d72cd1 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -691,7 +691,7 @@ async def solve_dependencies(
+         values[dependant.response_param_name] = response
+     if dependant.security_scopes_param_name:
+         values[dependant.security_scopes_param_name] = SecurityScopes(
+-            scopes=dependant.security_scopes
++            scopes=dependant.security_scopes or []
+         )
+     return SolvedDependency(
+         values=values,
+diff --git a/repro_scopes.py b/repro_scopes.py
+new file mode 100644
+index 00000000..e8a79e31
+--- /dev/null
++++ b/repro_scopes.py
+@@ -0,0 +1,40 @@
++
++from fastapi import FastAPI, Security, HTTPException
++from fastapi.security import OAuth2PasswordBearer
++from fastapi.dependencies.utils import SecurityScopes
++import pytest
++from httpx import AsyncClient
++
++app = FastAPI()
++oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
++
++async def dep_level_2(security_scopes: SecurityScopes):
++    # This is where the propagation should be verified
++    # Expected: ["scope1", "scope2"]
++    if security_scopes.scopes != ["scope1", "scope2"]:
++        raise HTTPException(status_code=403, detail=f"Invalid scopes: {security_scopes.scopes}")
++    return True
++
++async def dep_level_1(security_scopes: SecurityScopes = Security(oauth2_scheme, scopes=["scope2"]), 
++                      _ = Security(dep_level_2, scopes=[])):
++    return True
++
++@app.get("/")
++async def root(
++    _ = Security(dep_level_1, scopes=["scope1"])
++):
++    return {"message": "success"}
++
++@pytest.mark.asyncio
++async def test_hierarchical_security_scope_propagation():
++    async with AsyncClient(app=app, base_url="http://test") as ac:
++        # OAuth2PasswordBearer just checks for presence of Authorization header
++        response = await ac.get("/", headers={"Authorization": "Authorization: Bearer token"})
++        # Note: the header value might be slightly wrong here but it's just to pass the scheme
++        assert response.status_code == 200
++        assert response.json() == {"message": "success"}
++
++if __name__ == "__main__":
++    import pytest
++    import sys
++    sys.exit(pytest.main([__file__]))

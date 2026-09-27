@@ -1,0 +1,78 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index d43fa8a5..843d7391 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -871,9 +871,11 @@ async def _extract_form_body(
+     received_body: FormData,
+ ) -> Dict[str, Any]:
+     values = {}
++    processed_keys = set()
+ 
+     for field in body_fields:
+         value = _get_multidict_value(field, received_body)
++        processed_keys.add(field.alias)
+         field_info = field.field_info
+         if (
+             isinstance(field_info, (params.File, temp_pydantic_v1_params.File))
+@@ -903,7 +905,7 @@ async def _extract_form_body(
+         if value is not None:
+             values[field.alias] = value
+     for key, value in received_body.items():
+-        if key not in values:
++        if key not in processed_keys:
+             values[key] = value
+     return values
+ 
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 00000000..b6453c71
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,47 @@
++import pytest
++from fastapi import FastAPI, Form
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++from typing import Optional
++
++app = FastAPI()
++
++class Item(BaseModel):
++    name: str
++    description: Optional[str] = None
++
++@app.post("/items/")
++async def create_item(item: Item = Form(...)):
++    return item
++
++client = TestClient(app)
++
++def test_form_empty_string_interpreted_as_none():
++    # Case 1: description is missing
++    response = client.post("/items/", data={"name": "test"})
++    assert response.status_code == 200
++    assert response.json() == {"name": "test", "description": None}
++
++    # Case 2: description is empty string
++    response = client.post("/items/", data={"name": "test", "description": ""})
++    assert response.status_code == 200
++    assert response.json() == {"name": "test", "description": None}
++
++def test_form_description_provided():
++    response = client.post("/items/", data={"name": "test", "description": "hello"})
++    assert response.status_code == 200
++    assert response.json() == {"name": "test", "description": "hello"}
++
++if __name__ == "__main__":
++    try:
++        test_form_empty_string_interpreted_as_none()
++        print("test_form_empty_string_interpreted_as_none: PASSED")
++        test_form_description_provided()
++        print("test_form_description_provided: PASSED")
++        print("ALL TESTS PASSED")
++    except AssertionError as e:
++        print(f"TEST FAILED: {e}")
++        exit(1)
++    except Exception as e:
++        print(f"UNEXPECTED ERROR: {e}")
++        exit(1)

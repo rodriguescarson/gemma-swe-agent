@@ -1,0 +1,200 @@
+diff --git a/rich/cells.py b/rich/cells.py
+index a8546227..54f80f60 100644
+--- a/rich/cells.py
++++ b/rich/cells.py
+@@ -4,6 +4,7 @@ from functools import lru_cache
+ from typing import Callable
+ 
+ from ._cell_widths import CELL_WIDTHS
++from .graphemes import split_graphemes
+ 
+ # Ranges of unicode ordinals that produce a 1-cell wide character
+ # This is non-exhaustive, but covers most common Western characters
+@@ -45,7 +46,7 @@ def cached_cell_len(text: str) -> int:
+     """
+     if _is_single_cell_widths(text):
+         return len(text)
+-    return sum(map(get_character_cell_size, text))
++    return sum(get_character_cell_size(g) for g in split_graphemes(text))
+ 
+ 
+ def cell_len(text: str, _cell_len: Callable[[str], int] = cached_cell_len) -> int:
+@@ -61,7 +62,7 @@ def cell_len(text: str, _cell_len: Callable[[str], int] = cached_cell_len) -> in
+         return _cell_len(text)
+     if _is_single_cell_widths(text):
+         return len(text)
+-    return sum(map(get_character_cell_size, text))
++    return sum(get_character_cell_size(g) for g in split_graphemes(text))
+ 
+ 
+ @lru_cache(maxsize=4096)
+@@ -74,7 +75,7 @@ def get_character_cell_size(character: str) -> int:
+     Returns:
+         int: Number of cells (0, 1 or 2) occupied by that character.
+     """
+-    codepoint = ord(character)
++    codepoint = ord(character[0]) if character else 0
+     _table = CELL_WIDTHS
+     lower_bound = 0
+     upper_bound = len(_table) - 1
+diff --git a/rich/graphemes.py b/rich/graphemes.py
+new file mode 100644
+index 00000000..06ccf1f3
+--- /dev/null
++++ b/rich/graphemes.py
+@@ -0,0 +1,27 @@
++import re
++from typing import Iterator
++
++def split_graphemes(text: str) -> Iterator[str]:
++    """Split a string into a sequence of graphemes."""
++    pos = 0
++    n = len(text)
++    while pos < n:
++        start = pos
++        char = text[pos]
++        pos += 1
++        while pos < n:
++            next_char = text[pos]
++            if (
++                "\u0300" <= next_char <= "\u036f" or
++                "\u1ab0" <= next_char <= "\u1aff" or
++                "\u1dc0" <= next_char <= "\u1dff" or
++                "\u20d0" <= next_char <= "\u20ff" or
++                "\ufe00" <= next_char <= "\ufe0f" or
++                next_char == "\u200d"
++            ):
++                pos += 1
++                if next_char == "\u200d" and pos < n:
++                    pos += 1
++            else:
++                break
++        yield text[start:pos]
+diff --git a/rich/graphemes.py` b/rich/graphemes.py`
+new file mode 100644
+index 00000000..4e88fafb
+--- /dev/null
++++ b/rich/graphemes.py`
+@@ -0,0 +1,96 @@
++import re
++from typing import Iterator
++
++# Grapheme cluster boundaries are complex. 
++# This is a simplified implementation that handles ZWJ (U+200D) and 
++# common combining characters, which covers most emoji grapheme clusters.
++_GRAPHEME_PATTERN = re.compile(
++    r"(\X)" if hasattr(re, "X") else r"\b\w*\b", # fallback
++    re.UNICODE
++)
++
++def split_graphemes(text: str) -> Iterator[str]:
++    """Split a string into a sequence of graphemes."""
++    # Using a regex that mimics \X (extended grapheme cluster)
++    # Since Python's 're' doesn't support \X, we use a simplified approach.
++    # A grapheme cluster usually starts with a non-combining character 
++    # and is followed by any number of combining marks or ZWJ + more characters.
++    
++    # This is a simplified regex for grapheme clusters:
++    # 1. A base character (anything not a combining mark)
++    # 2. Any number of combining marks (U+0300–U+036F, U+1AB0–U+1AFF, U+1DC0–U+1DFF, U+20D0–U+20FF, U+FE00–U+FE0F, U+UTF8_COMBINING_MARKS)
++    # 3. ZWJ (U+200D) followed by another grapheme cluster.
++    
++    # Instead of a complex regex, we can use the fact that we want to group 
++    # sequences of (Base + Combiners)* (ZWJ + Base + Combiners)*
++    
++    # For the purpose of this fix and given the constraints, 
++    # we will implement a loop that identifies the boundaries.
++    
++    # Unicode combining marks and ZWJ
++    # ZWJ: \u200d
++    # Combining marks: \u0300-\u036f, \u1ab0-\u1aff, \u1dc0-\u1dff, \u20d0-\u20ff, \ufe00-\ufe0f
++    
++    pos = 0
++    n = len(text)
++    while pos < n:
++        start = pos
++        char = text[pos]
++        pos += 1
++        # Consume combining marks and ZWJ
++        while pos < n:
++            next_char = text[pos]
++            # Combine mark or ZWJ
++            if (
++                "\u0300" <= next_char <= "\u036f" or
++                "\u1ab0" <= next_char <= "\u1aff" or
++                "\u1dc0" <= next_char <= "\u1dff" or
++                "\u20d0" <= next_char <= "\u20ff" or
++                "\ufe00" <= next_char <= "\ufe0f" or
++                next_char == "\u200d"
++            ):
++                pos += 1
++            elif next_char == "\u200d":
++                pos += 1
++            else:
++                break
++        yield text[start:pos]
++
++def get_grapheme_width(grapheme: str) -> int:
++    """Get the cell width of a grapheme."""
++    # The width of a grapheme cluster is generally the width of its first character
++    # or the maximum width of its components. For most emojis, the base character
++    # determines the width.
++    if not grapheme:
++        return 0
++    
++    # We use the first character to determine the width.
++    # If the grapheme is just ZWJs and combining marks, it has 0 width.
++    # But a grapheme always starts with a base character in our split_graphemes.
++    
++    # Import inside to avoid circular import with cells.py
++    from rich.cells import get_character_cell_size
++    
++    # The actual width of a multi-codepoint grapheme is tricky.
++    # Most modern terminals treat ZWJ sequences as the width of one of the emojis.
++    # We'll sum the widths but subtract 1 for each ZWJ or combining mark (width 0).
++    # Actually, the simplest rule: the width of the grapheme is the width of the 
++    # first character if it's an emoji, or we sum them and handle 0-width.
++    
++    total_width = 0
++    for char in grapheme:
++        total_width += get_character_cell_size(char)
++    
++    # For graphemes like family emojis, they consist of multiple emojis joined by ZWJs.
++    # They should be rendered as a single emoji width (usually 2).
++    # So if there are multiple characters with width > 0, we take the max.
++    
++    max_width = 0
++    has_width = False
++    for char in grapheme:
++        w = get_character_cell_size(char)
++        if w > 0:
++            max_width = max(max_width, w)
++            has_width = True
++            
++    return max_width if has_width else 0
+diff --git a/tests/test_graphemes.py b/tests/test_graphemes.py
+new file mode 100644
+index 00000000..dc1b886e
+--- /dev/null
++++ b/tests/test_graphemes.py
+@@ -0,0 +1,20 @@
++import pytest
++from rich.cells import cell_len
++
++def test_grapheme_width():
++    # Family emoji: 👨‍👩‍👧‍👦 (Man + ZWJ + Woman + ZWJ + Girl + ZWJ + Boy)
++    # It should be treated as a single glyph with width 2 in most modern terminals.
++    # Currently it's returning 8 (4 emojis * 2 cells each, ignoring ZWJs).
++    family_emoji = "👨‍👩‍👧‍👦"
++    assert cell_len(family_emoji) == 2
++
++def test_mixed_graphemes():
++    # "Hello 👨‍👩‍👧‍👦 World"
++    # "Hello " (6) + Family (2) + " World" (6) = 14
++    text = "Hello 👨‍👩‍👧‍👦 World"
++    assert cell_len(text) == 14
++
++def test_single_emoji():
++    # Simple emoji: 🍎 (Apple)
++    apple = "🍎"
++    assert cell_len(apple) == 2

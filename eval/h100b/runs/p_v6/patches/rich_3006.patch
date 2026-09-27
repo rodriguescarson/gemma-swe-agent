@@ -1,0 +1,108 @@
+diff --git a/rich/repr.py b/rich/repr.py
+index 9dd65cde..95331006 100644
+--- a/rich/repr.py
++++ b/rich/repr.py
+@@ -76,7 +76,7 @@ def auto(
+                         param.POSITIONAL_OR_KEYWORD,
+                         param.KEYWORD_ONLY,
+                     ):
+-                        if param.default == param.empty:
++                        if param.default is param.empty:
+                             yield getattr(self, param.name)
+                         else:
+                             yield param.name, getattr(self, param.name), param.default
+diff --git a/tests/test_issue_2875.py b/tests/test_issue_2875.py
+new file mode 100644
+index 00000000..7ce54a7c
+--- /dev/null
++++ b/tests/test_issue_2875.py
+@@ -0,0 +1,89 @@
++import pytest
++import rich.repr
++
++class CustomEq:
++    def __init__(self, value):
++        self.value = value
++    def __eq__(self, other):
++        return True
++
++@rich.repr.auto
++class Foo:
++    def __init__(self, x, y=CustomEq(1)):
++        self.x = x
++        self.y = y
++
++def test_custom_eq_parameter():
++    # If the bug exists, param.default == param.empty might be True
++    # because CustomEq(1) == inspect.Parameter.empty returns True.
++    # This would lead to 'y' being treated as if it had no default.
++    f = Foo(1)
++    # Expected: Foo(1, y=CustomEq(1)) or similar, 
++    # but specifically we want to ensure it doesn't incorrectly think it's empty.
++    # If it thinks it's empty, it yields getattr(self, 'y'), 
++    # resulting in Foo(1, CustomEq(1)) instead of Foo(1, y=CustomEq(1))
++    # Actually, the code is:
++    # if param.default == param.empty:
++    #     yield getattr(self, param.name)
++    # else:
++    #     yield param.name, getattr(self, param.name), param.default
++    
++    # With the bug, it goes into the 'if' branch.
++    # Without the bug, it goes into the 'else' branch.
++    
++    # We need to see what the actual output is.
++    res = repr(f)
++    print(f"Repr result: {res}")
++    # If it's "Foo(1, CustomEq(1))", the bug is present.
++    # If it's "Foo(1, y=CustomEq(1))", the bug is fixed.
++    # Wait, let me check the expected output for a param with a default.
++    # From test_repr.py: repr(Egg("hello", egg=2)) == "Egg('hello', egg=2)"
++    # Egg has egg: int = 1. So if we pass egg=2, it's "egg=2".
++    # If we use default, it should be omitted? 
++    # Let's check Egg("hello") -> Egg('hello')
++    
++    # In the provided code:
++    # if default and default[0] == value:
++    #     continue
++    # append(f"{key}={value!r}")
++    
++    # So if we use the default value, it is omitted.
++    # But the question is whether it correctly identifies it has a default.
++    
++    # If it thinks it's empty, it yields just the value.
++    # Then in auto_repr:
++    # if isinstance(arg, tuple): ...
++    # else: append(repr(arg))
++    # So it would yield repr(self.y).
++    
++    # Result with bug: Foo(1, CustomEq(1))
++    # Result without bug: Foo(1)  (because self.y == default)
++    
++    assert "y=" not in res or res == "Foo(1)" # This is confusing.
++    # Let's just check if it incorrectly treats it as having no default.
++    # If it has no default, it MUST be in the repr.
++    # If it has a default and we use it, it is omitted.
++    
++    # Let's try a value different from default.
++    f2 = Foo(1, y=CustomEq(2))
++    res2 = repr(f2)
++    print(f"Repr result 2: {res2}")
++    # Bug: thinks it's empty -> yields getattr(self, 'y') -> "Foo(1, CustomEq(2))"
++    # Fixed: knows it has default -> yields ('y', getattr(self, 'y'), default) 
++    # -> default is CustomEq(1), value is CustomEq(2) -> they are != ? 
++    # NO! CustomEq(2) == CustomEq(1) is TRUE!
++    # So it would still be omitted!
++    # Wait, CustomEq(1) == CustomEq(1) is True.
++    # And CustomEq(2) == CustomEq(1) is True.
++    
++    # The issue is that `param.default == param.empty` is True.
++    # This means the code thinks the parameter HAS NO DEFAULT.
++    # If a parameter has no default, it MUST be present in the repr.
++    # If a parameter HAS a default, and we use that default, it is OMITTED.
++    
++    # So:
++    # Case 1: Foo(1)
++    # Bug: param.default == param.empty is True -> yields value -> repr is "Foo(1, CustomEq(1))"
++    # Fixed: param.default == param.empty is False -> value == default is True -> omitted -> repr is "Foo(1)"
++    
++    assert res == "Foo(1)"

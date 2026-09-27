@@ -1,0 +1,63 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index c5c6b69b..f71e84ee 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -129,7 +129,7 @@ def get_parameterless_sub_dependant(*, depends: params.Depends, path: str) -> De
+     if isinstance(depends, params.Security) and depends.scopes:
+         use_security_scopes.extend(depends.scopes)
+     return get_dependant(
+-        path=path, call=depends.dependency, security_scopes=use_security_scopes
++        path=path, call=depends.dependency, security_scopes=use_security_scopes, scope=depends.scope
+     )
+ 
+ 
+diff --git a/tests/test_issue_repro.py b/tests/test_issue_repro.py
+new file mode 100644
+index 00000000..41728443
+--- /dev/null
++++ b/tests/test_issue_repro.py
+@@ -0,0 +1,44 @@
++import pytest
++from fastapi import Depends, FastAPI
++from fastapi.testclient import TestClient
++from unittest.mock import MagicMock
++
++# A dependency that tracks if it was closed
++class Session:
++    def __init__(self) -> None:
++        self.open = True
++
++def dep_session_top():
++    s = Session()
++    # We will use a mock to track the closing
++    yield s
++    s.open = False
++
++# We can't easily check the internal state of a dependency that isn't returned.
++# But we can use a mock function.
++
++mock_dep = MagicMock()
++
++def dep_with_mock():
++    yield mock_dep
++    mock_dep.closed = True
++
++app = FastAPI()
++
++@app.get("/route-dep", dependencies=[Depends(dep_with_mock, scope="function")])
++def route_dep():
++    return {"status": "ok"}
++
++client = TestClient(app)
++
++def test_top_level_dependency_scope():
++    # Before call
++    mock_dep.closed = False
++    
++    response = client.get("/route-dep")
++    assert response.status_code == 200
++    # If scope="function", it should be closed AFTER the response is sent.
++    # But FastAPI's dependency injection happens before the route handler.
++    # The yield happens, then route handler, then the cleanup (closing).
++    # So at the end of the request, it should be closed.
++    assert mock_dep.closed is True

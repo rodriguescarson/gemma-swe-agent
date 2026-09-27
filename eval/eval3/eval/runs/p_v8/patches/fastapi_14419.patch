@@ -1,0 +1,78 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 45353835..7b024e0a 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -649,7 +649,7 @@ async def solve_dependencies(
+             solved = await run_in_threadpool(call, **solved_result.values)
+         if sub_dependant.name is not None:
+             values[sub_dependant.name] = solved
+-        if sub_dependant.cache_key not in dependency_cache:
++        if sub_dependant.use_cache and sub_dependant.cache_key not in dependency_cache:
+             dependency_cache[sub_dependant.cache_key] = solved
+     path_values, path_errors = request_params_to_args(
+         dependant.path_params, request.path_params
+diff --git a/test_cache_scopes.py b/test_cache_scopes.py
+new file mode 100644
+index 00000000..ebbb813e
+--- /dev/null
++++ b/test_cache_scopes.py
+@@ -0,0 +1,59 @@
++import pytest
++from fastapi import FastAPI, Depends, Security
++from fastapi.testclient import TestClient
++from fastapi.security import SecurityScopes
++
++app = FastAPI()
++
++call_count = 0
++
++def dep_no_scopes():
++    global call_count
++    call_count += 1
++    return "value"
++
++def top_level(a=Depends(dep_no_scopes), b=Depends(dep_no_scopes)):
++    return {"a": a, "b": b}
++
++@app.get("/")
++async def root(res=Depends(top_level)):
++    return res
++
++def test_cache_no_scopes():
++    global call_count
++    call_count = 0
++    client = TestClient(app)
++    response = client.get("/")
++    assert response.status_code == 200
++    assert response.json() == {"a": "value", "b": "value"}
++    # dep_no_scopes is used twice, should be called once if cached
++    assert call_count == 1
++
++app2 = FastAPI()
++call_count2 = 0
++
++def dep_no_scopes_2():
++    global call_count2
++    call_count2 += 1
++    return "value"
++
++def dep_with_scopes_2(scopes: SecurityScopes):
++    global call_count2
++    call_count2 += 1
++    return "value"
++
++def top_level_2(a=Depends(dep_no_scopes_2), b=Depends(dep_with_scopes_2)):
++    return {"a": a, "b": b}
++
++@app2.get("/")
++async def root_2(res=Depends(top_level_2)):
++    return res
++
++def test_cache_mixed_scopes():
++    global call_count2
++    call_count2 = 0
++    client = TestClient(app2)
++    response = client.get("/")
++    assert response.status_code == 200
++    # both are called once
++    assert call_count2 == 2

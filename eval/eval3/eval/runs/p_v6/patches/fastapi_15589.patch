@@ -1,0 +1,159 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 000000000..909c1475b
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,13 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++def read_root(x_header: str = Header()):
++    return {"x_header": x_header}
++
++client = TestClient(app)
++response = client.get("/", headers={"x_header": "foo"})
++print(f"Status Code: {response.status_code}")
++print(f"JSON: {response.json()}")
+diff --git a/repro_test.py b/repro_test.py
+new file mode 100644
+index 000000000..59c8030ad
+--- /dev/null
++++ b/repro_test.py
+@@ -0,0 +1,41 @@
++
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++async def read_root(x_test_header: str = Header()):
++    return {"x_test_header": x_test_header}
++
++@app.get("/explicit")
++async def read_explicit(x_test_header: str = Header(convert_underscores=False)):
++    return {"x_test_header": x_test_header}
++
++client = TestClient(app)
++
++def test_default_behavior():
++    # Should fail (422) when sending underscore header by default
++    response = client.get("/", headers={"x_test_header": "hello"})
++    print(f"Default underscore header: {response.status_code}")
++    assert response.status_code == 422
++
++    # Should pass (200) when sending hyphenated header by default
++    response = client.get("/", headers={"x-test-header": "hello"})
++    print(f"Default hyphenated header: {response.status_code}")
++    assert response.status_code == 200
++
++def test_explicit_behavior():
++    # Should pass (200) when convert_underscores=False
++    response = client.get("/explicit", headers={"x_test_header": "hello"})
++    print(f"Explicit underscore header: {response.status_code}")
++    assert response.status_code == 200
++
++if __name__ == "__main__":
++    try:
++        test_default_behavior()
++        test_explicit_behavior()
++        print("All tests passed!")
++    except AssertionError as e:
++        print("Test failed!")
++        raise e
+diff --git a/repro_underscore_accepted.py b/repro_underscore_accepted.py
+new file mode 100644
+index 000000000..5dfb0e0ea
+--- /dev/null
++++ b/repro_underscore_accepted.py
+@@ -0,0 +1,13 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++def read_root(x_header: str = Header(convert_underscores=False)):
++    return {"x_header": x_header}
++
++client = TestClient(app)
++response = client.get("/", headers={"x_header": "foo"})
++print(f"Status Code: {response.status_code}")
++print(f"JSON: {response.json()}")
+diff --git a/test_underscore_headers.py b/test_underscore_headers.py
+new file mode 100644
+index 000000000..5ab992620
+--- /dev/null
++++ b/test_underscore_headers.py
+@@ -0,0 +1,36 @@
++
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++import pytest
++
++def test_header_underscore_rejected_by_default():
++    app = FastAPI()
++
++    @app.get("/")
++    def read_root(x_header: str = Header()):
++        return {"x_header": x_header}
++
++    client = TestClient(app)
++    # Should fail because x_header is converted to x-header, and x_header is provided
++    # FastAPI should reject underscore headers when convert_underscores=True (default)
++    response = client.get("/", headers={"x_header": "foo"})
++    assert response.status_code == 422
++    assert response.json()["detail"][0]["loc"] == ["header", "x-header"]
++
++    # Should succeed when using the hyphenated version
++    response = client.get("/", headers={"x-header": "foo"})
++    assert response.status_code == 200
++    assert response.json() == {"x_header": "foo"}
++
++def test_header_underscore_accepted_when_convert_underscores_false():
++    app = FastAPI()
++
++    @app.get("/")
++    def read_root(x_header: str = Header(convert_underscores=False)):
++        return {"x_header": x_header}
++
++    client = TestClient(app)
++    # Should succeed because convert_underscores=False
++    response = client.get("/", headers={"x_header": "foo"})
++    assert response.status_code == 200
++    assert response.json() == {"x_header": "foo"}
+diff --git a/tests/test_reproduce_underscore_header.py b/tests/test_reproduce_underscore_header.py
+new file mode 100644
+index 000000000..5cc95f37f
+--- /dev/null
++++ b/tests/test_reproduce_underscore_header.py
+@@ -0,0 +1,26 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++import pytest
++
++app = FastAPI()
++
++@app.get("/header")
++async def read_header(strange_header: str = Header()):
++    return {"strange_header": strange_header}
++
++@app.get("/header_allowed")
++async def read_header_allowed(strange_header: str = Header(convert_underscores=False)):
++    return {"strange_header": strange_header}
++
++def test_header_underscores_not_accepted_by_default():
++    client = TestClient(app)
++    # SHOULD FAIL: underscore (this is what we want to ensure)
++    response = client.get("/header", headers={"strange_header": "value"})
++    assert response.status_code == 422, f"Should have failed with 422, but got {response.status_code}"
++
++def test_header_underscores_accepted_when_explicitly_allowed():
++    client = TestClient(app)
++    # SHOULD WORK: underscore when convert_underscores=False
++    response = client.get("/header_allowed", headers={"strange_header": "value"})
++    assert response.status_code == 200, f"Should have worked with 200, but got {response.status_code}: {response.text}"
++    assert response.json() == {"strange_header": "value"}

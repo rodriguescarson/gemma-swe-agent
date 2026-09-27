@@ -1,0 +1,96 @@
+diff --git a/fastapi/_compat/shared.py b/fastapi/_compat/shared.py
+index 68b9bbdf..ba1ed29f 100644
+--- a/fastapi/_compat/shared.py
++++ b/fastapi/_compat/shared.py
+@@ -65,6 +65,19 @@ def _annotation_is_sequence(annotation: Union[type[Any], None]) -> bool:
+ 
+ def field_annotation_is_sequence(annotation: Union[type[Any], None]) -> bool:
+     origin = get_origin(annotation)
++    if origin is Annotated:
++        # Pydantic's Json[T] is Annotated[T, Json].
++        # If it's Json[T], it should not be treated as a sequence for Form data
++        # even if T is a sequence.
++        args = get_args(annotation)
++        # The second argument (and onwards) are the metadata.
++        # We check if any of them are the Json type.
++        # We can check for its name or its class.
++        for arg in args[1:]:
++            if getattr(arg, "__name__", None) == "Json" or "pydantic.types.Json" in str(arg):
++                return False
++        return field_annotation_is_sequence(args[0])
++
+     if origin is Union or origin is UnionType:
+         for arg in get_args(annotation):
+             if field_annotation_is_sequence(arg):
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 00000000..c6441316
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,28 @@
++from fastapi import FastAPI, Form
++from pydantic import Json
++from typing import List, Annotated
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.post("/upload")
++def upload(tags: Annotated[Json[List[str]], Form()]):
++    return {"tags": tags}
++
++client = TestClient(app)
++def test_json_list_form():
++    response = client.post("/upload", data={"tags": '["abc", "def"]'})
++    print(f"Status: {response.status_code}")
++    print(f"Body: {response.json()}")
++    assert response.status_code == 200
++    assert response.json() == {"tags": ["abc", "def"]}
++
++if __name__ == "__main__":
++    try:
++        test_json_list_form()
++        print("Test passed!")
++    except Exception as e:
++        print(f"Test failed: {e}")
++        import traceback
++        traceback.print_exc()
++        exit(1)
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 00000000..e0001a57
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,32 @@
++from fastapi import FastAPI, Form
++from pydantic import Json
++from typing import List, Annotated
++from fastapi.testclient import TestClient
++import logging
++
++# Enable logging to see Pydantic errors
++logging.basicConfig(level=logging.INFO)
++
++app = FastAPI()
++
++@app.post("/upload")
++def upload(tags: Annotated[Json[List[str]], Form()]):
++    return {"tags": tags}
++
++client = TestClient(app)
++
++def test_json_list_form():
++    # Client sends JSON string in form data
++    response = client.post("/upload", data={"tags": '["abc", "def"]'})
++    print(f"Status Code: {response.status_code}")
++    print(f"Response Content: {response.content}")
++    assert response.status_code == 200
++    assert response.json() == {"tags": ["abc", "def"]}
++    print("Test passed!")
++
++if __name__ == "__main__":
++    try:
++        test_json_list_form()
++    except Exception as e:
++        print(f"Test failed: {e}")
++        raise e
