@@ -1,0 +1,162 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 7c6558c69..3b512928c 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -822,6 +822,8 @@ def request_params_to_args(
+                 alias = get_validation_alias(field)
+                 if alias == field.name:
+                     alias = alias.replace("_", "-")
++                if alias != get_validation_alias(field):
++                    processed_keys.add(get_validation_alias(field))
+         value = _get_multidict_value(field, received_params, alias=alias)
+         if value is not None:
+             params_to_process[get_validation_alias(field)] = value
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 000000000..860aa210d
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,29 @@
++
++from fastapi import FastAPI, Header
++from pydantic import BaseModel
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++class HeaderModel(BaseModel):
++    x_header: str
++
++@app.get("/")
++async def root(headers: HeaderModel = Header()):
++    return {"headers": headers}
++
++client = TestClient(app)
++
++def test_underscore_header():
++    # This should FAIL (be ignored) because convert_underscores=True by default
++    # If the fix works, this request will likely result in a 422 Unprocessable Entity 
++    # because x_header is required but not provided (since x_header in headers is ignored).
++    response = client.get("/", headers={"x_header": "foo"})
++    print(f"Request with x_header: status={response.status_code}, json={response.json()}")
++    
++    # This should SUCCEED
++    response = client.get("/", headers={"x-header": "bar"})
++    print(f"Request with x-header: status={response.status_code}, json={response.json()}")
++
++if __name__ == "__main__":
++    test_underscore_header()
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 000000000..8e5c8bc41
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,27 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++async def root(x_header: str = Header(default=None, convert_underscores=True)):
++    return {"x_header": x_header}
++
++client = TestClient(app)
++
++print("Testing with underscore header (should be rejected/None when convert_underscores=True):")
++res_underscore = client.get("/", headers={"x_header": "foo"})
++print(f"Response: {res_underscore.json()}")
++
++print("\nTesting with hyphen header (should be accepted when convert_underscores=True):")
++res_hyphen = client.get("/", headers={"x-header": "bar"})
++print(f"Response: {res_hyphen.json()}")
++
++print("\nTesting with underscore header when convert_underscores=False:")
++app_false = FastAPI()
++@app_false.get("/")
++async def root_false(x_header: str = Header(default=None, convert_underscores=False)):
++    return {"x_header": x_header}
++client_false = TestClient(app_false)
++res_underscore_false = client_false.get("/", headers={"x_header": "foo"})
++print(f"Response: {res_underscore_false.json()}")
+diff --git a/reproduce_issue_2.py b/reproduce_issue_2.py
+new file mode 100644
+index 000000000..8e5c8bc41
+--- /dev/null
++++ b/reproduce_issue_2.py
+@@ -0,0 +1,27 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++async def root(x_header: str = Header(default=None, convert_underscores=True)):
++    return {"x_header": x_header}
++
++client = TestClient(app)
++
++print("Testing with underscore header (should be rejected/None when convert_underscores=True):")
++res_underscore = client.get("/", headers={"x_header": "foo"})
++print(f"Response: {res_underscore.json()}")
++
++print("\nTesting with hyphen header (should be accepted when convert_underscores=True):")
++res_hyphen = client.get("/", headers={"x-header": "bar"})
++print(f"Response: {res_hyphen.json()}")
++
++print("\nTesting with underscore header when convert_underscores=False:")
++app_false = FastAPI()
++@app_false.get("/")
++async def root_false(x_header: str = Header(default=None, convert_underscores=False)):
++    return {"x_header": x_header}
++client_false = TestClient(app_false)
++res_underscore_false = client_false.get("/", headers={"x_header": "foo"})
++print(f"Response: {res_underscore_false.json()}")
+diff --git a/reproduce_pydantic_model.py b/reproduce_pydantic_model.py
+new file mode 100644
+index 000000000..0c5246fc5
+--- /dev/null
++++ b/reproduce_pydantic_model.py
+@@ -0,0 +1,42 @@
++from fastapi import FastAPI, Header
++from pydantic import BaseModel
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++class HeaderModel(BaseModel):
++    x_header: str
++
++@app.get("/")
++async def read_root(headers: HeaderModel = Header()):
++    return {"headers": headers}
++
++client = TestClient(app)
++
++def test_headers_underscore():
++    # This should be REJECTED when convert_underscores=True (default)
++    # Because it contains an underscore and we want only hyphens
++    response = client.get("/", headers={"x_header": "foo"})
++    print(f"Underscore header result: {response.json()}")
++    # If it's accepted, it'll be in the response
++    assert response.status_code != 200 or response.json().get("headers") != {"x_header": "foo"}
++
++def test_headers_hyphen():
++    # This should be ACCEPTED and converted to x_header
++    response = client.get("/", headers={"x-header": "bar"})
++    print(f"Hyphen header result: {response.json()}")
++    assert response.status_code == 200
++    assert response.json()["headers"] == {"x_header": "bar"}
++
++if __name__ == "__main__":
++    try:
++        test_headers_underscore()
++        print("test_headers_underscore passed (meaning x_header was NOT accepted)")
++    except AssertionError as e:
++        print(f"test_headers_underscore failed: {e}")
++
++    try:
++        test_headers_hyphen()
++        print("test_headers_hyphen passed")
++    except AssertionError as e:
++        print(f"test_headers_hyphen failed: {e}")

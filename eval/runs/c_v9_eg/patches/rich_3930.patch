@@ -1,0 +1,126 @@
+diff --git a/rich/cells.py b/rich/cells.py
+index a8546227..dd2ad999 100644
+--- a/rich/cells.py
++++ b/rich/cells.py
+@@ -1,10 +1,11 @@
+ from __future__ import annotations
+ 
+ from functools import lru_cache
+-from typing import Callable
++from typing import Callable, Iterable
+ 
+ from ._cell_widths import CELL_WIDTHS
+ 
++
+ # Ranges of unicode ordinals that produce a 1-cell wide character
+ # This is non-exhaustive, but covers most common Western characters
+ _SINGLE_CELL_UNICODE_RANGES: list[tuple[int, int]] = [
+@@ -30,8 +31,33 @@ _SINGLE_CELLS = frozenset(
+ _is_single_cell_widths: Callable[[str], bool] = _SINGLE_CELLS.issuperset
+ 
+ 
++def split_graphemes(text: str) -> Iterable[str]:
++    """Split text into grapheme clusters."""
++    if not text:
++        return
++    
++    # A simple grapheme splitter that handles ZWJ and combining characters
++    # This is a basic implementation of the grapheme cluster rule
++    import unicodedata
++    
++    start = 0
++    for i, char in enumerate(text):
++        # ZWJ (Zero Width Joiner) is U+200D
++        # Combining characters typically have category 'M' (Mark)
++        if i > 0 and (char == "200d" or unicodedata.category(char).startswith("M")):
++            continue
++        if i > 0 and text[i-1] == "200d":
++            continue
++        
++        if i > start:
++            yield text[start:i]
++        start = i
++    yield text[start:]
++
++
+ @lru_cache(4096)
+ def cached_cell_len(text: str) -> int:
++
+     """Get the number of cells required to display text.
+ 
+     This method always caches, which may use up a lot of memory. It is recommended to use
+@@ -45,23 +71,12 @@ def cached_cell_len(text: str) -> int:
+     """
+     if _is_single_cell_widths(text):
+         return len(text)
+-    return sum(map(get_character_cell_size, text))
+-
+-
+-def cell_len(text: str, _cell_len: Callable[[str], int] = cached_cell_len) -> int:
+-    """Get the number of cells required to display text.
+-
+-    Args:
+-        text (str): Text to display.
+-
+-    Returns:
+-        int: Get the number of cells required to display text.
+-    """
++    return sum(map(get_character_cell_size, split_graphemes(text)))
+     if len(text) < 512:
+         return _cell_len(text)
+     if _is_single_cell_widths(text):
+         return len(text)
+-    return sum(map(get_character_cell_size, text))
++    return sum(map(get_character_cell_size, split_graphemes(text)))
+ 
+ 
+ @lru_cache(maxsize=4096)
+@@ -110,21 +125,23 @@ def set_cell_size(text: str, total: int) -> str:
+     if cell_size < total:
+         return text + " " * (total - cell_size)
+ 
++    # Binary search until we find the right size
++    graphemes = list(split_graphemes(text))
+     start = 0
+-    end = len(text)
++    end = len(graphemes)
+ 
+-    # Binary search until we find the right size
+     while True:
+         pos = (start + end) // 2
+-        before = text[: pos + 1]
++        before = "".join(graphemes[: pos + 1])
+         before_len = cell_len(before)
+-        if before_len == total + 1 and cell_len(before[-1]) == 2:
++        if before_len == total + 1 and cell_len(graphemes[pos]) == 2:
+             return before[:-1] + " "
+         if before_len == total:
+             return before
+         if before_len > total:
+             end = pos
+         else:
++
+             start = pos
+ 
+ 
+@@ -150,16 +167,16 @@ def chop_cells(
+ 
+     total_width = 0
+ 
+-    for character in text:
+-        cell_width = _get_character_cell_size(character)
++    for grapheme in split_graphemes(text):
++        cell_width = _get_character_cell_size(grapheme)
+         char_doesnt_fit = total_width + cell_width > width
+ 
+         if char_doesnt_fit:
+-            append_new_line([character])
++            append_new_line([grapheme])
+             append_to_last_line = lines[-1].append
+             total_width = cell_width
+         else:
+-            append_to_last_line(character)
++            append_to_last_line(grapheme)
+             total_width += cell_width
+ 
+     return ["".join(line) for line in lines]

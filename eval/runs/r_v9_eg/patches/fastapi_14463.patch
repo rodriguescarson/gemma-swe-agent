@@ -1,0 +1,133 @@
+diff --git a/fastapi/openapi/utils.py b/fastapi/openapi/utils.py
+index 75ff2610..d56027b5 100644
+--- a/fastapi/openapi/utils.py
++++ b/fastapi/openapi/utils.py
+@@ -1,3 +1,4 @@
++import copy
+ import http.client
+ import inspect
+ import warnings
+@@ -377,7 +378,7 @@ def get_openapi_path(
+                     additional_status_code,
+                     additional_response,
+                 ) in route.responses.items():
+-                    process_response = additional_response.copy()
++                    process_response = copy.deepcopy(additional_response)
+                     process_response.pop("model", None)
+                     status_code_key = str(additional_status_code).upper()
+                     if status_code_key == "DEFAULT":
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 00000000..c449757e
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,51 @@
++from fastapi import FastAPI
++from pydantic import BaseModel
++import json
++
++class ModelA(BaseModel):
++    a: str
++
++class ModelB(BaseModel):
++    b: str
++
++app = FastAPI(
++    responses={
++        500: {
++            'model': ModelA | ModelB,
++            'content': {"application/json": {
++                'examples': {"Case A": {"value": "a"}}
++            }}
++        }
++    }
++)
++
++@app.get('/route1')
++def route1():
++    return "test"
++
++@app.get('/route2')
++def route2():
++    return "test"
++
++@app.get('/route3')
++def route3():
++    return "test"
++
++def test_repro():
++    openapi_json = app.openapi()
++    responses_500 = []
++    for path in openapi_json['paths'].values():
++        for method in path.values():
++            responses_500.append(method['responses']['500'])
++    
++    for i, resp in enumerate(responses_500):
++        any_of = resp['content']['application/json']['schema']['anyOf']
++        print(f"Route {i+1} anyOf length: {len(any_of)}")
++        if len(any_of) != 2:
++            print(f"FAILURE: Expected length 2, got {len(any_of)}")
++            assert len(any_of) == 2
++
++    print("SUCCESS: No duplication found.")
++
++if __name__ == "__main__":
++    test_repro()
+diff --git a/repro_issue.py b/repro_issue.py
+new file mode 100644
+index 00000000..1b238032
+--- /dev/null
++++ b/repro_issue.py
+@@ -0,0 +1,52 @@
++from fastapi import FastAPI
++from pydantic import BaseModel
++import json
++from fastapi.openapi.utils import get_openapi
++
++class ModelA(BaseModel):
++    a: str
++
++class ModelB(BaseModel):
++    b: str
++
++app = FastAPI(
++    responses={
++        500: {
++            'model': ModelA | ModelB,
++            'content': {"application/json": {
++                'examples': {"Case A": {"value": "a"}}
++            }}
++        }
++    }
++)
++
++@app.get('/route1')
++def route1():
++    return "test"
++
++@app.get('/route2')
++def route2():
++    return "test"
++
++@app.get('/route3')
++def route3():
++    return "test"
++
++openapi_schema = get_openapi(
++    title="Test App",
++    version="0.1.0",
++    routes=app.routes,
++)
++response_500_schema = openapi_schema["paths"]["/route1"]["get"]["responses"]["500"]["content"]["application/json"]["schema"]
++any_of_len = len(response_500_schema.get("anyOf", []))
++print(f"Length of anyOf for route1: {any_of_len}")
++
++route2_500_schema = openapi_schema["paths"]["/route2"]["get"]["responses"]["500"]["content"]["application/json"]["schema"]
++route3_500_schema = openapi_schema["paths"]["/route3"]["get"]["responses"]["500"]["content"]["application/json"]["schema"]
++
++print(f"Length of anyOf for route2: {len(route2_500_schema.get('anyOf', []))}")
++print(f"Length of anyOf for route3: {len(route3_500_schema.get('anyOf', []))}")
++
++assert any_of_len == 2, f"Expected 2 items in anyOf, got {any_of_len}"
++assert len(route2_500_schema.get('anyOf', [])) == 2
++assert len(route3_500_schema.get('anyOf', [])) == 2

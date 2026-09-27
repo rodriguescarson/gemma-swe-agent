@@ -1,0 +1,94 @@
+diff --git a/fastapi/_compat/is_typealiastype.py b/fastapi/_compat/is_typealiastype.py
+new file mode 100644
+index 00000000..7cbc97f4
+--- /dev/null
++++ b/fastapi/_compat/is_typealiastype.py
+@@ -0,0 +1,12 @@
++from typing import Any
++
++def is_typealiastype(annotation: Any) -> bool:
++
++    """
++    Check if the annotation is a PEP 695 type alias.
++    """
++    try:
++        from typing import TypeAliasType
++        return isinstance(annotation, TypeAliasType)
++    except ImportError:
++        return False
+diff --git a/fastapi/_compat/shared.py b/fastapi/_compat/shared.py
+index 68b9bbdf..9f59e184 100644
+--- a/fastapi/_compat/shared.py
++++ b/fastapi/_compat/shared.py
+@@ -12,6 +12,7 @@ from typing import (
+ )
+ 
+ from fastapi.types import UnionType
++from fastapi._compat.is_typealiastype import is_typealiastype
+ from pydantic import BaseModel
+ from pydantic.version import VERSION as PYDANTIC_VERSION
+ from starlette.datastructures import UploadFile
+diff --git a/fastapi/_compat/v2.py b/fastapi/_compat/v2.py
+index dae78a32..38b8fd04 100644
+--- a/fastapi/_compat/v2.py
++++ b/fastapi/_compat/v2.py
+@@ -522,6 +522,8 @@ def get_flat_models_from_model(
+ def get_flat_models_from_annotation(
+     annotation: Any, known_models: TypeModelSet
+ ) -> TypeModelSet:
++    if shared.is_typealiastype(annotation):
++        annotation = getattr(annotation, \"__value__\", annotation)
+     origin = get_origin(annotation)
+     if origin is not None:
+         for arg in get_args(annotation):
+@@ -538,6 +540,8 @@ def get_flat_models_from_field(
+     field: ModelField, known_models: TypeModelSet
+ ) -> TypeModelSet:
+     field_type = field.type_
++    if shared.is_typealiastype(field_type):
++        field_type = getattr(field_type, \"__value__\", field_type)
+     if lenient_issubclass(field_type, BaseModel):
+         if field_type in known_models:
+             return known_models
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 00000000..360eb8cc
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,36 @@
++import asyncio
++from fastapi import FastAPI
++from fastapi.openapi.utils import get_openapi
++from pydantic import BaseModel
++
++# PEP 695 type alias (Python 3.12+)
++try:
++    from typing import TypeAliasType
++    class MockModel(BaseModel):
++        name: str
++    
++    MyAlias = TypeAliasType("MyAlias", MockModel)
++except ImportError:
++    print("Python version < 3.12, skipping PEP 695 specific check")
++    exit(0)
++
++app = FastAPI()
++
++class Item(BaseModel):
++    data: MyAlias
++
++@app.get("/item")
++def read_item():
++    return {"hello": "world"}
++
++def test_openapi_schema():
++    openapi_schema = get_openapi(app, title="Test API", version="1.0.0")
++    import json
++    schema_str = json.dumps(openapi_schema)
++    if "name" not in schema_str:
++        print("Error: 'name' property from MockModel not found in OpenAPI schema")
++        exit(1)
++    print("Success: OpenAPI schema correctly resolved PEP 695 TypeAliasType")
++
++if __name__ == "__main__":
++    test_openapi_schema()

@@ -1,0 +1,246 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 7c6558c69..7901613a5 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -535,6 +535,8 @@ def analyze_param(
+             ensure_multipart_is_installed()
+         if not field_info.alias and getattr(field_info, "convert_underscores", None):
+             alias = param_name.replace("_", "-")
++        elif getattr(field_info, "convert_underscores", None):
++            alias = (field_info.alias or param_name).replace("_", "-")
+         else:
+             alias = field_info.alias or param_name
+         field_info.alias = alias
+@@ -820,8 +822,7 @@ def request_params_to_args(
+             )
+             if convert_underscores:
+                 alias = get_validation_alias(field)
+-                if alias == field.name:
+-                    alias = alias.replace("_", "-")
++                alias = alias.replace("_", "-")
+         value = _get_multidict_value(field, received_params, alias=alias)
+         if value is not None:
+             params_to_process[get_validation_alias(field)] = value
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 000000000..421448107
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,68 @@
++
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++from pydantic import BaseModel
++
++app = FastAPI()
++
++@app.get("/simple")
++async def simple(x_test: str = Header()):
++    return {"x_test": x_test}
++
++@app.get("/alias")
++async def alias(x_test: str = Header(alias="x_test")):
++    return {"x_test": x_test}
++
++@app.get("/no_convert")
++async def no_convert(x_test: str = Header(convert_underscores=False)):
++    return {"x_test": x_test}
++
++class HeaderModel(BaseModel):
++    x_test: str
++
++@app.get("/model")
++async def model(headers: HeaderModel = Header()):
++    return {"x_test": headers.x_test}
++
++client = TestClient(app)
++
++def test_simple():
++    # Should accept hyphen
++    assert client.get("/simple", headers={"x-test": "hyphen"}).json() == {"x_test": "hyphen"}
++    # Should NOT accept underscore
++    assert client.get("/simple", headers={"x_test": "underscore"}).status_code == 422
++
++def test_alias():
++    # Should accept hyphen because convert_underscores=True by default
++    assert client.get("/alias", headers={"x-test": "hyphen"}).json() == {"x_test": "hyphen"}
++    # Should NOT accept underscore even if alias="x_test"
++    assert client.get("/alias", headers={"x_test": "underscore"}).status_code == 422
++
++def test_no_convert():
++    # Should accept underscore
++    assert client.get("/no_convert", headers={"x_test": "underscore"}).json() == {"x_test": "underscore"}
++    # Should NOT accept hyphen
++    assert client.get("/no_convert", headers={"x-test": "hyphen"}).status_code == 422
++
++def test_model():
++    # Should accept hyphen
++    assert client.get("/model", headers={"x-test": "hyphen"}).json() == {"x_test": "hyphen"}
++    # Should NOT accept underscore
++    assert client.get("/model", headers={"x_test": "underscore"}).status_code == 422
++
++if __name__ == "__main__":
++    try:
++        test_simple()
++        print("test_simple passed")
++        test_alias()
++        print("test_alias passed")
++        test_no_convert()
++        print("test_no_convert passed")
++        test_model()
++        print("test_model passed")
++        print("All tests passed!")
++    except Exception as e:
++        print(f"Test failed: {e}")
++        import traceback
++        traceback.print_exc()
++        exit(1)
+diff --git a/repro_headers.py b/repro_headers.py
+new file mode 100644
+index 000000000..79a25fdf7
+--- /dev/null
++++ b/repro_headers.py
+@@ -0,0 +1,69 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++import pytest
++
++app = FastAPI()
++
++@app.get("/test")
++async def test_endpoint(x_test: str = Header(convert_underscores=True)):
++    return {"x_test": x_test}
++
++@app.get("/test-alias")
++async def test_alias_endpoint(x_alias: str = Header(alias="x_test", convert_underscores=True)):
++    return {"x_alias": x_alias}
++
++client = TestClient(app)
++
++def test_header_convert_underscores_true():
++    # Should accept hyphen
++    response = client.get("/test", headers={"x-test": "hyphen"})
++    print(f"Test 1 (hyphen): status={response.status_code}, json={response.json()}")
++    assert response.status_code == 200
++    assert response.json() == {"x_test": "hyphen"}
++
++    # Should NOT accept underscore
++    response = client.get("/test", headers={"x_test": "underscore"})
++    print(f"Test 2 (underscore): status={response.status_code}")
++    assert response.status_code == 422
++
++def test_header_alias_convert_underscores_true():
++    # Should accept hyphen (converted alias)
++    response = client.get("/test-alias", headers={"x-test": "hyphen"})
++    print(f"Test 3 (hyphen alias): status={response.status_code}, json={response.json()}")
++    assert response.status_code == 200
++    assert response.json() == {"x_alias": "hyphen"}
++
++    # Should NOT accept underscore (even if alias is "x_test")
++    response = client.get("/test-alias", headers={"x_test": "underscore"})
++    print(f"Test 4 (underscore alias): status={response.status_code}")
++    assert response.status_code == 422
++
++def test_header_convert_underscores_false():
++    app_false = FastAPI()
++    @app_false.get("/test-false")
++    async def test_false_endpoint(x_test: str = Header(convert_underscores=False)):
++        return {"x_test": x_test}
++    
++    client_false = TestClient(app_false)
++    
++    # Should accept underscore
++    response = client_false.get("/test-false", headers={"x_test": "underscore"})
++    print(f"Test 5 (false convert): status={response.status_code}, json={response.json()}")
++    assert response.status_code == 200
++    assert response.json() == {"x_test": "underscore"}
++
++if __name__ == "__main__":
++    try:
++        test_header_convert_underscores_true()
++        print("test_header_convert_underscores_true: PASSED")
++        test_header_alias_convert_underscores_true()
++        print("test_header_alias_convert_underscores_true: PASSED")
++        test_header_convert_underscores_false()
++        print("test_header_convert_underscores_false: PASSED")
++        print("All manual tests PASSED")
++    except AssertionError as e:
++        print(f"Test FAILED: {e}")
++        exit(1)
++    except Exception as e:
++        print(f"An error occurred: {e}")
++        exit(1)
+diff --git a/repro_output.log b/repro_output.log
+new file mode 100644
+index 000000000..894b76f60
+--- /dev/null
++++ b/repro_output.log
+@@ -0,0 +1,11 @@
++/tmp/swegemma_sandbox_6c1d7094-8d2_m65b53ea/workspace/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
++  from starlette.testclient import TestClient as TestClient  # noqa
++Traceback (most recent call last):
++  File "/tmp/swegemma_sandbox_6c1d7094-8d2_m65b53ea/workspace/repro.py", line 57, in <module>
++    test_alias()
++  File "/tmp/swegemma_sandbox_6c1d7094-8d2_m65b53ea/workspace/repro.py", line 37, in test_alias
++    assert client.get("/alias", headers={"x-test": "hyphen"}).json() == {"x_test": "hyphen"}
++           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++AssertionError
++test_simple passed
++Test failed: 
+diff --git a/simple_repro.py b/simple_repro.py
+new file mode 100644
+index 000000000..15fb11fd0
+--- /dev/null
++++ b/simple_repro.py
+@@ -0,0 +1,22 @@
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/")
++async def root(x_test: str = Header()):
++    return {"x_test": x_test}
++
++client = TestClient(app)
++
++print(f"Hyphen: {client.get('/', headers={'x-test': 'hyphen'}).status_code} {client.get('/', headers={'x-test': 'hyphen'}).json()}")
++print(f"Underscore: {client.get('/', headers={'x_test': 'underscore'}).status_code} {client.get('/', headers={'x_test': 'underscore'}).json()}")
++
++print("--- Disabled convert_underscores ---")
++app2 = FastAPI()
++@app2.get("/")
++async def root2(x_test: str = Header(convert_underscores=False)):
++    return {"x_test": x_test}
++client2 = TestClient(app2)
++print(f"Hyphen: {client2.get('/', headers={'x-test': 'hyphen'}).status_code} {client2.get('/', headers={'x-test': 'hyphen'}).json()}")
++print(f"Underscore: {client2.get('/', headers={'x_test': 'underscore'}).status_code} {client2.get('/', headers={'x_test': 'underscore'}).json()}")
+diff --git a/test_alias_debug.py b/test_alias_debug.py
+new file mode 100644
+index 000000000..eba893c86
+--- /dev/null
++++ b/test_alias_debug.py
+@@ -0,0 +1,23 @@
++
++from fastapi import FastAPI, Header
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.get("/alias")
++async def alias(x_test: str = Header(alias="x_test")):
++    return {"x_test": x_test}
++
++client = TestClient(app)
++
++def test_alias():
++    print("Sending request with x-test: hyphen")
++    response = client.get("/alias", headers={"x-test": "hyphen"})
++    print(f"Status: {response.status_code}, JSON: {response.json()}")
++    
++    print("\nSending request with x_test: underscore")
++    response = client.get("/alias", headers={"x_test": "underscore"})
++    print(f"Status: {response.status_code}, JSON: {response.json()}")
++
++if __name__ == "__main__":
++    test_alias()

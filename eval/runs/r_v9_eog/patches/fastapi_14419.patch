@@ -1,0 +1,168 @@
+diff --git a/fastapi/dependencies/models.py b/fastapi/dependencies/models.py
+index d6359c0f..b6f51b64 100644
+--- a/fastapi/dependencies/models.py
++++ b/fastapi/dependencies/models.py
+@@ -43,12 +43,22 @@ class Dependant:
+     path: Optional[str] = None
+     scope: Union[Literal["function", "request"], None] = None
+ 
++    @cached_property
++    def uses_scopes(self) -> bool:
++        if self.security_scopes or self.security_scopes_param_name:
++            return True
++        for dep in self.dependencies:
++            if dep.uses_scopes:
++                return True
++        return False
++
+     @cached_property
+     def cache_key(self) -> DependencyCacheKey:
+         return (
+             self.call,
+             tuple(sorted(set(self.security_scopes or []))),
+             self.computed_scope or "",
++            self.uses_scopes,
+         )
+ 
+     @cached_property
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 00000000..80204d88
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,40 @@
++
++from fastapi import Depends, FastAPI, Security
++from fastapi.security import SecurityScopes
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++counter_holder = {"counter": 0}
++
++async def dep_counter():
++    counter_holder["counter"] += 1
++    return counter_holder["counter"]
++
++async def dep_with_scopes(security_scopes: SecurityScopes, count: int = Depends(dep_counter)):
++    return count
++
++@app.get("/test-repro")
++async def repro(
++    a1: int = Depends(dep_with_scopes),
++    a2: int = Depends(dep_with_scopes)
++):
++    return {"a1": a1, "a2": a2}
++
++client = TestClient(app)
++
++def test_repro():
++    counter_holder["counter"] = 0
++    response = client.get("/test-repro")
++    print(f"Response: {response.json()}, Counter: {counter_holder['counter']}")
++    assert response.json() == {"a1": 1, "a2": 1}
++    assert counter_holder["counter"] == 1
++
++if __name__ == "__main__":
++    try:
++        test_repro()
++        print("SUCCESS")
++    except AssertionError as e:
++        print(f"FAILURE: {e}")
++    except Exception as e:
++        print(f"ERROR: {e}")
+diff --git a/tests/test_reproduce_issue.py b/tests/test_reproduce_issue.py
+new file mode 100644
+index 00000000..097391e7
+--- /dev/null
++++ b/tests/test_reproduce_issue.py
+@@ -0,0 +1,36 @@
++from fastapi import Depends, FastAPI, Security
++from fastapi.security import SecurityScopes
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++counter_holder = {"counter": 0}
++
++async def dep_no_scope():
++    counter_holder["counter"] += 1
++    return counter_holder["counter"]
++
++async def super_dep_no_scope(count: int = Depends(dep_no_scope)):
++    return count
++
++@app.get("/test")
++async def test_endpoint(
++    a: int = Depends(super_dep_no_scope),
++    b: int = Depends(super_dep_no_scope),
++):
++    return {"a": a, "b": b}
++
++client = TestClient(app)
++
++def test_cache_no_scope():
++    counter_holder["counter"] = 0
++    response = client.get("/test")
++    assert response.status_code == 200
++    # super_dep_no_scope is called twice.
++    # dep_no_scope is called twice.
++    # If cached:
++    # a: super_dep_no_scope(dep_no_scope()) -> dep_no_scope called (1), returns 1. super_dep_no_scope returns 1.
++    # b: super_dep_no_scope(dep_no_scope()) -> super_dep_no_scope is cached, returns 1.
++    # Total counter: 1
++    assert response.json() == {"a": 1, "b": 1}
++    assert counter_holder["counter"] == 1
+diff --git a/tests/test_reproduce_issue_2.py b/tests/test_reproduce_issue_2.py
+new file mode 100644
+index 00000000..c1021fe6
+--- /dev/null
++++ b/tests/test_reproduce_issue_2.py
+@@ -0,0 +1,47 @@
++from fastapi import Depends, FastAPI, Security
++from fastapi.security import SecurityScopes
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++counter_holder = {"counter": 0}
++
++async def dep_no_scope():
++    counter_holder["counter"] += 1
++    return counter_holder["counter"]
++
++async def super_dep_with_scope(security_scopes: SecurityScopes, count: int = Depends(dep_no_scope)):
++    return count
++
++@app.get("/test")
++async def test_endpoint(
++    a: int = Depends(super_dep_with_scope),
++    b: int = Depends(super_dep_with_scope),
++):
++    return {"a": a, "b": b}
++
++client = TestClient(app)
++
++def test_cache_with_scope():
++    counter_holder["counter"] = 0
++    response = client.get("/test")
++    assert response.status_code == 200
++    # super_dep_with_scope depends on dep_no_scope.
++    # super_dep_with_scope uses SecurityScopes.
++    # In the current implementation:
++    # super_dep_with_scope has security_scopes=None (because it's not declared via Security()),
++    # but it uses SecurityScopes.
++    # The cache_key uses self.security_scopes.
++    # If we call super_dep_with_scope twice:
++    # First call:
++    # - a: super_dep_with_scope(SecurityScopes(...), dep_no_scope())
++    #   - dep_no_scope called (1), returns 1.
++    #   - super_dep_with_scope returns 1.
++    # Second call:
++    # - b: super_dep_with_scope(SecurityScopes(...), dep_no_scope())
++    #   - dep_no_scope called (2), returns 2.
++    #   - super_dep_with_scope returns 2.
++    # If cached:
++    # - b: returns 1.
++    assert response.json() == {"a": 1, "b": 1}
++    assert counter_holder["counter"] == 1
