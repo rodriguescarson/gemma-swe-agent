@@ -1,0 +1,51 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index ef3f5641..8821c332 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -192,7 +192,11 @@ def get_flat_params(dependant: Dependant) -> List[ModelField]:
+ 
+ def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
+     signature = inspect.signature(call)
+-    globalns = getattr(call, "__globals__", {})
++    # Recursive dereference of __wrapped__ to match typing.get_type_hints logic
++    target = call
++    while hasattr(target, "__wrapped__"):
++        target = target.__wrapped__
++    globalns = getattr(target, "__globals__", {})
+     typed_params = [
+         inspect.Parameter(
+             name=param.name,
+diff --git a/tests/test_wrapped_method_forward_reference.py b/tests/test_wrapped_method_forward_reference.py
+new file mode 100644
+index 00000000..2376289e
+--- /dev/null
++++ b/tests/test_wrapped_method_forward_reference.py
+@@ -0,0 +1,28 @@
++import functools
++import pytest
++from fastapi import FastAPI, Depends
++from fastapi.dependencies.utils import get_typed_signature
++from typing import Annotated, ForwardRef
++
++class Model:
++    pass
++
++def get_model() -> "Model":
++    return Model()
++
++def wrapper(func):
++    @functools.wraps(func)
++    def wrapped(*args, **kwargs):
++        return func(*args, **kwargs)
++    return wrapped
++
++@wrapper
++def endpoint(item: Annotated[str, Depends(get_model)]):
++    return item
++
++def test_wrapped_method_type_inference():
++    # This should not raise NameError for 'Model'
++    signature = get_typed_signature(endpoint)
++    # Ensure the annotation is evaluated (get_typed_signature calls get_typed_annotation)
++    # which in turn calls evaluate_forwardref.
++    assert signature.parameters["item"].annotation is not None

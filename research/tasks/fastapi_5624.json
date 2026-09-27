@@ -1,0 +1,21 @@
+{
+  "task": "fastapi_5624",
+  "repo": "fastapi/fastapi",
+  "pr_url": "https://github.com/fastapi/fastapi/pull/5624",
+  "linked_issue_urls": ["https://github.com/fastapi/fastapi/issues/5623"],
+  "kind": "bugfix",
+  "statement_reveals_fix": "none",
+  "gold_files": ["fastapi/dependencies/utils.py"],
+  "gold_hunks": 1,
+  "gold_lines_changed": 4,
+  "root_cause": "In get_dependant(), `use_security_scopes = security_scopes or []` aliases the parent's scope list, then `use_security_scopes.extend(param_details.depends.scopes)` mutates it in place. Each Security() sub-dependency adds its scopes to the one list the parent and all siblings share, so scopes leak sideways (security2 also sees scope1, and vice versa) instead of flowing only from parent to child.",
+  "best_solution": "Scopes are built into the Dependant tree once, at route registration (get_dependant recursion), not at request time. The statement says 'hierarchical propagation is broken', so read how get_dependant passes security_scopes down. The list is shared by reference and extended in place, which is the classic mutable-argument aliasing bug. Fix: build a new list instead of mutating: `use_security_scopes = use_security_scopes + list(param_details.depends.scopes)`. Each child then gets parent_scopes + own_scopes, and siblings stay independent (dep1 -> [scope3, scope1], dep2 -> [scope3, scope2]). Copying up front with `list(security_scopes or [])` before the extend works just as well.",
+  "acceptable_alternatives": "Any non-mutating copy before extending: `use_security_scopes = list(security_scopes or [])` then extend (this is what our passing v8 patch did), or `[*security_scopes, *scopes]`. Changing solve_dependencies or SecurityScopes construction at request time does not fix this.",
+  "hidden_test_demands": "New tests/test_security_scopes_dont_propagate.py::test_security_scopes_dont_propagate. A route has Security(dep3, scopes=['scope3']); dep3 has two sibling Security deps, security1 (scopes=['scope1']) and security2 (scopes=['scope2']), each returning SecurityScopes.scopes. GET /scopes must return exactly {'dep1': ['scope3','scope1'], 'dep2': ['scope3','scope2']}: parent scope first, then own scope, and no sibling leakage. Uses Annotated[..., Security(...)] syntax.",
+  "locating_signals": "The statement is only a title plus 'see defect #5623'. 'security scope propagation' points to where Security scopes are threaded through the dependency tree: grep for `security_scopes` finds get_dependant in fastapi/dependencies/utils.py, which contains the one `.extend(` on a list passed in by the parent. The function is not named in the statement. The linked issue text ('A case of parameter mutation in FastAPI causes leakage of added scopes to sibling dependencies') says outright that the bug is a mutation bug.",
+  "our_outcome_summary": "Only v8 passed. v8 copied the list (`list(security_scopes) if security_scopes is not None else []`) before the extend, which is equivalent to gold. v4 produced an empty patch (35s, 23 calls). v6 patched the wrong layer: it added request-time scope propagation to solve_dependencies, passed a nonexistent `security_scopes=` kwarg to SolvedDependency and dropped `dependency_cache=`, which gave TypeError: SolvedDependency.__init__() got an unexpected keyword argument 'security_scopes'. It also left the aliasing in get_dependant untouched. v7 made a cosmetic `scopes=dependant.security_scopes or []` change in solve_dependencies, which did not affect the leak (the test still saw sibling scopes), and it left a stray repro_scopes.py in the diff.",
+  "failure_mode": "solved_by_some",
+  "generalizable_lesson": "When a bug is described as values 'leaking' or 'propagating wrongly' between siblings in a recursive tree build, first look for a mutable list/dict that is passed down and mutated in place (`x = arg or []` followed by `.append`/`.extend`/`[k]=`). Fix it with a copy (`x = list(arg or []) + new`) at that spot, not by adding new plumbing elsewhere. Also: when a statement is only 'see #N', fetch or infer the linked issue before editing. Never pass new kwargs to a dataclass or constructor without checking its fields. Never leave repro scripts in the final diff.",
+  "difficulty_5min": "medium",
+  "tags": ["title_plus_link_only", "needs_linked_issue_text", "single_function_fix", "edge_case_logic"]
+}

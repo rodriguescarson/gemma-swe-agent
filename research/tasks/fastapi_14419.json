@@ -1,0 +1,42 @@
+{
+  "task": "fastapi_14419",
+  "repo": "fastapi/fastapi",
+  "pr_url": "https://github.com/fastapi/fastapi/pull/14419",
+  "kind": "bugfix",
+  "statement_reveals_fix": "partial",
+  "gold_files": [
+    "fastapi/dependencies/models.py",
+    "fastapi/dependencies/utils.py"
+  ],
+  "gold_hunks": 7,
+  "gold_lines_changed": 62,
+  "linked_issue_urls": [
+    "https://github.com/fastapi/fastapi/pull/9790",
+    "https://github.com/fastapi/fastapi/discussions/6024",
+    "https://github.com/fastapi/fastapi/discussions/6024#discussioncomment-8541913"
+  ],
+  "new_api_names": [
+    "Dependant.own_oauth_scopes",
+    "Dependant.parent_oauth_scopes",
+    "Dependant.oauth_scopes",
+    "Dependant._uses_scopes"
+  ],
+  "root_cause": "Dependant.cache_key always included tuple(sorted(set(self.security_scopes))), and security_scopes was inherited from every Security(..., scopes=...) ancestor. So a plain dependency such as get_db reached through Security(get_user, scopes=['read']) got key (get_db, ('read',)) while the direct Depends(get_db) got (get_db, ()), and the per-request cache ran it twice even though get_db never looks at scopes.",
+  "best_solution": "Make scopes part of the cache key only when the dependency actually uses them, transitively. In fastapi/dependencies/models.py add a cached_property `_uses_scopes` that is True if the dependant declared its own Security scopes, or has a SecurityScopes parameter (security_scopes_param_name is not None), or any sub-dependant has `_uses_scopes`. Then cache_key = (call, tuple(sorted(set(oauth_scopes))) if self._uses_scopes else (), computed_scope or ''). To tell 'declared own scopes' apart from 'inherited scopes', gold splits the old security_scopes field into own_oauth_scopes and parent_oauth_scopes, with an `oauth_scopes` property that merges parent then own (order preserved, deduped). get_dependant/get_parameterless_sub_dependant in utils.py pass own_oauth_scopes from the Security marker and parent_oauth_scopes=current_scopes to children. SecurityScopes injection and the dependency-override path use oauth_scopes, and SecurityRequirement gets current_scopes for any SecurityBase. A smaller fix should also pass the hidden tests (traced by hand, not run): keep security_scopes and compute _uses_scopes = security_scopes_param_name is not None or any(sub._uses_scopes for sub in self.dependencies). The recursion over sub-dependencies is the part that matters.",
+  "hidden_test_demands": "tests/test_security_scopes.py::test_security_scopes_dependency_called_once: endpoint has Depends(get_db) and Security(get_user, scopes=['read']) where get_user depends on get_db; get_db must run exactly once. tests/test_security_scopes_sub_dependency.py::test_security_scopes_sub_dependency_caching: get_current_user(SecurityScopes, Depends(get_db_session)), get_user_me = Security(get_current_user, scopes=['me']), get_user_items = Depends(get_user_me), endpoint uses Depends(get_user_me) and Security(get_user_items, scopes=['items']). Expected counts: get_db_session 1, get_current_user 2, get_user_me 2, get_user_items 1. The exact JSON shows the second get_current_user sees scopes ['items','me'] (parent first, then own) and both share db_session_1. So scope-reading deps and their ancestors stay keyed by scopes, and scope-free leaves are shared.",
+  "locating_signals": "The title and last paragraph ('Dependencies are cached based on the function. And also on the scopes, but only when ... this dependency or a sub-dependency declare scopes or access the SecurityScopes') state the rule exactly. Searching for 'cache' plus 'scopes' leads to Dependant.cache_key in fastapi/dependencies/models.py, which the statement does not name. The words 'or by a sub-dependency' are the signal that the check must recurse. The linked discussion diagrams are not visible offline.",
+  "our_outcome_summary": "All four configs failed in the Kaggle env. v4 (103s, 43 calls) came closest: in cache_key it kept the scopes only when self.security_scopes_param_name was set. That fixed test_security_scopes (get_db called once), but the check was not transitive. get_user_me has no SecurityScopes parameter of its own, yet its sub-dependency get_current_user does, so v4 merged both get_user_me calls into one cache entry (log: assert 1 == 2 on get_user_me). v6 (90s, 26 calls) went the opposite way and appended the sub-dependants' cache keys to the tuple. Keys got more specific, not less, so get_db still ran twice (2 == 1 in both tests). v7 (173s, 41 calls) produced an empty patch. v8 (143s, 51 calls) edited the wrong place: it only added `sub_dependant.use_cache and` to the cache-store condition in solve_dependencies and left cache_key alone, so both tests failed with 2 == 1. v4 and v8 also added stray test files (v8 at the repo root).",
+  "failure_mode": "partial_fix",
+  "generalizable_lesson": "When a statement gives a rule with a recursive clause ('this X or any of its sub-Xs does Y'), implement it as a memoized recursive predicate over the child graph, not a check on the node's own fields only. Then build the statement's own nested example (parent -> child -> grandchild that does Y) as a quick test before you finish. For cache-key or dedup bugs where something runs too often, the fix is to remove or conditionally drop a key component. Adding more components (v6) can only split the cache further. Check the direction with a call counter before submitting.",
+  "difficulty_5min": "medium",
+  "tags": [
+    "statement_is_pr_description",
+    "multi_file",
+    "new_function_or_param",
+    "edge_case_logic",
+    "test_reveals_hidden_spec",
+    "existing_tests_cover_area",
+    "repro_easy_from_statement"
+  ],
+  "acceptable_alternatives": "The minimal version keeps the existing security_scopes field and adds a recursive `_uses_scopes` (security_scopes_param_name set, or any sub-dependant uses scopes) used to include or drop scopes in cache_key. By hand trace (not executed) it satisfies both hidden tests, because inherited-scope order is already parent then own. The own/parent split in gold is only needed to count 'declared its own Security scopes' as usage."
+}

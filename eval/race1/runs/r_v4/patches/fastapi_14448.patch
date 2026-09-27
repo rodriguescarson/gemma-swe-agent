@@ -1,0 +1,174 @@
+diff --git a/fastapi/dependencies/models.py b/fastapi/dependencies/models.py
+index 2a4d9a01..6e7d607c 100644
+--- a/fastapi/dependencies/models.py
++++ b/fastapi/dependencies/models.py
+@@ -79,9 +79,14 @@ class Dependant:
+     def _unwrapped_call(self) -> Any:
+         if self.call is None:
+             return self.call  # pragma: no cover
+-        unwrapped = inspect.unwrap(self.call)
+-        if isinstance(unwrapped, partial):
+-            unwrapped = unwrapped.func
++        unwrapped = self.call
++        while True:
++            prev = unwrapped
++            unwrapped = inspect.unwrap(unwrapped)
++            if isinstance(unwrapped, partial):
++                unwrapped = unwrapped.func
++            if unwrapped is prev:
++                break
+         return unwrapped
+ 
+     @cached_property
+diff --git a/fastapi/routing.py b/fastapi/routing.py
+index c10175b1..70cdeca7 100644
+--- a/fastapi/routing.py
++++ b/fastapi/routing.py
+@@ -63,6 +63,20 @@ from pydantic import BaseModel
+ from starlette import routing
+ from starlette._exception_handler import wrap_app_handling_exceptions
+ from starlette._utils import is_async_callable
++
++
++def is_async_callable_unwrapped(func: Any) -> bool:
++    unwrapped = func
++    while True:
++        prev = unwrapped
++        unwrapped = inspect.unwrap(unwrapped)
++        if isinstance(unwrapped, functools.partial):
++            unwrapped = unwrapped.func
++        if unwrapped is prev:
++            break
++    return is_async_callable(unwrapped)
++
++
+ from starlette.concurrency import run_in_threadpool
+ from starlette.exceptions import HTTPException
+ from starlette.requests import Request
+@@ -89,7 +103,7 @@ def request_response(
+     and returns an ASGI application.
+     """
+     f: Callable[[Request], Awaitable[Response]] = (
+-        func if is_async_callable(func) else functools.partial(run_in_threadpool, func)  # type:ignore
++        func if is_async_callable_unwrapped(func) else functools.partial(run_in_threadpool, func)  # type:ignore
+     )
+ 
+     async def app(scope: Scope, receive: Receive, send: Send) -> None:
+diff --git a/tests/test_dependencies_wraps_partial.py b/tests/test_dependencies_wraps_partial.py
+new file mode 100644
+index 00000000..a4c00c0a
+--- /dev/null
++++ b/tests/test_dependencies_wraps_partial.py
+@@ -0,0 +1,112 @@
++import asyncio
++import functools
++import inspect
++import pytest
++from fastapi import FastAPI, Depends
++from fastapi.testclient import TestClient
++from starlette.responses import Response
++from fastapi.routing import is_async_callable_unwrapped
++
++async def async_func():
++    return "async"
++
++def sync_func():
++    return "sync"
++
++def wrapper(f):
++    @functools.wraps(f)
++    def wrapped(*args, **kwargs):
++        return f(*args, **kwargs)
++    return wrapped
++
++async def async_wrapper(f):
++    @functools.wraps(f)
++    async def wrapped(*args, **kwargs):
++        return await f(*args, **kwargs)
++    return wrapped
++
++def test_wraps_partial_async_dependency():
++    app = FastAPI()
++
++    # Combine wraps and partial
++    # Case 1: async function wrapped then partialed
++    wrapped_async = wrapper(async_func)
++    partial_wrapped_async = functools.partial(wrapped_async)
++
++    @app.get("/")
++    async def root(dep = Depends(partial_wrapped_async)):
++        return {"dep": dep}
++
++    client = TestClient(app)
++    response = client.get("/")
++    assert response.status_code == 200
++    assert response.json() == {"dep": "async"}
++
++def test_wraps_partial_sync_dependency():
++    app = FastAPI()
++
++    # Case 2: sync function wrapped then partialed
++    wrapped_sync = wrapper(sync_func)
++    partial_wrapped_sync = functools.partial(wrapped_sync)
++
++    @app.get("/")
++    async def root(dep = Depends(partial_wrapped_sync)):
++        return {"dep": dep}
++
++    client = TestClient(app)
++    response = client.get("/")
++    assert response.status_code == 200
++    assert response.json() == {"dep": "sync"}
++
++def test_partial_wraps_async_dependency():
++    app = FastAPI()
++
++    # Case 3: partialed first then wrapped
++    partial_async = functools.partial(async_func)
++    wrapped_partial_async = wrapper(partial_async)
++
++    @app.get("/")
++    async def root(dep = Depends(wrapped_partial_async)):
++        return {"dep": dep}
++
++    client = TestClient(app)
++    response = client.get("/")
++    assert response.status_code == 200
++    assert response.json() == {"dep": "async"}
++
++def test_complex_nesting_async():
++    app = FastAPI()
++
++    # Multi layer
++    f = async_func
++    f = wrapper(f)
++    f = functools.partial(f)
++    f = wrapper(f)
++    f = functools.partial(f)
++
++    @app.get("/")
++    async def root(dep = Depends(f)):
++        return {"dep": dep}
++
++    client = TestClient(app)
++    response = client.get("/")
++    assert response.status_code == 200
++    assert response.json() == {"dep": "async"}
++
++def test_routing_unwrapped_async_detection():
++    # Test that it correctly identifies partially wrapped async functions
++    async def async_func_to_test():
++        return "success"
++    
++    wrapped = wrapper(async_func_to_test)
++    partial = functools.partial(wrapped)
++    
++    assert is_async_callable_unwrapped(partial) is True
++    
++    def sync_func_to_test():
++        return "success"
++    
++    wrapped_sync = wrapper(sync_func_to_test)
++    partial_sync = functools.partial(wrapped_sync)
++    
++    assert is_async_callable_unwrapped(partial_sync) is False

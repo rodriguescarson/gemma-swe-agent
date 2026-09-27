@@ -1,0 +1,100 @@
+diff --git a/fastapi/routing.py b/fastapi/routing.py
+index 0b4d2887..152f950c 100644
+--- a/fastapi/routing.py
++++ b/fastapi/routing.py
+@@ -954,14 +954,6 @@ class APIRouter(routing.Router):
+     ) -> None:
+         # Handle on_startup/on_shutdown locally since Starlette removed support
+         # Ref: https://github.com/Kludex/starlette/pull/3117
+-        # TODO: deprecate this once the lifespan (or alternative) interface is improved
+-        self.on_startup: list[Callable[[], Any]] = (
+-            [] if on_startup is None else list(on_startup)
+-        )
+-        self.on_shutdown: list[Callable[[], Any]] = (
+-            [] if on_shutdown is None else list(on_shutdown)
+-        )
+-
+         # Determine the lifespan context to use
+         if lifespan is None:
+             # Use the default lifespan that runs on_startup/on_shutdown handlers
+@@ -980,6 +972,15 @@ class APIRouter(routing.Router):
+             default=default,
+             lifespan=lifespan_context,
+         )
++
++        # TODO: deprecate this once the lifespan (or alternative) interface is improved
++        self.on_startup: list[Callable[[], Any]] = (
++            [] if on_startup is None else list(on_startup)
++        )
++        self.on_shutdown: list[Callable[[], Any]] = (
++            [] if on_shutdown is None else list(on_shutdown)
++        )
++
+         if prefix:
+             assert prefix.startswith("/"), "A path prefix must start with '/'"
+             assert not prefix.endswith("/"), (
+diff --git a/tests/test_reproduce_issue.py b/tests/test_reproduce_issue.py
+new file mode 100644
+index 00000000..5cf087df
+--- /dev/null
++++ b/tests/test_reproduce_issue.py
+@@ -0,0 +1,59 @@
++from fastapi import FastAPI, APIRouter
++import pytest
++from fastapi.testclient import TestClient
++
++def s_start():
++    print("SYNC START", flush=True)
++
++def s_shutdown():
++    print("SYNC SHUTDOWN", flush=True)
++
++def test_startup_shutdown_events():
++    # The issue reported is that on_startup/on_shutdown are not called
++    # when passed to FastAPI(on_startup=...) or APIRouter(on_startup=...)
++    # because FastAPI inherits from APIRouter.
++    
++    startup_called = False
++    shutdown_called = False
++    
++    def start():
++        nonlocal startup_called
++        startup_called = True
++        
++    def shutdown():
++        nonlocal shutdown_called
++        shutdown_called = True
++
++    app = FastAPI(on_startup=[start], on_shutdown=[shutdown])
++
++    @app.get("/health")
++    async def health():
++        return {"ok": True}
++
++    with TestClient(app) as client:
++        assert startup_called is True, "Startup event was not called"
++        response = client.get("/health")
++        assert response.status_code == 200
++    
++    assert shutdown_called is True, "Shutdown event was not called"
++
++def test_router_startup_shutdown_events():
++    startup_called = False
++    shutdown_called = False
++    
++    def start():
++        nonlocal startup_called
++        startup_called = True
++        
++    def shutdown():
++        nonlocal shutdown_called
++        shutdown_called = True
++
++    router = APIRouter(on_startup=[start], on_shutdown=[shutdown])
++    app = FastAPI()
++    app.include_router(router)
++
++    with TestClient(app) as client:
++        assert startup_called is True, "Router startup event was not called"
++    
++    assert shutdown_called is True, "Router shutdown event was not called"

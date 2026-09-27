@@ -1,0 +1,40 @@
+{
+  "task": "fastapi_14851",
+  "repo": "fastapi/fastapi",
+  "pr_url": "https://github.com/fastapi/fastapi/pull/14851",
+  "linked_issue_urls": [
+    "https://github.com/Kludex/starlette/pull/3117"
+  ],
+  "kind": "refactor",
+  "statement_reveals_fix": "partial",
+  "gold_files": [
+    "fastapi/routing.py"
+  ],
+  "gold_hunks": 6,
+  "gold_lines_changed": 157,
+  "root_cause": "Upstream Starlette (Kludex/starlette PR #3117, 'Drop main deprecation warnings around applications/routing') removes the deprecated on_startup/on_shutdown constructor args, Router.startup()/shutdown(), add_event_handler(), the internal _DefaultLifespan, and the automatic wrapping of plain (async) generator lifespan functions. FastAPI's APIRouter.__init__ forwards on_startup/on_shutdown/lifespan straight to starlette.routing.Router.__init__, and APIRouter.on_event() calls the inherited self.add_event_handler(). None of this lives in the FastAPI repo, so on_event, FastAPI(on_startup=...), and generator lifespans would all break on the next Starlette release.",
+  "best_solution": "Re-implement the removed Starlette machinery inside fastapi/routing.py and stop forwarding it to the base class. (1) In APIRouter.__init__, set self.on_startup = list(on_startup or []) and self.on_shutdown = list(on_shutdown or []). (2) Work out lifespan_context yourself: None -> a local _DefaultLifespan(self) whose __aenter__ awaits router._startup() and __aexit__ awaits router._shutdown(), and whose __call__(app) returns self; an async generator function -> contextlib.asynccontextmanager(lifespan); a sync generator function -> a vendored _wrap_gen_lifespan_context (contextlib.contextmanager wrapped in an _AsyncLiftContextManager that turns __enter__/__exit__ into async methods); anything else is passed through unchanged. Set self.lifespan_context and call super().__init__(routes=..., redirect_slashes=..., default=..., lifespan=lifespan_context), with no on_startup/on_shutdown. (3) Add APIRouter._startup/_shutdown, which loop over the handler lists and await a handler if is_async_callable(handler), otherwise call it. (4) Add APIRouter.add_event_handler(event_type, func): assert the type is 'startup' or 'shutdown' and append to the matching list. The existing on_event decorator keeps calling self.add_event_handler, so it now resolves to FastAPI's version. The code is vendored rather than imported so it doesn't depend on Starlette private symbols. The reasoning chain from the statement: find every place FastAPI leans on the Starlette lifecycle API (inherited methods and constructor kwargs), read the base-class source in site-packages, and copy the behavior across.",
+  "acceptable_alternatives": "Any implementation that keeps on_startup/on_shutdown/add_event_handler/on_event working without passing them to Starlette, and that turns sync and async generator lifespans into async context managers before calling super().__init__. Importing starlette.routing._wrap_gen_lifespan_context / _DefaultLifespan would pass the tests in an env with the old Starlette, but it defeats the point, because those symbols are what is being removed. The v7-style patch (drop the kwargs from super().__init__ and append to self.on_startup in on_event) passes in the Kaggle env only because the installed Starlette (0.52.1 pinned in the env files) still initializes self.on_startup and still runs the handlers through its own _DefaultLifespan.",
+  "hidden_test_demands": "3 new tests appended to tests/test_router_events.py (9 tests collected in total): test_router_async_shutdown_handler (an async @app.on_event('shutdown') handler must be awaited on TestClient exit, so state.app_shutdown flips False->True); test_router_sync_generator_lifespan (FastAPI(lifespan=<plain def with yield>) must run the startup part on entry and the shutdown part on exit); test_router_async_generator_lifespan (same with an async def generator that has not been wrapped in asynccontextmanager). The existing tests (router/app on_event startup+shutdown, nested lifespan state) must keep passing. No new public API name is checked. The harness uses its own pytest.ini, so Starlette's generator-lifespan DeprecationWarnings do not turn into errors the way FastAPI's own filterwarnings=error config would.",
+  "locating_signals": "The statement names `on_event` and 'the next Starlette' but no file or function. `git grep on_event` leads to APIRouter.on_event in fastapi/routing.py (~line 4480), which calls self.add_event_handler. That method is NOT defined anywhere in the repo: it is inherited from starlette.routing.Router in site-packages. APIRouter.__init__ (~line 900) forwards on_startup/on_shutdown/lifespan to super().__init__. The key step is to read the installed base class (python -c 'import inspect, starlette.routing as r; print(inspect.getsource(r.Router))') and see what 'the next Starlette' drops.",
+  "new_api_names": [
+    "_DefaultLifespan",
+    "_AsyncLiftContextManager",
+    "_wrap_gen_lifespan_context",
+    "APIRouter._startup",
+    "APIRouter._shutdown",
+    "APIRouter.add_event_handler"
+  ],
+  "our_outcome_summary": "Only v7 passed (kaggle_env_pass v4=false, v6=false, v7=true, v8=false). v4 (81 s, 86 calls), v6 (460 s, 57 calls) and v8 (94 s, 75 calls) produced empty patches: each died with litellm ContextWindowExceededError (32768-token limit), and v4 and v8 burned about 1.1M prompt tokens. The traces show the same loop every time: the agent ran `git grep -n \"def add_event_handler\"` or `grep -r` on it 10-20 times, found nothing (the method lives in Starlette's site-packages, not the repo), then paged through 50-300-line windows of the 4,500-line routing.py and applications.py until the context overflowed. It never inspected starlette.routing. v7 (169 s, 102 calls, 2186 chars) passed with a shallow patch: it removed on_startup/on_shutdown from the super().__init__ call and made on_event append straight to self.on_startup/self.on_shutdown, falling back to self.add_event_handler for other event types. It passed only because the env's old Starlette still sets self.on_startup = [] and runs the handlers through its own _DefaultLifespan, and still wraps generator lifespans. In substance the patch is wrong. FastAPI(on_startup=[...]) and router add_event_handler are now silently dropped (the kwargs are no longer forwarded or stored), the `if self.on_startup is None` guards are dead code, and nothing works on the next Starlette. It also added tests/test_on_event_reimpl.py, which collected 0 items.",
+  "failure_mode": "solved_by_some",
+  "generalizable_lesson": "When the code calls a method on self (or passes kwargs to super().__init__) and grep finds no definition in the repo, the method is inherited from a third-party base class. Stop re-grepping and read the installed source: `python -c \"import inspect, pkg.mod as m; print(inspect.getsource(m.Base.method))\"` or `python -c \"import pkg; print(pkg.__file__)\"` plus a targeted sed. A statement like 'compatible with the next version of <dependency>' means: list every inherited method, constructor kwarg and implicit behavior the repo relies on, then vendor it locally (store the state on self, implement the methods, stop forwarding the removed kwargs). Keep existing public entry points working, both constructor args and decorators. On huge files, never page through large windows. Grep for line numbers and read 20-40 lines around each hit, and treat the same failing grep returning nothing twice as a signal to change strategy.",
+  "difficulty_5min": "hard",
+  "tags": [
+    "statement_is_pr_description",
+    "new_function_or_param",
+    "multi_hunk_same_file",
+    "async_code",
+    "existing_tests_cover_area",
+    "large_feature"
+  ]
+}

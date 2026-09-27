@@ -5,6 +5,7 @@
 set -uo pipefail
 cd /root/g4; export PYTHONDONTWRITEBYTECODE=1; fail() { echo "PREFLIGHT_FAIL $1 $(date -u +%FT%TZ)" >> eval/progress.log; echo "FAIL: $1"; exit 1; }
 BUNDLE=${1:-submissions/v6}
+/root/venv/bin/hf auth whoami >/dev/null 2>&1 || fail "hf auth missing: backup would fail after the run (2026-09-27: 50 min idle pod)"
 PYTHONPYCACHEPREFIX=/tmp/pf_pycache /root/hvenv/bin/python -m compileall -q scripts train pod submissions >/dev/null || fail compileall   # never write __pycache__ into bundles
 /root/hvenv/bin/python -m pip -q install pytest >/dev/null 2>&1; PYTHONDONTWRITEBYTECODE=1 /root/hvenv/bin/python -m pytest -q -rf -p no:cacheprovider tests -k "not shellcheck and not official_compiler" >eval/preflight_tests.log 2>&1 || fail "unit tests: $(grep -E "^FAILED" eval/preflight_tests.log | head -3 | tr "\n" " ") $(tail -1 eval/preflight_tests.log)"
 /root/venv/bin/python - <<'PY' || fail "env/version"

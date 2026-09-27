@@ -1,0 +1,53 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index e5ac51d5..39b0647e 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -730,7 +730,19 @@ def _get_multidict_value(
+     field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None
+ ) -> Any:
+     alias = alias or get_validation_alias(field)
+-    if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict, Headers)):
++    if (
++        is_sequence_field(field)
++        and isinstance(values, (ImmutableMultiDict, Headers))
++        and not (
++            isinstance(field.field_info, params.Form)
++            and hasattr(field.field_info, "metadata")
++            and any(
++                # This check covers pydantic.types.Json for Pydantic v2
++                getattr(m, "__name__", None) == "Json" or "pydantic.types.Json" in str(type(m))
++                for m in field.field_info.metadata
++            )
++        )
++    ):
+         value = values.getlist(alias)
+     else:
+         value = values.get(alias, None)
+diff --git a/tests/test_json_form.py b/tests/test_json_form.py
+new file mode 100644
+index 00000000..bcb3b59b
+--- /dev/null
++++ b/tests/test_json_form.py
+@@ -0,0 +1,22 @@
++from typing import Annotated
++from pydantic import Json
++from fastapi import FastAPI, Form, UploadFile
++from fastapi.testclient import TestClient
++
++app = FastAPI()
++
++@app.post("/upload")
++def upload(
++    file: UploadFile,
++    tags: Annotated[Json[list[str]], Form()]
++):
++    return {"file": file.filename, "tags": tags}
++
++client = TestClient(app)
++
++def test_upload_json_form():
++    files = {"file": ("test.txt", b"content")}
++    data = {"tags": '["abc", "def"]'}
++    response = client.post("/upload", files=files, data=data)
++    assert response.status_code == 200
++    assert response.json() == {"file": "test.txt", "tags": ["abc", "def"]}

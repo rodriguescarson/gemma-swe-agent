@@ -1,0 +1,111 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 00000000..41902d97
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,39 @@
++from rich.pretty import pprint
++
++class CustomList(list):
++    def __eq__(self, other):
++        return True
++    def __len__(self):
++        return 0
++
++# This is a container.
++# In rich/pretty.py:
++# open_brace, close_brace, empty = _BRACES[obj_type](obj)
++# if reached_max_depth: ...
++# elif obj_type.__repr__ != type(obj).__repr__: ...
++# elif obj:
++#     # iterate children
++# else:
++#     node = Node(empty=empty, children=[], last=root)
++
++# If we have CustomList(), then 'elif obj' is False (because __len__ is 0).
++# So it goes to the 'else' block: node = Node(empty=empty, children=[], last=root)
++# For a list, empty is '[]'.
++# So it returns '[]'.
++# This is CORRECT for an empty list.
++
++# But what if the user WANTED it to be treated as NOT empty, but it has __len__=0?
++# No, that's usually how empty is defined.
++
++# What if 'obj' is something that is TRUTHY but we WANT it to be treated as empty?
++# No, that's not the issue.
++
++# "When repr'ing classes that have overwritten __eq__ as parameters, the check with == Parameters.empty can be True."
++# Maybe "Parameters" is a class they are using in their project.
++# a = Parameters()
++# a.__eq__(anything) is True.
++# If rich does: if obj == some_sentinel:
++# it will be True.
++
++# But where does rich do that?
++# I searched for '==' and didn't find it.
+diff --git a/rich/pretty.py b/rich/pretty.py
+index fd12885b..80a38b99 100644
+--- a/rich/pretty.py
++++ b/rich/pretty.py
+@@ -808,7 +808,7 @@ def traverse(
+                 node = Node(value_repr=f"{open_brace}...{close_brace}")
+             elif obj_type.__repr__ != type(obj).__repr__:
+                 node = Node(value_repr=to_repr(obj), last=root)
+-            elif obj:
++            elif len(obj) > 0:
+                 children = []
+                 node = Node(
+                     open_brace=open_brace,
+diff --git a/test_custom_fix.py b/test_custom_fix.py
+new file mode 100644
+index 00000000..b8900442
+--- /dev/null
++++ b/test_custom_fix.py
+@@ -0,0 +1,47 @@
++from rich.pretty import Pretty
++from rich.console import Console
++import io
++
++class CustomClass:
++    def __init__(self, items):
++        self.items = items
++    def __len__(self):
++        return len(self.items)
++    def __getitem__(self, index):
++        return self.items[index]
++    def __iter__(self):
++        return iter(self.items)
++    def __eq__(self, other):
++        return True
++
++def test_fix():
++    console = Console(file=io.StringIO(), force_terminal=False)
++    
++    # Test Case 1: Custom class with items
++    # If the bug exists, the truthiness check might fail or behave unexpectedly.
++    # With the fix, it should enter 'elif len(obj) > 0'.
++    obj = CustomClass([1, 2, 3])
++    console.print(Pretty(obj))
++    output = console.file.getvalue()
++    print(f"Output 1: {repr(output)}")
++    assert "1" in output and "2" in output and "3" in output
++    
++    # Reset console for next test
++    console = Console(file=io.StringIO(), force_terminal=False)
++    
++    # Test Case 2: Custom class that is empty
++    obj_empty = CustomClass([])
++    console.print(Pretty(obj_empty))
++    output_empty = console.file.getvalue()
++    print(f"Output 2: {repr(output_empty)}")
++    # Should be treated as empty.
++    # Depending on the brace used, it should not contain 1, 2, 3.
++    assert "1" not in output_empty
++
++if __name__ == "__main__":
++    try:
++        test_fix()
++        print("Tests passed!")
++    except Exception as e:
++        print(f"Test failed: {e}")
++        raise e

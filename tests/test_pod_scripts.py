@@ -104,3 +104,8 @@ def test_run_eval_uses_bundle_eval_config(tmp_path):
     script = f'SUB={tmp_path}; MIN=6; CALLS=110; TURNS=220; TO=99\n{body}\necho "$MIN $CALLS $TURNS $TO"'
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True).stdout.split()
     assert out == ["5", "70", "150", "180"]
+
+def test_preflight_requires_hf_auth_before_any_run():
+    # a fresh pod without an HF token finished a 3 h race and then could not back up, so it sat idle 50 min
+    s = (POD / "preflight.sh").read_text()
+    assert "hf auth whoami" in s and s.index("hf auth whoami") < s.index("pytest")

@@ -1,0 +1,161 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 00000000..e1c1b30c
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,70 @@
++
++import sys
++from rich.traceback import Traceback
++
++def test_recursive_exception_group():
++    try:
++        # We need to bypass the readonly attribute of ExceptionGroup.exceptions.
++        # We can do this by creating a mock object that looks like an ExceptionGroup.
++        
++        class MockExceptionGroup(Exception):
++            def __init__(self, *args):
++                super().__init__(*args)
++                self.exceptions = []
++
++        eg = MockExceptionGroup("circular")
++        eg.exceptions.append(eg)
++
++        # We need to make sure it's recognized as a BaseExceptionGroup/ExceptionGroup
++        # In rich.traceback.py, it uses isinstance(exc_value, (BaseExceptionGroup, ExceptionGroup))
++        # Since we can't easily inherit from the real ones and change .exceptions,
++        # let's just use the real ones but monkeypatch if possible, or just trust the logic.
++        
++        # Wait, the most important thing is that Traceback.extract(type(eg), eg, traceback)
++        # handles the recursion.
++        
++        # Let's use a real ExceptionGroup and a proxy for the exceptions attribute.
++        
++        class ProxyList(list):
++            def __iter__(self):
++                # When iterated, yield the owner of the proxy
++                yield self.owner
++        
++        eg = ExceptionGroup("outer", [Exception("inner")])
++        # We can't set eg.exceptions, but we can try to replace it with something if it were possible.
++        # But it's not.
++        
++        # Let's try to use a custom class that inherits from BaseExceptionGroup 
++        # and we'll define __getattribute__ to return circularity.
++        
++        class CircularGroup(ExceptionGroup):
++            def __getattribute__(self, name):
++                if name == "exceptions":
++                    return (self,)
++                return super().__getattribute__(name)
++        
++        cg = CircularGroup("outer", [Exception("inner")])
++        
++        try:
++            Traceback.extract(type(cg), cg, cg.__traceback__)
++        except RecursionError:
++            print("RecursionError caught!")
++            raise
++        except Exception as e:
++            print(f"Caught unexpected exception: {e}")
++            raise
++            
++    except RecursionError:
++        print("RecursionError caught!")
++        raise
++    except Exception as e:
++        print(f"Caught unexpected exception: {e}")
++        raise
++
++if __name__ == "__main__":
++    try:
++        test_recursive_exception_group()
++        print("Test passed successfully!")
++    except Exception as e:
++        print(f"Test failed: {e}")
++        sys.exit(1)
+diff --git a/reproduce_recursion.py b/reproduce_recursion.py
+new file mode 100644
+index 00000000..f932a2de
+--- /dev/null
++++ b/reproduce_recursion.py
+@@ -0,0 +1,30 @@
++
++import sys
++from rich.traceback import install
++
++def level1():
++    level2()
++
++def level2():
++    # Force a recursion error in the traceback handler
++    # by causing an exception inside the handler's print call.
++    # However, the issue is about the handler itself causing recursion.
++    # A typical scenario for traceback recursion is when the 
++    # traceback handler itself raises an exception, which is then 
++    # caught by the traceback handler, and so on.
++    1/0
++
++def test_recursion():
++    # This is a simple way to see if the handler handles its own errors
++    install()
++    try:
++        level1()
++    except Exception:
++        pass
++
++if __name__ == "__main__":
++    try:
++        test_recursion()
++        print("Completed without crash")
++    except Exception as e:
++        print(f"Caught: {e}")
+diff --git a/rich/traceback.py b/rich/traceback.py
+index b2cc6304..c61a8270 100644
+--- a/rich/traceback.py
++++ b/rich/traceback.py
+@@ -17,6 +17,7 @@ from typing import (
+     Tuple,
+     Type,
+     Union,
++    Set,
+ )
+ 
+ from pygments.lexers import guess_lexer_for_filename
+@@ -418,6 +419,7 @@ class Traceback:
+         locals_max_string: int = LOCALS_MAX_STRING,
+         locals_hide_dunder: bool = True,
+         locals_hide_sunder: bool = False,
++        seen: Optional[Set[BaseException]] = None,
+     ) -> Trace:
+         """Extract traceback information.
+ 
+@@ -431,11 +433,20 @@ class Traceback:
+             locals_max_string (int, optional): Maximum length of string before truncating, or None to disable. Defaults to 80.
+             locals_hide_dunder (bool, optional): Hide locals prefixed with double underscore. Defaults to True.
+             locals_hide_sunder (bool, optional): Hide locals prefixed with single underscore. Defaults to False.
++            seen (set, optional): Set of seen exceptions to prevent infinite recursion. Defaults to None.
+ 
+         Returns:
+             Trace: A Trace instance which you can use to construct a `Traceback`.
+         """
+ 
++        if seen is None:
++            seen = set()
++
++        if exc_value in seen:
++            return Trace(exc_type, exc_value, traceback)
++
++        seen.add(exc_value)
++
+         stacks: List[Stack] = []
+         is_cause = False
+ 
+@@ -471,6 +482,7 @@ class Traceback:
+                                 locals_max_length=locals_max_length,
+                                 locals_hide_dunder=locals_hide_dunder,
+                                 locals_hide_sunder=locals_hide_sunder,
++                                seen=seen,
+                             )
+                         )
+ 
