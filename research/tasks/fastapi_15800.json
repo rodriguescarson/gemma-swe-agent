@@ -1,0 +1,53 @@
+{
+  "task": "fastapi_15800",
+  "repo": "fastapi/fastapi",
+  "pr_url": "https://github.com/fastapi/fastapi/pull/15800",
+  "kind": "feature",
+  "statement_reveals_fix": "partial",
+  "gold_files": [
+    "fastapi/routing.py",
+    "fastapi/applications.py",
+    "docs_src/frontend/tutorial001_py310.py",
+    "docs_src/frontend/tutorial002_py310.py",
+    "docs_src/frontend/tutorial003_py310.py",
+    "docs_src/frontend/tutorial004_py310.py",
+    "docs_src/frontend/tutorial005_py310.py",
+    "docs_src/frontend/tutorial006_py310.py"
+  ],
+  "gold_hunks": 20,
+  "gold_lines_changed": 654,
+  "linked_issue_urls": [],
+  "new_api_names": [
+    "FastAPI.frontend",
+    "APIRouter.frontend",
+    "fallback",
+    "check_dir",
+    "APIRouter._low_priority_routes",
+    "APIRouter._frontend_routes",
+    "_FrontendRouteGroup",
+    "_FrontendRoute",
+    "_FrontendStaticFiles",
+    "_IncludedRouter.effective_low_priority_routes",
+    "APIRouter._match_low_priority"
+  ],
+  "root_cause": "New feature, not a bug. FastAPI had no built-in way to serve a static SPA build (dist/) at low priority. A plain Mount/StaticFiles is matched in route order, so it can shadow API routes, 405 partial matches and slash redirects. It also has no SPA fallback (index.html for navigation, 404.html for missing assets), and it does not follow include_router prefixes the way FastAPI's lazily built _IncludedRouter tree does.",
+  "best_solution": "Add frontend(path, *, directory, fallback='auto'|'index.html'|'404.html'|None, check_dir=True) to APIRouter, and have FastAPI.frontend delegate to self.router.frontend. The router keeps a separate _low_priority_routes list holding one _FrontendRouteGroup (stored as _frontend_routes). The group holds _FrontendRoute objects whose .app is a _FrontendStaticFiles, a StaticFiles subclass with html=True and follow_symlink=False. APIRouter.app is overridden: normal routes are tried first (FULL, then the first PARTIAL, then redirect_slashes), and only then _match_low_priority. That method walks the router's own low-priority routes plus each _IncludedRouter's effective_low_priority_routes(), which is cached by routes_version and applies the include prefix through with_prefix. When several frontends match, the longest prefix wins, matching on segment boundaries. The frontend path comes from a fastapi scope key. Behavior: GET/HEAD only (405 otherwise); a directory index redirects to add a trailing slash; the fallback 'auto' prefers 404.html (served with status 404) and otherwise serves index.html (status 200), but only for navigation requests (no file extension on the last segment, and an Accept header that allows text/html or */* without q=0). lookup errors map PermissionError to 401 and ValueError/ENAMETOOLONG to 404. check_dir raises RuntimeError('...does not exist...') for a missing directory or a missing explicit fallback file. An invalid fallback raises AssertionError mentioning 'fallback'. Frontend routes never appear in OpenAPI, and url_path_for raises NoMatchFound. docs_src/frontend/tutorial001-006_py310.py are also added, and the hidden tests run them with runpy.",
+  "acceptable_alternatives": "Any design that keeps frontend matching strictly after all normal routes (including partial matches and slash redirects) and across include_router prefixes could pass the behavioral tests. However, about 10 tests reach into private internals (app.router._frontend_routes.routes[0].app.lookup_path, route_group.with_prefix/handle/url_path_for, router._low_priority_routes plus _mark_routes_changed, and an included route exposing effective_low_priority_routes() that returns the same cached list object), and 6 parametrized tests need the docs_src/frontend/tutorial00N_py310.py files. So in practice only a near-copy of the gold structure passes everything.",
+  "hidden_test_demands": "tests/test_frontend.py, 60 test cases (47 functions, some parametrized). Public API: app.frontend(path, directory=Path|str, fallback=..., check_dir=...) and router.frontend(...) honoring the APIRouter prefix plus nested include_router prefixes, and root_path. Exact behaviors checked: an API route wins over a frontend file; a POST to an API path returns 405, not the frontend; the fallback 'auto' prefers 404.html (status 404) over index.html (status 200); the index fallback only fires for Accept text/html, xhtml or */*, respects q=0, and ignores an invalid q value; asset-like paths get no index fallback; fallback=None gives the JSON body {\"detail\":\"Not Found\"}; a directory redirects to a trailing slash; path traversal (including %5c) and symlinks cannot escape; websocket routes win; HEAD works; other methods return 405; RuntimeError match 'does not exist', 'index.html' or '404.html' when check_dir is on; AssertionError match 'fallback' for an invalid value; nothing appears in openapi. Private API: app.router._frontend_routes.routes[0].app.lookup_path (monkeypatched; PermissionError->401, ValueError->404, ENAMETOOLONG->404, other OSError propagates); _frontend_routes.matches on a websocket scope returns (Match.NONE, {}); with_prefix('/app').handle raises a 404 HTTPException; url_path_for raises NoMatchFound; router._low_priority_routes.append(Route(...)) followed by _mark_routes_changed() must be served, including through include_router; the included route's effective_low_priority_routes() must return the identical cached list on repeated calls. Files: docs_src/frontend/tutorial001..006_py310.py must exist, define app, and give the parametrized status and body results.",
+  "locating_signals": "The title names the exact public API: app.frontend(\"/\", directory=\"dist\") and router.frontend(\"/\", directory=\"dist\"), so FastAPI in fastapi/applications.py and APIRouter in fastapi/routing.py are obvious locations. The body is an empty PR template with no description. Nothing in the statement mentions fallback, check_dir, low-priority routing, the Accept-header SPA logic, the private attribute names, or the docs_src tutorial files the tests execute.",
+  "our_outcome_summary": "All four configs failed in the Kaggle env. v4 and v6 produced empty patches (268s/68 calls and 303s/36 calls). v7 (3263 chars) added frontend(self, path, directory) to FastAPI and APIRouter as a plain self.mount(path, StaticFiles(directory)). It forgot to import StaticFiles in applications.py, so every test failed with NameError (60 failed, 0 passed). It also wrote its own tests/test_frontend.py, which the hidden file overwrote. v8 (1909 chars) did the same mount-a-StaticFiles approach with imports fixed and got 13 of 60 passing. It failed on everything beyond basic file serving: no fallback or check_dir kwargs (TypeError), no low-priority ordering (a Mount at '/' shadows the 405 and slash-redirect behavior), no SPA fallback, no _low_priority_routes or _frontend_routes internals, no root_path handling, and no docs_src tutorial files.",
+  "failure_mode": "hidden_spec",
+  "generalizable_lesson": "When the statement is a bare PR title that names a new public method with only a minimal example (method(\"/\", directory=\"dist\")), expect the hidden tests to cover a whole design: extra keyword arguments with defaults, error messages, priority and ordering rules, private helper attributes, and example files under docs_src/examples that the tests execute. Mine the repo's conventions before coding. Look at how sibling features ship docs_src examples and tests that runpy them. Look at how an existing wrapper such as StaticFiles or Mount would conflict with current routing order, and build the feature as a lowest-priority fallback rather than a plain mount. Always import every name you use and run a smoke test of the exact example from the title before submitting. A single NameError turned a partial solution into 0 passed.",
+  "difficulty_5min": "infeasible",
+  "tags": [
+    "statement_is_pr_description",
+    "statement_names_new_api",
+    "title_plus_link_only",
+    "multi_file",
+    "new_function_or_param",
+    "large_feature",
+    "test_reveals_hidden_spec",
+    "exact_string_or_format_required",
+    "edge_case_logic"
+  ]
+}

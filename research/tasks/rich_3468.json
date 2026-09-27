@@ -1,0 +1,22 @@
+{
+  "task": "rich_3468",
+  "repo": "Textualize/rich",
+  "pr_url": "https://github.com/Textualize/rich/pull/3468",
+  "kind": "bugfix",
+  "statement_reveals_fix": "none",
+  "gold_files": ["rich/console.py"],
+  "gold_hunks": 4,
+  "gold_lines_changed": 42,
+  "linked_issue_urls": ["https://github.com/Textualize/rich/issues/1591"],
+  "root_cause": "Console._check_buffer wrote and flushed self.file with no BrokenPipeError handling. When stdout is piped to a reader that exits early (`python -m rich | head -1`), the write/flush raised a traceback. Catching the error is not enough: the unflushed data left in sys.stdout makes the interpreter's shutdown flush fail again ('Exception ignored ... BrokenPipeError'), so the process exits with code 120.",
+  "best_solution": "Split _check_buffer so that the write/flush body moves to a new _write_buffer(), and wrap the call as `try: self._write_buffer() except BrokenPipeError: self.on_broken_pipe()`. The new public hook Console.on_broken_pipe() follows the CPython 'note on SIGPIPE' recipe: set self.quiet = True, `devnull = os.open(os.devnull, os.O_WRONLY); os.dup2(devnull, sys.stdout.fileno())`, then `raise SystemExit(1)`. Pointing fd 1 at devnull stops the interpreter's shutdown flush from failing again, which would otherwise exit 120, and exit code 1 matches Python's normal EPIPE convention. Because the whole write path sits inside one try, both write() and flush() are covered. The other two hunks only reformat conditional expressions (black).",
+  "acceptable_alternatives": "Any handler around the whole write+flush path that redirects stdout's fd to os.devnull (or otherwise stops the shutdown flush from raising) and then exits with SystemExit(1). Catching the error and returning, or exiting with 0, fails.",
+  "hidden_test_demands": "tests/test_console.py::test_brokenpipeerror (skipped on win32) runs `python -m rich | head -1` through subprocess.Popen and asserts proc1.returncode == 1 and head returncode == 0. So the process must exit with exactly 1: no traceback that leaves the exit code at 1 by accident, no 0, and no 120 from a failed shutdown flush of sys.stdout.",
+  "locating_signals": "The statement is the terse PR body 'handle broken pipe / Handle BrokenPipe exceptions / Fixes issue 1591'. It does not name a function. The issue traceback (not in the statement) points at console.py _exit_buffer -> _check_buffer -> self.file.write. The fix recipe (dup2 devnull + sys.exit(1)) appears only in an issue comment by lmmx, which cites the Python signal docs 'note on SIGPIPE'. Grepping for self.file.write/flush in console.py finds the location.",
+  "our_outcome_summary": "All four configs (v4/v6/v7/v8) failed in the Kaggle env, each in 57-188s and 25-102 calls. Every config found the right spot (_check_buffer) and 97 other tests passed. The exit semantics were wrong each time. v4 and v8 (identical patches) added `except BrokenPipeError: return` around write() only. The later self.file.flush() still raised, and the exit code was 120. v6 raised SystemExit(0) and got 120, because the shutdown flush of sys.stdout failed again. v7 also wrapped flush() with return, but data left in the buffer still failed at interpreter shutdown, giving 120. None of them redirected fd 1 to devnull, and none exited with 1.",
+  "failure_mode": "hidden_spec",
+  "generalizable_lesson": "When handling BrokenPipeError or SIGPIPE in CLI output code, use the CPython recipe: catch around the whole write+flush path, `os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())`, then `sys.exit(1)`. Swallowing the error, or exiting with 0, leaves a buffered stdout that fails again at interpreter shutdown and exits with 120. More generally, when a statement is only 'Fixes <issue URL>', the linked issue's comments often hold the expected recipe and exit code. Verify the fix end to end with a real pipe (`python -m pkg | head -1; echo ${PIPESTATUS[0]}`), not only by reading the code.",
+  "difficulty_5min": "medium",
+  "tags": ["statement_is_pr_description", "title_plus_link_only", "needs_linked_issue_text", "test_reveals_hidden_spec", "cli_or_script", "edge_case_logic", "new_function_or_param", "env_sensitive_test", "repro_easy_from_statement"],
+  "new_api_names": ["Console.on_broken_pipe", "Console._write_buffer"]
+}
