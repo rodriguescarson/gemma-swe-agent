@@ -11,8 +11,14 @@ COMP=gemma-4-developer-agent
 mkdir -p "$(dirname "$LOG")"
 already() { "$KAGGLE" competitions submissions $COMP -v 2>/dev/null | grep -q ",\"\\?$TAG"; }
 echo "$(date -u) [$(hostname -s)] armed $KERNEL for $AT UTC (tag $TAG)" >> "$LOG"
-# wait until AT; a sleeping machine that wakes late still fires (same UTC day)
-until [ "$(date -u +%H%M)" -ge "$AT" ] 2>/dev/null; do sleep 20; done
+# Target = the NEXT occurrence of AT (UTC) after arming, as an absolute epoch; a late wake still fires, an afternoon
+# arming never fires early (2026-09-27: an HHMM ">=" check fired at 16:12 for a 00:01 target).
+TARGET=${SUBMIT_TARGET_EPOCH:-$(python3 -c 'import datetime as d, sys
+n = d.datetime.now(d.timezone.utc); a = sys.argv[1]
+t = n.replace(hour=int(a[:2]), minute=int(a[2:]), second=0, microsecond=0)
+print(int((t if t > n else t + d.timedelta(days=1)).timestamp()))' "$AT")}
+echo "$(date -u) [$(hostname -s)] target epoch $TARGET ($(python3 -c "import datetime as d,sys; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc))" "$TARGET"))" >> "$LOG"
+until [ "$(date -u +%s)" -ge "$TARGET" ]; do sleep 20; done
 for i in 1 2 3; do
   if already; then echo "$(date -u) [$(hostname -s)] $TAG already on Kaggle, skipping" >> "$LOG"; break; fi
   out=$("$KAGGLE" competitions submit $COMP -k "carsonrodrigues/$KERNEL" -v 1 -f submission.zip -m "$MSG" 2>&1 | tr "\n" " ")

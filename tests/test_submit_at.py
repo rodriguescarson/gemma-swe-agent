@@ -24,7 +24,7 @@ echo "Successfully submitted"
 def _run(tmp, existing, msg):
     fake, calls = _fake_kaggle(tmp, existing)
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M")
-    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"))
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0")
     subprocess.run(["bash", str(SCRIPT), "k", now, msg], env=env, check=True, timeout=60)
     return [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
 
@@ -35,3 +35,22 @@ def test_skips_when_tag_already_on_kaggle(tmp_path):
 
 def test_submits_once_when_absent(tmp_path):
     assert len(_run(tmp_path, ["sub2: older"], "sub3: v4 staged")) == 1
+
+
+def test_afternoon_arming_does_not_fire_early(tmp_path):
+    # regression 2026-09-27: arming at 16:12 UTC for "0001" fired immediately
+    fake, calls = _fake_kaggle(tmp_path, [])
+    past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime("%H%M")
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"))
+    env.pop("SUBMIT_TARGET_EPOCH", None)
+    p = subprocess.Popen(["bash", str(SCRIPT), "k", past, "sub9: x"], env=env)
+    try:
+        p.wait(timeout=4); fired = True
+    except subprocess.TimeoutExpired:
+        fired = False
+    finally:
+        p.kill()
+    assert not fired and not calls.exists()
+    log = (tmp_path / "log.txt").read_text()
+    target = int(log.split("target epoch ")[1].split()[0])
+    assert target - datetime.datetime.now(datetime.timezone.utc).timestamp() > 22 * 3600   # next day, ~23 h away
