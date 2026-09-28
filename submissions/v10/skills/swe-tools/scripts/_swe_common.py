@@ -1,0 +1,2105 @@
+"""swe-tools v10 shared library: paths, clock, arguments, stdin, subprocesses, output, git, hygiene and state.
+
+Stdlib only, Python 3.8 syntax. Imported by every helper right after the preamble; never run on its own. Everything
+that depends on the environment is computed lazily and cached per process, so importing this module costs little.
+"""
+import os
+import re
+import sys
+import time
+import json
+
+# ---------------------------------------------------------------------------------------------------------- constants
+VERSION = "v10.0"
+DOCKER_TMP = os.environ.get("SWE_DOCKER_TMP_FOR_TESTS") or "/tmp"
+DOCKER_WS = os.environ.get("SWE_DOCKER_WS_FOR_TESTS") or "/workspace"
+DISPLAY_SWE = "/tmp/swe"
+# The subprocess sandbox rewrites these prefixes in COMMAND TEXT (subprocess.py:432-481); unrewrite() maps them back.
+# They are display text for that inverse mapping, never opened as paths.
+SANDBOX_REWRITES = (("venv/bin", "/usr/local/bin"), ("workspace", "/workspace"), ("wheels", "/wheels"), ("tmp", "/tmp"))
+
+CAP_S = 300; T_LOCATOR = 75; T_EDIT_NOW = 150; T_FINISH = 210; T_QUICK = 235; T_TIME = 250; T_SAFE = 255
+T_VERIFY_END = 262; T_EVAL_END = 272; T_NO_EVAL = 275; T_NO_RESTORE = 285
+# End-game plan: every verify.py run ends by T_VERIFY_END; finalize's quick evaluation and verify --repro-only end by
+# T_EVAL_END (T_NO_EVAL - 3), so finalize can still restore (< T_NO_RESTORE) and the patch is submitted before CAP_S.
+# verify switches to quick mode at T_QUICK, or earlier when clock + 1.2 x last test secs + QUICK_PAD passes
+# T_VERIFY_END (QUICK_PAD covers the import check and the claims).
+QUICK_PAD = 15
+RUN_DEFAULT = 20; RUN_MAX = 90; VIEW_OBJ = 15; LOCATE_PARSE = 15; ORIGIN_PROBE = 5; VERIFY_TOTAL = 60
+IMPORT_CHECK = 10; CLAIM_TIMEOUT = 10; CLAIMS_TOTAL = 25; PYTEST_SIDE = 40; FINALIZE_QUICK = 12; MAX_PAR = 2
+CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 2800, "edit": 1500, "run": 2500,
+        "verify": 2000, "finalize": 1000, "status": 2200}
+# Output is also capped by ESTIMATED tokens (est_tokens: ASCII chars / 3 + non-ASCII chars x 2.7), so rendered tables
+# and box drawing (0.36-0.63 chars/token measured) cannot spend 3x a helper's budget. ASCII output never hits these.
+CAP_TOKENS = {k: v // 3 for k, v in CAPS.items()}
+# Context meter (state["ctx"]): estimated tokens that the current stage's tool calls added to its prompt (output,
+# model-written input, CTX_CALL per call). At CONTEXT_TOKENS the footer shows CONTEXT_HINT. tests/test_v10_prompts.py
+# (R95) derives the value: a p95 statement plus CONTEXT_TOKENS at 2.3 chars/token stays under the 14,336 compaction
+# line, and a typical first fixer round (3 views, 3 edits, 1 verify) stays below it.
+CONTEXT_TOKENS = 5500
+CTX_CALL = 30
+GIT_TIMEOUT = 10
+HELPER_LIMIT = 110          # whole-helper watchdog (s), always clamped by real_budget; timeout_seconds is 120
+
+_SH_MAX = 4 << 20           # merged child output kept by sh(), bytes
+_STDIN_MAX = 32 << 20       # read_stdin() safety cap, bytes
+_TAG = "_swegemma_baseline"
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+_HEX = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_GIT_OPTS = ["-c", "safe.directory=*", "-c", "gc.auto=0"]
+_CACHE = {}
+_LIVE = set()               # process groups of running children, killed by safe_main on any exit
+_LOG_PARTS = []             # full texts of sections cut by cap(), written to last.log
+
+FINAL_HINT = ("FINAL: the patch was finalized at t=%ds; nothing more to change. The stage that can submit should "
+              "submit now; any other stage should reply done.")
+TIME_HINT = "TIME: t>=250s. End your stage now (verifier: run finalize.py next)."
+FINISH_HINT = "FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage."
+EDIT_NOW_HINT = ("EDIT NOW: no source file changed at t>=150s. Locator: reply with your plan now. Other stages: make "
+                 "the plan's change with edit.py now.")
+LOCATOR_HINT = "LOCATOR: 75s used. Locator: stop and reply with your plan now. Other stages: ignore this line."
+CONTEXT_HINT = ("CONTEXT: this stage's context is nearly full. Locator: reply with your plan now. Fixer: make any "
+                "missing edit, then reply with your notes. Verifier: run finalize.py next.")
+REPEAT_NOTES = {
+    "run": "NOTE: same command, same output 3 times; change something.",
+    "verify": "STOP re-running verify; decide now.",
+    "locate": "NOTE: 3rd locate call; stop searching and use what you have.",
+    "grep": "NOTE: same search 3 times; use what you found.",
+    "view": "NOTE: same view 3 times; you already have these lines.",
+}
+
+
+def _reset():
+    """Test hook: forget every per-process cache."""
+    _CACHE.clear()
+    del _LOG_PARTS[:]
+
+
+def _under(path, root):
+    root = root.rstrip(os.sep) or os.sep
+    return path == root or path.startswith(root + os.sep)
+
+
+def _real(p):
+    try:
+        return os.path.realpath(p)
+    except (OSError, ValueError):
+        return os.path.abspath(p)
+
+
+def sha1_hex(data):
+    """sha1 hex digest of bytes or str (str encoded UTF-8, surrogates kept)."""
+    if isinstance(data, str):
+        data = data.encode("utf-8", "surrogateescape")
+    try:
+        from _sha1 import sha1          # the C builtin; avoids the ~10 ms OpenSSL import of hashlib
+    except ImportError:
+        from hashlib import sha1
+    return sha1(data or b"").hexdigest()
+
+
+def _atomic_write(path, data, mode=0o644):
+    """Write bytes or str to path via a temp file and os.replace (readers never see a partial file)."""
+    if isinstance(data, str):
+        data = data.encode("utf-8", "surrogateescape")
+    tmp = "%s.tmp.%d" % (path, os.getpid())
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        _write_all(fd, data)
+    finally:
+        os.close(fd)
+    try:
+        os.chmod(tmp, mode)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+
+
+def _write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        view = view[n:]
+
+
+# -------------------------------------------------------------------------------------------------------------- paths
+def in_rewriting_sandbox():
+    """True inside the harness subprocess sandbox, whose TMPDIR/TEST_TMPDIR is <root>/tmp with a swegemma_sandbox_* root."""
+    return _sandbox_root() is not None
+
+
+def _sandbox_root():
+    for k in ("TEST_TMPDIR", "TMPDIR"):
+        v = (os.environ.get(k) or "").rstrip(os.sep)
+        if v and os.path.basename(v) == "tmp" and os.path.basename(os.path.dirname(v)).startswith("swegemma_sandbox_"):
+            return os.path.dirname(v)
+    return None
+
+
+def _primary_swe():
+    e = os.environ
+    if e.get("SWE_DIR"):
+        return os.path.abspath(e["SWE_DIR"])
+    for k in ("TEST_TMPDIR", "TMPDIR"):
+        if e.get(k):
+            return os.path.join(os.path.abspath(e[k]), "swe")
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "swe")
+
+
+def swe_dir():
+    """The per-task helper dir: this file's dir once installed (it holds VERSION), else $SWE_DIR, $TEST_TMPDIR/swe,
+    $TMPDIR/swe, then tempfile.gettempdir()/swe. Created on first use."""
+    d = _CACHE.get("swe")
+    if d:
+        return d
+    d = _HERE if os.path.isfile(os.path.join(_HERE, "VERSION")) else _primary_swe()
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    _CACHE["swe"] = d
+    return d
+
+
+def install_targets():
+    """The primary install dir, plus DOCKER_TMP/swe when the command text is not rewritten (TEST_TMPDIR unset, not the
+    rewriting sandbox, SWE_DUAL not 0, SWE_DIR unset), the path differs and DOCKER_TMP is writable."""
+    prim = _primary_swe()
+    out = [prim]
+    e = os.environ
+    if e.get("TEST_TMPDIR") or e.get("SWE_DIR") or in_rewriting_sandbox() or e.get("SWE_DUAL", "1") == "0":
+        return out
+    dual = os.path.join(DOCKER_TMP, "swe")
+    if _real(dual) != _real(prim) and os.path.isdir(DOCKER_TMP) and os.access(DOCKER_TMP, os.W_OK):
+        out.append(dual)
+    return out
+
+
+def _git_root(cand, sd, bounds):
+    d = os.path.abspath(cand)
+    rd = _real(d)
+    if _under(rd, sd):
+        return None
+    stop = None
+    for b in bounds:                    # never walk up out of TMPDIR (the skill wrapper's temp dir lives there)
+        if _under(rd, b) and (stop is None or len(b) > len(stop)):
+            stop = b
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            r = _real(d)
+            return None if _under(r, sd) else r
+        if stop is not None and _real(d) == stop:
+            return None
+        p = os.path.dirname(d)
+        if p == d:
+            return None
+        d = p
+
+
+def ws():
+    """The repository root: $SWE_WS, else the first git root above cwd, $PWD, $SWE_PATH0, then /workspace (only when it
+    has .git); paths under swe_dir() are skipped. Falls back to the cwd. Cached per process."""
+    w = _CACHE.get("ws")
+    if w:
+        return w
+    e = os.environ
+    if e.get("SWE_WS") and os.path.isdir(e["SWE_WS"]):
+        w = _real(e["SWE_WS"])
+    else:
+        sd = _real(swe_dir())
+        bounds = [_real(e[k]) for k in ("TMPDIR", "TEST_TMPDIR") if e.get(k)]
+        try:
+            cwd = os.getcwd()
+        except OSError:
+            cwd = ""
+        for c in (cwd, e.get("PWD"), e.get("SWE_PATH0")):
+            if c:
+                w = _git_root(c, sd, bounds)
+                if w:
+                    break
+        if not w and os.path.exists(os.path.join(DOCKER_WS, ".git")) and not _under(_real(DOCKER_WS), sd):
+            w = _real(DOCKER_WS)
+        if not w:
+            w = _real(cwd or ".")
+    _CACHE["ws"] = w
+    return w
+
+
+def rel(path):
+    """Path relative to ws() with / separators ('' when outside)."""
+    r = _real(path if os.path.isabs(path) else os.path.join(ws(), path))
+    w = ws()
+    if not _under(r, w):
+        return ""
+    return os.path.relpath(r, w).replace(os.sep, "/")
+
+
+def git_dir():
+    g = _CACHE.get("gitdir", 0)
+    if g == 0:
+        p = os.path.join(ws(), ".git")
+        g = p if os.path.isdir(p) else None
+        _CACHE["gitdir"] = g
+    return g
+
+
+# ---------------------------------------------------------------------------------------------------------------- git
+def _clamp(timeout):
+    """timeout, cut to real_budget() once the task clock is known (never earlier: the clock itself needs git)."""
+    t = max(0.1, float(timeout))
+    if os.environ.get("SWE_FAKE_CLOCK") or "t0" in _CACHE:
+        try:
+            return min(t, real_budget(t))
+        except Exception:
+            pass
+    return t
+
+
+def git_run(args, timeout=GIT_TIMEOUT, env=None, cwd=None, input=None, quotepath_off=True):
+    """Run git in ws() -> (rc | None on timeout, stdout bytes, stderr bytes). New session, killpg on timeout, no
+    optional index writes (GIT_OPTIONAL_LOCKS=0)."""
+    import subprocess
+    argv = ["git"] + (["-c", "core.quotepath=off"] if quotepath_off else []) + _GIT_OPTS + [str(a) for a in args]
+    e = dict(os.environ if env is None else env)
+    e["GIT_OPTIONAL_LOCKS"] = "0"
+    e["GIT_TERMINAL_PROMPT"] = "0"
+    try:
+        p = subprocess.Popen(argv, cwd=cwd or ws(), env=e, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+    except OSError as ex:
+        return 127, b"", str(ex).encode()
+    _LIVE.add(p.pid)
+    try:
+        try:
+            out, err = p.communicate(input, timeout=_clamp(timeout))
+            rc = p.returncode
+        except subprocess.TimeoutExpired:
+            _killpg(p.pid)
+            try:
+                out, err = p.communicate(timeout=2)
+            except Exception:
+                out, err = b"", b""
+            rc = None
+    finally:
+        _killpg(p.pid)
+        _LIVE.discard(p.pid)
+    return rc, out or b"", err or b""
+
+
+def git(args, timeout=GIT_TIMEOUT, env=None, cwd=None):
+    """git -c core.quotepath=off <args> in ws() -> (rc | None, text). The text is stdout; on failure stderr is appended."""
+    rc, out, err = git_run(args, timeout, env=env, cwd=cwd)
+    text = out.decode("utf-8", "surrogateescape")
+    if rc != 0:
+        text += err.decode("utf-8", "replace")
+    return rc, text
+
+
+def _tag_sha():
+    if "tag" in _CACHE:
+        return _CACHE["tag"]
+    sha = None
+    gd = git_dir()
+    if gd:
+        try:
+            with open(os.path.join(gd, "refs", "tags", _TAG)) as f:
+                s = f.read().strip()
+            if _HEX.match(s) and _loose_type(s) in (None, "commit"):
+                sha = s
+        except OSError:
+            pass
+    if sha is None:
+        rc, out = git(["rev-parse", "-q", "--verify", "refs/tags/%s^{commit}" % _TAG])
+        s = out.strip() if rc == 0 else ""
+        sha = s if _HEX.match(s) else None
+    _CACHE["tag"] = sha
+    return sha
+
+
+def _loose(sha):
+    """(type, body) of a loose object, or None when it is packed/unreadable."""
+    gd = git_dir()
+    if not gd or not sha:
+        return None
+    try:
+        import zlib
+        with open(os.path.join(gd, "objects", sha[:2], sha[2:]), "rb") as f:
+            raw = zlib.decompress(f.read())
+        head, _, body = raw.partition(b"\0")
+        return head.split(b" ")[0].decode("ascii", "replace"), body
+    except Exception:
+        return None
+
+
+def _loose_type(sha):
+    o = _loose(sha)
+    return o[0] if o else None
+
+
+def baseline():
+    """The _swegemma_baseline commit (what the patch is diffed against); without the tag, HEAD recorded at the first
+    call (kept in state.json). Cached per process."""
+    b = _CACHE.get("base")
+    if b:
+        return b
+    b = _tag_sha()
+    if not b:
+        st = _read_state_raw()
+        if st.get("baseline") and st.get("ws") == ws():
+            b = st["baseline"]
+        else:
+            rc, out = git(["rev-parse", "-q", "--verify", "HEAD^{commit}"])
+            b = out.strip() if rc == 0 and _HEX.match(out.strip()) else _EMPTY_TREE
+            _CACHE["base"] = b
+            if not _CACHE.get("locked"):        # inside state_update, _fill() records it (flock is not re-entrant)
+                try:
+                    state_update(lambda s: None)
+                except Exception:
+                    pass
+    _CACHE["base"] = b
+    return b
+
+
+def _commit_time(sha):
+    o = _loose(sha)
+    if o and o[0] == "commit":
+        m = re.search(rb"^committer .* (\d+) [+-]\d{4}\s*$", o[1], re.M)
+        if m:
+            return int(m.group(1))
+    if not sha or sha == _EMPTY_TREE:
+        return None
+    rc, out = git(["log", "-1", "--format=%ct", sha])
+    try:
+        return int(out.strip()) if rc == 0 else None
+    except ValueError:
+        return None
+
+
+# -------------------------------------------------------------------------------------------------------------- clock
+def clock_scale():
+    """float($SWE/clock_scale) clamped to 0.2..5 (the pod L4 hook; never present on Kaggle), else 1.0."""
+    s = _CACHE.get("scale")
+    if s is None:
+        s = 1.0
+        try:
+            with open(os.path.join(swe_dir(), "clock_scale")) as f:
+                v = float(f.read().strip())
+            if v == v:                   # not NaN
+                s = min(5.0, max(0.2, v))
+        except (OSError, ValueError):
+            pass
+        _CACHE["scale"] = s
+    return s
+
+
+def _t0_file():
+    """$SWE/t0, written once (by the first helper or install) and read afterwards."""
+    path = os.path.join(swe_dir(), "t0")
+    try:
+        with open(path) as f:
+            return float(f.read().strip())
+    except (OSError, ValueError):
+        pass
+    now = time.time()
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+        try:
+            os.write(fd, repr(now).encode())
+        finally:
+            os.close(fd)
+    except FileExistsError:
+        try:
+            with open(path) as f:
+                return float(f.read().strip())
+        except (OSError, ValueError):
+            pass
+    except OSError:
+        pass
+    return now
+
+
+def t0():
+    """Task start (epoch s): the baseline's committer time, else the tag file mtime, each only when 0-900 s ago, else
+    $SWE/t0."""
+    v = _CACHE.get("t0")
+    if v is not None:
+        return v
+    now = time.time()
+    tf = _t0_file()
+    ct = _commit_time(baseline())
+    if ct is not None and -5 <= now - ct <= 900:
+        v = float(ct)
+    else:
+        v = None
+        gd = git_dir()
+        if gd:
+            try:
+                m = os.stat(os.path.join(gd, "refs", "tags", _TAG)).st_mtime
+                if -5 <= now - m <= 900:
+                    v = m
+            except OSError:
+                pass
+        if v is None:
+            v = tf
+    _CACHE["t0"] = v
+    return v
+
+
+def clock():
+    """Seconds of task time used: $SWE_FAKE_CLOCK when set, else (now - t0) * clock_scale."""
+    f = os.environ.get("SWE_FAKE_CLOCK")
+    if f:
+        try:
+            return float(f)
+        except ValueError:
+            pass
+    return max(0.0, (time.time() - t0()) * clock_scale())
+
+
+def real_budget(default_s):
+    """Real seconds a helper may spend: min(default, max(1, (300 - clock)/scale - 4))."""
+    return min(float(default_s), max(1.0, (CAP_S - clock()) / clock_scale() - 4.0))
+
+
+# -------------------------------------------------------------------------------------------------------------- state
+_HELD = set()
+
+
+class _Flock(object):
+    """Exclusive flock on $SWE/<name>, re-entrant within a process (flock itself is not: a second fd would block);
+    a no-op where fcntl is missing."""
+
+    def __init__(self, name="state.lock"):
+        self.name, self.fd, self.outer = name, None, False
+
+    def __enter__(self):
+        if self.name in _HELD:
+            return self
+        self.outer = True
+        _HELD.add(self.name)
+        try:
+            import fcntl
+            self.fd = os.open(os.path.join(swe_dir(), self.name), os.O_RDWR | os.O_CREAT, 0o644)
+            fcntl.flock(self.fd, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        if not self.outer:
+            return False
+        _HELD.discard(self.name)
+        self.outer = False
+        if self.fd is not None:
+            try:
+                import fcntl
+                fcntl.flock(self.fd, fcntl.LOCK_UN)
+            except (ImportError, OSError):
+                pass
+            os.close(self.fd)
+            self.fd = None
+        return False
+
+
+def _defaults():
+    return {"version": VERSION, "ws": None, "baseline": None, "t0": None, "final_done": False, "final_sha": None,
+            "final_t": None, "origin": {}, "base": {}, "memo": {}, "repeats": {}, "repro": {}, "orig_tests": {},
+            "last_test_secs": None, "pytest_mask": None, "ckpts": [], "edits": [], "views": {}, "locate_calls": 0}
+
+
+def _with_defaults(st):
+    d = _defaults()
+    for k, v in d.items():
+        if k not in st or (isinstance(v, (dict, list)) and not isinstance(st.get(k), type(v))):
+            st[k] = v
+    return st
+
+
+def _read_state_raw():
+    try:
+        with open(os.path.join(swe_dir(), "state.json"), "rb") as f:
+            st = json.loads(f.read().decode("utf-8", "replace"))
+        return st if isinstance(st, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _mismatch(st):
+    if st.get("ws") and st["ws"] != ws():
+        return True
+    tag = _tag_sha()
+    return bool(tag and st.get("baseline") and st["baseline"] != tag)
+
+
+def _reset_task_files():
+    """A different task (ws or baseline changed): drop state, journal, caches, repro and checkpoints."""
+    import shutil
+    sd = swe_dir()
+    try:
+        names = os.listdir(sd)
+    except OSError:
+        return
+    drop = {"state.json", "journal.jsonl", "repro.py", "idx", "j_orig.xml", "j_cur.xml", "t0"}
+    for n in names:
+        p = os.path.join(sd, n)
+        if n in drop or n.startswith("index_") and n.endswith(".marshal"):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        elif n in ("claims", "ckpt", "base", "rt_orig", "rt_cur"):
+            shutil.rmtree(p, ignore_errors=True)
+    for k in ("t0", "scale"):
+        _CACHE.pop(k, None)
+
+
+def _fill(st):
+    if not st.get("ws"):
+        st["ws"] = ws()
+    if not st.get("baseline"):
+        st["baseline"] = baseline()
+    if st.get("t0") is None and not os.environ.get("SWE_FAKE_CLOCK"):
+        try:
+            st["t0"] = round(t0(), 3)
+        except Exception:
+            pass
+    return st
+
+
+def state_load():
+    """The task state (section 4.16 schema, defaults filled). A state from another ws/baseline is reset first."""
+    st = _read_state_raw()
+    if st and _mismatch(st):
+        return state_update(lambda s: None)
+    return _with_defaults(st)
+
+
+def state_update(fn):
+    """Load, fn(state) (mutate in place or return a new dict), write atomically, all under flock. Returns the state."""
+    with _Flock():
+        _CACHE["locked"] = True
+        try:
+            st = _read_state_raw()
+            if st and _mismatch(st):
+                _reset_task_files()
+                st = {}
+            st = _with_defaults(st)
+            r = fn(st)
+            if isinstance(r, dict):
+                st = _with_defaults(r)
+            _fill(st)
+            _atomic_write(os.path.join(swe_dir(), "state.json"), json.dumps(st, default=str, sort_keys=True))
+        finally:
+            _CACHE["locked"] = False
+    return st
+
+
+VIEWS_KEPT = 60                      # per file, as view.py keeps them
+
+
+def record_views(items, derived=True):
+    """Record line ranges this helper just PRINTED with their current numbers (grep hits, locate symbol spans, verify
+    SIBLINGS and IMPORT file:line) as views in state["views"], one state update for all: edit.py's STALE guard then
+    sees that numbers taken from this output are current. items: (rel path, a, b). Derived views carry a 4th field "d"
+    (a line seen in a search result rather than a view.py range); edit.py treats them as weaker evidence."""
+    rows = {}
+    for rel, a, b in items or ():
+        try:
+            a, b = int(a), int(b)
+        except (TypeError, ValueError):
+            continue
+        if rel and 0 < a <= b:
+            rows.setdefault(str(rel), []).append((a, b))
+    if not rows:
+        return
+    t = round(float(clock()), 1)
+
+    def fn(s):
+        vv = s.get("views")
+        if not isinstance(vv, dict):
+            vv = s["views"] = {}
+        for rel, spans in rows.items():
+            lst = vv.get(rel)
+            if not isinstance(lst, list):
+                lst = vv[rel] = []
+            seen = set()
+            for a, b in spans:
+                if (a, b) not in seen:
+                    seen.add((a, b))
+                    lst.append([a, b, t, "d"] if derived else [a, b, t])
+            del lst[:-VIEWS_KEPT]
+        return s
+    try:
+        state_update(fn)
+    except Exception:
+        pass
+
+
+# ------------------------------------------------------------------------------------------------------------ journal
+def journal(event):
+    """Append one JSON line to $SWE/journal.jsonl (t = task seconds added when absent)."""
+    ev = dict(event or {})
+    if "t" not in ev:
+        try:
+            ev["t"] = round(clock(), 1)
+        except Exception:
+            ev["t"] = None
+    line = (json.dumps(ev, ensure_ascii=False, default=str) + "\n").encode("utf-8", "replace")
+    try:
+        fd = os.open(os.path.join(swe_dir(), "journal.jsonl"), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+        try:
+            os.write(fd, line)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
+
+
+def journal_entries(max_bytes=262144):
+    """Parsed journal entries from the last max_bytes of the file (oldest first)."""
+    try:
+        with open(os.path.join(swe_dir(), "journal.jsonl"), "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - max_bytes))
+            data = f.read().decode("utf-8", "replace")
+    except OSError:
+        return []
+    lines = data.split("\n")
+    if size > max_bytes:
+        lines = lines[1:]
+    out = []
+    for ln in lines:
+        if ln.strip():
+            try:
+                e = json.loads(ln)
+            except ValueError:
+                continue
+            if isinstance(e, dict):
+                out.append(e)
+    return out
+
+
+def _short(s, n):
+    s = " ".join(str(s).split())
+    return s if len(s) <= n else s[:n - 3] + "..."
+
+
+def render_event(e):
+    """One short line for a journal entry (prefers its 'msg')."""
+    h = str(e.get("h") or "?")
+    t = e.get("t")
+    ts = "t=%ds " % int(t) if isinstance(t, (int, float)) else ""
+    if e.get("msg"):
+        body = str(e["msg"])
+        if not body.startswith(h):
+            body = "%s: %s" % (h, body)
+    elif h == "edit":
+        body = "edit %s %s" % (e.get("file", "?"), "OK" if e.get("ok") else "FAILED")
+        if e.get("tier"):
+            body += " (%s)" % e["tier"]
+        if e.get("start") is not None and e.get("end") is not None:
+            body += " lines %s-%s" % (e["start"], e["end"])
+        if isinstance(e.get("delta"), int) and e["delta"]:
+            body += " (%+d)" % e["delta"]
+        if not e.get("ok") and e.get("why"):
+            body += " %s" % e["why"]
+    elif h == "locate" and e.get("files") is not None:
+        body = "locate: %s files%s" % (e["files"], " (top %s)" % e["top"] if e.get("top") else "")
+    elif e.get("first"):
+        body = "%s: %s" % (h, e["first"])
+    elif e.get("verdict"):
+        body = "%s: %s" % (h, e["verdict"])
+    else:
+        kv = ["%s=%s" % (k, v) for k, v in sorted(e.items()) if k not in ("h", "t", "ts") and isinstance(v, (str, int, float, bool))]
+        body = "%s: %s" % (h, " ".join(kv)) if kv else h
+    return _short(ts + body, 140)
+
+
+def jtail(n=8):
+    """Rendered last n journal entries (list of str)."""
+    return [render_event(e) for e in journal_entries()[-n:]] if n > 0 else []
+
+
+def repeat_note(helper, key):
+    """Count sha1(helper, key) in state.repeats; from the third time on return the helper's repeat note, else ''."""
+    k = sha1_hex("%s\0%s" % (helper, key))[:16]
+    box = {}
+
+    def bump(s):
+        s["repeats"][k] = int(s["repeats"].get(k) or 0) + 1
+        box["n"] = s["repeats"][k]
+    try:
+        state_update(bump)
+    except Exception:
+        return ""
+    if box.get("n", 0) >= 3:
+        return REPEAT_NOTES.get(helper, "NOTE: same %s call, same result 3 times; change something." % helper)
+    return ""
+
+
+# ---------------------------------------------------------------------------------------------------------- arguments
+class UsageError(Exception):
+    """Bad command line; safe_main prints the message (one line) and the script exits 0."""
+
+
+class Span(tuple):
+    """An inclusive line range (A, B) parsed from 'A-B'; str() gives 'A-B'."""
+
+    def __new__(cls, a, b):
+        return tuple.__new__(cls, (a, b))
+
+    def __str__(self):
+        return "%d-%d" % (self[0], self[1])
+
+    def split(self, *a, **k):
+        return str(self).split(*a, **k)
+
+
+class Args(dict):
+    """parse_args result: a dict keyed by flag name (dash form) that also answers to the underscore form and to
+    attribute access. Extra keys: '_' (unassigned positionals), '_given' (names set on the command line), '_notes',
+    '_bad' (raw values that did not convert), '_unknown' (ignored unknown flags when strict=False)."""
+
+    @staticmethod
+    def _k(k):
+        return k.replace("_", "-") if isinstance(k, str) and not k.startswith("_") else k
+
+    def __getitem__(self, k):
+        return dict.__getitem__(self, self._k(k))
+
+    def __setitem__(self, k, v):
+        dict.__setitem__(self, self._k(k), v)
+
+    def __contains__(self, k):
+        return dict.__contains__(self, self._k(k))
+
+    def get(self, k, d=None):
+        return dict.get(self, self._k(k), d)
+
+    def pop(self, k, *d):
+        return dict.pop(self, self._k(k), *d)
+
+    def __getattr__(self, k):
+        try:
+            return self[k]
+        except KeyError:
+            raise AttributeError(k)
+
+
+_FLAG = re.compile(r"^--([A-Za-z][A-Za-z0-9_-]*)(?:=(.*))?$", re.S)
+_BOOLS = {"1": True, "true": True, "yes": True, "on": True, "0": False, "false": False, "no": False, "off": False}
+_INT = re.compile(r"^\s*([+-]?\d+)(?:\.0*)?\s*s?\s*$")
+_RANGE = re.compile(r"^\s*L?(\d+)\s*(?:(?:-|:|,|\.\.|\s+|to)\s*L?(\d+))?\s*$", re.I)
+
+
+def _norm_flag(name):
+    return name.lower().replace("_", "-")
+
+
+def _main_usage():
+    return str(getattr(sys.modules.get("__main__"), "USAGE", "") or "")
+
+
+def _split_list(vals):
+    out = []
+    for v in vals:
+        s = str(v).strip()
+        if len(s) > 1 and s[0] == "[" and s[-1] == "]":          # the skill wrapper passes str(list)
+            try:
+                import ast
+                lit = ast.literal_eval(s)
+                if isinstance(lit, (list, tuple)):
+                    out.extend(str(x) for x in lit)
+                    continue
+            except (ValueError, SyntaxError):
+                pass
+        cur, depth = [], 0
+        for ch in s:
+            if ch in "[({":
+                depth += 1
+            elif ch in "])}" and depth:
+                depth -= 1
+            if depth == 0 and (ch == "," or ch.isspace()):
+                if cur:
+                    out.append("".join(cur))
+                cur = []
+                continue
+            cur.append(ch)
+        if cur:
+            out.append("".join(cur))
+    return [x for x in out if x]
+
+
+def _coerce(name, kind, raw, res, is_flag):
+    """Typed value, or: int/float -> None (flag) / raw str (positional); range -> raw str. Failures noted in _bad."""
+    s = str(raw)
+    if kind == "int":
+        m = _INT.match(s)
+        if m:
+            return int(m.group(1))
+    elif kind == "float":
+        try:
+            return float(s.strip().rstrip("s"))
+        except ValueError:
+            pass
+    elif kind == "range":
+        m = _RANGE.match(s)
+        if m:
+            a = int(m.group(1))
+            return Span(a, int(m.group(2)) if m.group(2) else a)
+    elif kind == "bool":
+        v = _BOOLS.get(s.strip().lower())
+        return True if v is None else v
+    else:
+        return s
+    res["_bad"][name] = s
+    what = {"int": "an integer", "float": "a number", "range": "a line range like 120-135"}.get(kind, kind)
+    res["_notes"].append("--%s must be %s" % (name, what))
+    if kind == "range" or not is_flag:
+        return s
+    return None
+
+
+def parse_args(argv, flags, positionals=(), usage=None, strict=True, interspersed=True):
+    """Parse helper arguments -> Args.
+
+    flags: {name: kind}, kind in str/int/float/bool/range/list. Accepted: --k v, --k=v, bare booleans or booleans
+    followed by 1/0/true/false/yes/no/on/off (any case), list flags taking values until the next --x (a string with
+    spaces/commas or a str(list) is split). A bare -- is ignored. positionals: names given to the positional words in
+    order, skipping names already set by a flag; a name ending in * takes all remaining words joined by spaces.
+    Unknown flags raise UsageError (strict) or land in _unknown. interspersed=False: the first positional word ends
+    flag parsing (run.py commands)."""
+    flags = dict((_norm_flag(k), v) for k, v in (flags or {}).items())
+    usage = usage if usage is not None else _main_usage()
+    res = Args()
+    for k, kind in flags.items():
+        res[k] = False if kind == "bool" else [] if kind == "list" else None
+    for k in ("_", "_notes", "_unknown"):
+        dict.__setitem__(res, k, [])
+    dict.__setitem__(res, "_given", set())
+    dict.__setitem__(res, "_bad", {})
+    toks = [str(t) for t in (argv or [])]
+    pos, i, done = [], 0, False
+
+    def is_known_flag(tok):
+        m = _FLAG.match(tok)
+        return bool(m) and _norm_flag(m.group(1)) in flags
+
+    while i < len(toks):
+        t = toks[i]
+        i += 1
+        if t == "--":
+            continue
+        m = None if done else _FLAG.match(t)
+        if not m:
+            pos.append(t)
+            if not interspersed:
+                done = True
+            continue
+        name, inline = _norm_flag(m.group(1)), m.group(2)
+        kind = flags.get(name)
+        if kind is None:
+            if strict:
+                raise UsageError("USAGE ERROR: unknown option --%s. Usage: %s" % (m.group(1), usage))
+            res["_unknown"].append(t)
+            continue
+        res["_given"].add(name)
+        if kind == "bool":
+            if inline is not None:
+                res[name] = _coerce(name, kind, inline, res, True)
+            elif i < len(toks) and toks[i].strip().lower() in _BOOLS:
+                res[name] = _BOOLS[toks[i].strip().lower()]
+                i += 1
+            else:
+                res[name] = True
+        elif kind == "list":
+            vals = [inline] if inline is not None else []
+            if inline is None:
+                while i < len(toks) and toks[i] != "--" and not _FLAG.match(toks[i]):
+                    vals.append(toks[i])
+                    i += 1
+            res[name] = list(res.get(name) or []) + _split_list(vals)
+        else:
+            if inline is None:
+                if i < len(toks) and not is_known_flag(toks[i]) and toks[i] != "--":
+                    inline = toks[i]
+                    i += 1
+                else:
+                    raise UsageError("USAGE ERROR: --%s needs a value. Usage: %s" % (name, usage))
+            res[name] = _coerce(name, kind, inline, res, True)
+    names = list(positionals or ())
+    rest, pi = [], 0
+    for j, v in enumerate(pos):
+        while pi < len(names) and _norm_flag(names[pi].rstrip("*")) in res["_given"]:
+            pi += 1
+        if pi >= len(names):
+            rest.append(v)
+            continue
+        raw = names[pi]
+        n = _norm_flag(raw.rstrip("*"))
+        kind = flags.get(n, "str")
+        if raw.endswith("*"):
+            words = pos[j:]
+            res[n] = _split_list(words) if kind == "list" else " ".join(words)
+            res["_given"].add(n)
+            break
+        res[n] = _coerce(n, kind, v, res, False) if kind not in ("str", "list") else ([v] if kind == "list" else v)
+        res["_given"].add(n)
+        pi += 1
+    dict.__setitem__(res, "_", rest)
+    return res
+
+
+def input_text(opts):
+    """The text a helper works on: --text when given (normalised like stdin), else read_stdin()."""
+    v = opts.get("text") if opts is not None else None
+    if v is not None and v is not False:
+        return _normalize_text(str(v))     # --text is part of argv, which the context meter already counts
+    return read_stdin()
+
+
+# -------------------------------------------------------------------------------------------------------------- stdin
+_JUNK = re.compile(r"^\s*(?:(?:SWE_)?EOF\W*|`+)\s*$")
+
+
+def _normalize_text(text):
+    """CRLF -> LF; strip trailing heredoc junk lines (EOF, SWE_EOF, EOF., lone backticks)."""
+    text = text.replace("\r\n", "\n")
+    lines = text.split("\n")
+    for _ in range(4):
+        j = len(lines) - 1
+        while j >= 0 and not lines[j].strip():
+            j -= 1
+        if j < 0 or not _JUNK.match(lines[j]):
+            break
+        lines = lines[:j] + [""]
+    return "\n".join(lines)
+
+
+def read_stdin(idle=1.0):
+    """stdin text, never blocking: '' for a TTY, a closed stdin, /dev/null or any char device, and when nothing is
+    readable within idle seconds; otherwise everything up to EOF (normalised by _normalize_text)."""
+    try:
+        fd = sys.stdin.fileno() if sys.stdin is not None else 0
+    except (AttributeError, ValueError, OSError):
+        fd = 0
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return ""
+    try:
+        if os.isatty(fd):
+            return ""
+    except OSError:
+        return ""
+    import stat as _stat
+    if _stat.S_ISCHR(st.st_mode):
+        return ""
+    import select
+    chunks, total = [], 0
+    end = time.monotonic() + 20.0
+    while True:
+        try:
+            r = select.select([fd], [], [], idle)[0]
+        except (OSError, ValueError):
+            break
+        if not r:
+            break
+        try:
+            b = os.read(fd, 1 << 16)
+        except OSError:
+            break
+        if not b:
+            break
+        chunks.append(b)
+        total += len(b)
+        if total >= _STDIN_MAX or time.monotonic() > end:
+            break
+    if not chunks:
+        return ""
+    text = _normalize_text(b"".join(chunks).decode("utf-8", "surrogateescape"))
+    _CACHE["in_stdin"] = est_tokens(text)          # the heredoc the model wrote: part of the stage's prompt
+    return text
+
+
+# ------------------------------------------------------------------------------------------------------- subprocesses
+def _killpg(pgid):
+    try:
+        import signal
+        os.killpg(pgid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError, AttributeError):
+        pass
+
+
+def _shell():
+    b = _CACHE.get("bash")
+    if b is None:
+        b = "/bin/bash" if os.path.exists("/bin/bash") else "sh"
+        _CACHE["bash"] = b
+    return b
+
+
+def sh(cmd, timeout, cwd=None, env=None):
+    """Run argv (list) or a bash command string -> (rc | None on timeout, merged output text).
+
+    New session, stdin /dev/null, output capped at 4 MB (decoded UTF-8, errors replaced). On the deadline the whole
+    process group is SIGKILLed and the partial output returned; on a normal exit the group is killed too, so
+    background children never outlive the call (a child that exited but left a background process holding the pipe
+    returns within ~0.3 s)."""
+    import subprocess
+    import select
+    argv = [_shell(), "-c", cmd] if isinstance(cmd, str) else [str(a) for a in cmd]
+    try:
+        p = subprocess.Popen(argv, cwd=cwd or ws(), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as ex:
+        return 127, "cannot run %s: %s" % (argv[0], ex)
+    _LIVE.add(p.pid)
+    fd = p.stdout.fileno()
+    buf, n, over, timed_out, exited = [], 0, False, False, None
+    end = time.monotonic() + _clamp(timeout)
+    try:
+        while True:
+            now = time.monotonic()
+            if now >= end:
+                timed_out = True
+                break
+            if exited is None and p.poll() is not None:
+                exited = now
+            if exited is not None and now - exited > 0.3:
+                break
+            r = select.select([fd], [], [], min(end - now, 0.05 if exited is not None else 0.1))[0]
+            if not r:
+                continue
+            b = os.read(fd, 65536)
+            if not b:
+                break
+            if n < _SH_MAX:
+                b = b[:_SH_MAX - n]
+                buf.append(b)
+                n += len(b)
+            else:
+                over = True
+    finally:
+        _killpg(p.pid)
+        if timed_out:
+            stop = time.monotonic() + 0.5
+            try:
+                while time.monotonic() < stop:
+                    r = select.select([fd], [], [], 0.05)[0]
+                    if not r:
+                        continue
+                    b = os.read(fd, 65536)
+                    if not b:
+                        break
+                    if n < _SH_MAX:
+                        buf.append(b[:_SH_MAX - n])
+                        n += len(buf[-1])
+            except (OSError, ValueError):
+                pass
+        try:
+            p.wait(timeout=2)
+        except Exception:
+            pass
+        try:
+            p.stdout.close()
+        except Exception:
+            pass
+        _LIVE.discard(p.pid)
+    text = b"".join(buf).decode("utf-8", "replace")
+    if over:
+        text += "\n... [output cut at 4 MB]"
+    return (None if timed_out else p.returncode), text
+
+
+def sh_many(jobs, deadline, par=None):
+    """Run jobs with at most MAX_PAR (or par, if smaller) at once, all within `deadline` seconds from now.
+    A job is a command (str or argv list), a tuple (cmd, timeout[, cwd[, env]]) or a dict(cmd=, timeout=, cwd=, env=).
+    Returns [(rc | None, text)] in job order; a job that cannot start in time gives (None, 'not run: no time left')."""
+    import threading
+    end = time.monotonic() + float(deadline)
+    jobs = list(jobs)
+    res = [None] * len(jobs)
+    nxt = [0]
+    lock = threading.Lock()
+
+    def unpack(j):
+        if isinstance(j, dict):
+            return j.get("cmd") or j.get("argv"), j.get("timeout"), j.get("cwd"), j.get("env")
+        if isinstance(j, tuple):
+            j = list(j) + [None] * 3
+            return j[0], j[1], j[2], j[3]
+        return j, None, None, None
+
+    def worker():
+        while True:
+            with lock:
+                i = nxt[0]
+                nxt[0] += 1
+            if i >= len(jobs):
+                return
+            cmd, t, cwd, env = unpack(jobs[i])
+            rem = end - time.monotonic()
+            if rem <= 0.05:
+                res[i] = (None, "not run: no time left")
+                continue
+            res[i] = sh(cmd, min(float(t), rem) if t else rem, cwd=cwd, env=env)
+
+    k = max(1, min(MAX_PAR, par or MAX_PAR, len(jobs)))
+    threads = [threading.Thread(target=worker) for _ in range(k)]
+    for th in threads:
+        th.daemon = True
+        th.start()
+    for th in threads:
+        th.join()
+    return res
+
+
+# ------------------------------------------------------------------------------------------------------ git: the tree
+_SCRATCH_ROOT = re.compile(r"^(repro|reproduce|scratch|debug|tmp|temp|try|demo)", re.I)
+
+
+def _skip_path(p):
+    b = p.rsplit("/", 1)[-1]
+    return not p or b.startswith(".adk_exec_") or "/__pycache__/" in "/" + p or p.endswith(".pyc")
+
+
+# Tracked root-level scripts that do not make the repository a root-module layout.
+_ROOT_SCRIPTS = frozenset(("setup.py", "conftest.py", "noxfile.py", "fabfile.py", "tasks.py", "manage.py",
+                           "runtests.py", "versioneer.py"))
+
+
+def _root_entries():
+    """(names, modules) of the baseline's root tree: every root entry, and the root-level .py modules other than
+    _ROOT_SCRIPTS and protected files. Cached per process (the baseline cannot change within a task)."""
+    v = _CACHE.get("root_entries")
+    if v is None:
+        rc, out = git(["ls-tree", "-z", "--name-only", baseline()])
+        names = frozenset(p for p in out.split("\0") if p) if rc == 0 else frozenset()
+        mods = frozenset(p for p in names if p.endswith(".py") and p not in _ROOT_SCRIPTS and not _protected_git(p))
+        v = _CACHE["root_entries"] = (names, mods)
+    return v
+
+
+def is_stdlib_name(stem):
+    """True for a top-level stdlib module name (a same-named root file would shadow it)."""
+    names = getattr(sys, "stdlib_module_names", None)
+    if names is not None:
+        return stem in names
+    if stem in sys.builtin_module_names:
+        return True
+    lib = os.path.dirname(os.__file__)
+    return os.path.isfile(os.path.join(lib, stem + ".py")) or os.path.isdir(os.path.join(lib, stem))
+
+
+def imports_module(stem, paths):
+    """True when one of these repo files (relative paths) imports the top-level module `stem`."""
+    rx = _CACHE.get(("imp_rx", stem))
+    if rx is None:
+        s = re.escape(stem)
+        rx = _CACHE[("imp_rx", stem)] = re.compile(
+            r"^[ \t]*(?:from[ \t]+%s(?:[ \t]|\.)|import[ \t]+(?:[\w.]+(?:[ \t]+as[ \t]+\w+)?[ \t]*,[ \t]*)*%s\b)" % (s, s),
+            re.M)
+    w = ws()
+    for p in paths:
+        try:
+            with open(os.path.join(w, p), "rb") as f:
+                text = f.read(4 << 20).decode("utf-8", "replace")
+        except OSError:
+            continue
+        if rx.search(text):
+            return True
+    return False
+
+
+def root_module_kept(p, tracked_changed=()):
+    """Whether an untracked .py file is a new module (part of the patch) rather than scratch. Inside a directory it
+    is; at the root it is only when its name is no stdlib module and no baseline root entry, does not look like scratch,
+    and either the baseline already has root-level modules or a changed tracked file (tracked_changed) imports it.
+    Root-level check/verify/repro scripts are therefore scratch: they would ship in the patch and, under the grader's
+    PYTHONPATH=<workspace>, could shadow installed modules."""
+    if not p.endswith(".py"):
+        return False
+    if "/" in p:
+        return True
+    stem = p[:-3]
+    if _SCRATCH_ROOT.match(p) or not stem.isidentifier() or is_stdlib_name(stem):
+        return False
+    names, mods = _root_entries()
+    if stem in names:                      # a tracked package or data dir of that name: the file only shadows it
+        return False
+    return bool(mods) or imports_module(stem, tracked_changed)
+
+
+def _new_module(p, tracked_changed=()):
+    """An untracked .py that looks like a new module rather than scratch (see root_module_kept)."""
+    return root_module_kept(p, tracked_changed)
+
+
+def changes():
+    """Changes since baseline() -> dict(source, protected, untracked, deleted, status). source: changed tracked
+    non-protected files plus untracked new modules; deleted: deleted tracked non-protected files; protected: every
+    changed/new protected path; untracked: every untracked non-protected file; status: path -> M/A/D/T/?. Reads only
+    (no index writes)."""
+    b = baseline()
+    res = {"source": [], "protected": [], "untracked": [], "deleted": [], "status": {}}
+    rc, out = git(["diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--ignore-submodules", b])
+    if rc == 0:
+        parts = out.split("\0")
+        i = 0
+        while i + 1 < len(parts):
+            code, p = parts[i][:1], parts[i + 1]
+            i += 2
+            if not code or _skip_path(p):
+                continue
+            res["status"][p] = code
+            if _protected_git(p):
+                res["protected"].append(p)
+            elif code == "D":
+                res["deleted"].append(p)
+            else:
+                res["source"].append(p)
+    rc, out = git(["ls-files", "--others", "--exclude-standard", "-z"])
+    if rc == 0:
+        root_py = []
+        for p in out.split("\0"):
+            if not p or _skip_path(p) or p in res["status"]:
+                continue
+            res["status"][p] = "?"
+            if _protected_git(p):
+                res["protected"].append(p)
+            else:
+                res["untracked"].append(p)
+                if p.endswith(".py"):
+                    if "/" in p:
+                        res["source"].append(p)
+                    else:
+                        root_py.append(p)
+        if root_py:                        # rare: decided against the tracked changes found above
+            tracked = [q for q in res["source"] if q.endswith(".py") and res["status"].get(q) != "?"]
+            res["source"] += [p for p in root_py if root_module_kept(p, tracked)]
+    for k in ("source", "protected", "untracked", "deleted"):
+        res[k].sort()
+    return res
+
+
+def source_changed():
+    """True when the tree has a source change (or when that cannot be determined)."""
+    try:
+        ch = changes()
+        return bool(ch["source"] or ch["deleted"])
+    except Exception:
+        return True
+
+
+def _index_path():
+    gd = git_dir()
+    if gd:
+        return os.path.join(gd, "index")
+    rc, out = git(["rev-parse", "--git-path", "index"])
+    p = out.strip() if rc == 0 else ""
+    return os.path.join(ws(), p) if p and not os.path.isabs(p) else p
+
+
+def _tmp_index_env():
+    """Env with GIT_INDEX_FILE=$SWE/idx: a copy of the real index plus intent-to-add entries for untracked files
+    (what the harness's `git add -N .` adds before diffing). The real index is never written."""
+    idx = os.path.join(swe_dir(), "idx")
+    src = _index_path()
+    try:
+        with open(src, "rb") as f:
+            st = os.fstat(f.fileno())
+            data = f.read()
+        tmp = idx + ".tmp.%d" % os.getpid()
+        _atomic_write(tmp, data)
+        # keep the index's own timestamps: git judges "racily clean" entries (a file rewritten in the same second
+        # with the same size) against the index file's mtime; a fresh mtime would make such an edit look unchanged
+        os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+        os.replace(tmp, idx)
+    except OSError:
+        try:
+            os.remove(idx)
+        except OSError:
+            pass
+    env = dict(os.environ)
+    env["GIT_INDEX_FILE"] = idx
+    git_run(["add", "-N", "--", "."], timeout=30, env=env)
+    return env
+
+
+class tmp_index(object):
+    """`with C.tmp_index() as env:` git calls made with env see the tree as the submitted patch will (new files in);
+    built once for the block, under a lock, without writing the real index."""
+
+    def __enter__(self):
+        self.lock = _Flock("idx.lock.flock")
+        self.lock.__enter__()
+        try:
+            return _tmp_index_env()
+        except BaseException:
+            self.lock.__exit__(None, None, None)
+            raise
+
+    def __exit__(self, *exc):
+        return self.lock.__exit__(*exc)
+
+
+def diff_bytes():
+    """Bytes equal to the patch the harness submits (`git add -N . && git diff --binary <baseline>`), built on a temp
+    copy of the index so the real one is untouched. Paths are quoted the way the harness sees them."""
+    with tmp_index() as env:
+        rc, out, err = git_run(["diff", "--binary", baseline()], timeout=60, env=env, quotepath_off=False)
+    return out if rc == 0 else b""
+
+
+def diff_sha():
+    return sha1_hex(diff_bytes())
+
+
+def git_tmpindex(args, timeout=30, env=None):
+    """git <args> against the temp index (new files visible, as in the submitted patch) -> (rc, text). Pass the env
+    of an open tmp_index() block to reuse it."""
+    if env is not None:
+        rc, out, err = git_run(args, timeout=timeout, env=env)
+    else:
+        with tmp_index() as e:
+            rc, out, err = git_run(args, timeout=timeout, env=e)
+    text = out.decode("utf-8", "surrogateescape")
+    return rc, text if rc == 0 else text + err.decode("utf-8", "replace")
+
+
+def numstat(paths=None, env=None):
+    """[(path, added, deleted)] since baseline over the submitted-patch view (None counts for binary files)."""
+    args = ["--literal-pathspecs", "diff", "--numstat", "-z", "--no-renames", "--no-ext-diff", baseline()]
+    if paths is not None:
+        if not paths:
+            return []
+        args += ["--"] + list(paths)
+    rc, out = git_tmpindex(args, env=env)
+    res = []
+    if rc != 0:
+        return res
+    for rec in out.split("\0"):
+        f = rec.split("\t", 2)
+        if len(f) == 3 and f[2]:
+            a = int(f[0]) if f[0].isdigit() else None
+            d = int(f[1]) if f[1].isdigit() else None
+            res.append((f[2], a, d))
+    return res
+
+
+# -------------------------------------------------------------------------------------------------------- protection
+_PROT_NAMES = {"conftest.py": "test configuration file", "pytest.ini": "test configuration file",
+               ".pytest.ini": "test configuration file", "tox.ini": "test configuration file",
+               "setup.cfg": "packaging/test configuration file", "pyproject.toml": "packaging/test configuration file",
+               "sitecustomize.py": "interpreter startup file", "usercustomize.py": "interpreter startup file",
+               "_swegemma_stubs.py": "harness file"}
+
+
+def _protected_parts(parts):
+    if not parts or ".." in parts:
+        return "outside the repository"
+    if ".git" in parts:
+        return "git internals"
+    base = parts[-1]
+    if (base.startswith("test_") and base.endswith(".py")) or base.endswith("_test.py"):
+        return "test file"
+    if base in _PROT_NAMES:
+        return _PROT_NAMES[base]
+    if base.endswith(".pth"):
+        return "interpreter startup file"
+    if len(parts) > 1 and (parts[0] in ("tests", "test", "testing") or any(x in ("tests", "test") for x in parts[1:-1])):
+        return "test directory"
+    return None
+
+
+def _protected_git(p):
+    """is_protected for a repo-relative path listed by git (no symlink/realpath checks needed)."""
+    return _protected_parts([x for x in p.split("/") if x not in ("", ".")])
+
+
+def is_protected(path):
+    """Why the grader-side reset owns this path (a short reason), or None when the agent may change it."""
+    if path is None:
+        return "outside the repository"
+    p = str(path).replace("\\", "/").strip()
+    if not p or p in (".", "./"):
+        return "outside the repository"
+    w = ws()
+    if os.path.isabs(p):
+        rp = _real(p)
+        if not _under(rp, w) or rp == w:
+            return "outside the repository"
+        p = os.path.relpath(rp, w).replace(os.sep, "/")
+    parts = [x for x in p.split("/") if x not in ("", ".")]
+    why = _protected_parts(parts)
+    if why:
+        return why
+    if not _under(_real(os.path.join(w, *parts)), w):
+        return "outside the repository"
+    return None
+
+
+def hygiene_revert():
+    """Undo agent changes to protected paths: tracked ones (modified, deleted, type-changed) are checked out from the
+    baseline one path per call; new ones are removed. Source files are never touched. Returns the paths."""
+    ch = changes()
+    b = baseline()
+    done = []
+    w = ws()
+    for p in ch["protected"]:
+        code = ch["status"].get(p)
+        if code in ("?", "A"):
+            if code == "A":
+                git(["--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", p])
+            fp = os.path.join(w, p)
+            try:
+                if os.path.islink(fp) or os.path.isfile(fp):
+                    os.remove(fp)
+                    done.append(p)
+            except OSError:
+                pass
+        else:
+            rc, _ = git(["--literal-pathspecs", "checkout", b, "--", p])
+            if rc == 0:
+                done.append(p)
+    return done
+
+
+def hygiene_note(paths):
+    """The one line helpers print after hygiene_revert() did something ('' when nothing was done)."""
+    if not paths:
+        return ""
+    shown = ", ".join(paths[:6]) + (" (+%d more)" % (len(paths) - 6) if len(paths) > 6 else "")
+    return "reverted test/config edits: " + shown
+
+
+def unrewrite(text):
+    """Undo the subprocess sandbox's rewrite of /tmp, /workspace, /usr/local/bin and /wheels in command text (heredoc
+    bodies included), so code written through a heredoc keeps its literal paths. Identity outside that sandbox."""
+    root = _sandbox_root()
+    if not root or not text:
+        return text
+    for sub, lit in SANDBOX_REWRITES:
+        pre = os.path.join(root, *sub.split("/"))
+        if pre in text:
+            text = re.sub(re.escape(pre) + r"(?![\w.-])", lambda m, lit=lit: lit, text)
+    return text
+
+
+def grader_env(tree, side):
+    """Env for a child that imports repository code from `tree` the way the grader does (side: orig or cur)."""
+    e = dict(os.environ)
+    e.update(PYTHONSAFEPATH="1", PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1", NO_COLOR="1")
+    side = re.sub(r"[^A-Za-z0-9_]", "_", str(side)) or "cur"
+    rt = os.path.join(swe_dir(), "rt_" + side)
+    try:
+        os.makedirs(rt, exist_ok=True)
+    except OSError:
+        pass
+    e["TMPDIR"] = rt
+    w = ws()
+    tree = os.path.abspath(str(tree))
+    out, rerooted = [], False
+    for x in (e.get("PYTHONPATH") or "").split(os.pathsep):
+        if not x:
+            continue
+        rx = _real(x)
+        if rx == w:
+            out.append(tree)
+            rerooted = True
+        elif _under(rx, w):
+            out.append(os.path.join(tree, os.path.relpath(rx, w)))
+            rerooted = True
+        else:
+            out.append(x)
+    if not rerooted:
+        out.insert(0, tree)
+    pre = []
+    try:
+        origin = state_load().get("origin") or {}
+    except Exception:
+        origin = {}
+    for d in origin.values() if isinstance(origin, dict) else ():
+        if isinstance(d, str) and d and not os.path.isabs(d) and ".." not in d.split("/"):
+            c = os.path.join(tree, d)
+            if c not in pre and os.path.isdir(c):
+                pre.append(c)
+    seen, final = set(), []
+    for x in pre + out:
+        if x not in seen:
+            seen.add(x)
+            final.append(x)
+    e["PYTHONPATH"] = os.pathsep.join(final)
+    return e
+
+
+# ------------------------------------------------------------------------------------------------------------- output
+_ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-Z\\-_]")
+SUMMARY_RE = re.compile(r"(?:\b\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b.*\bin "
+                        r"[\d.]+s\b)|\bno tests ran\b")
+_CUT = "... [%d lines cut; full output: /tmp/swe/last.log] ..."
+
+
+def clean_text(text):
+    """ANSI/OSC escapes removed; CRLF -> LF; a line redrawn with bare CRs keeps its last non-empty segment."""
+    if not text:
+        return ""
+    if "\x1b" in text:
+        text = _ANSI.sub("", text)
+    text = text.replace("\r\n", "\n").replace("\x00", "")
+    if "\r" in text:
+        lines = []
+        for ln in text.split("\n"):
+            if "\r" in ln:
+                segs = [s for s in ln.split("\r") if s.strip()]
+                ln = segs[-1] if segs else ""
+            lines.append(ln)
+        text = "\n".join(lines)
+    return text
+
+
+def _long(line):
+    return line if len(line) <= 400 else line[:200] + " ... " + line[-100:]
+
+
+def _last_log():
+    return os.path.join(swe_dir(), "last.log")
+
+
+def _write_last_log(text):
+    try:
+        _atomic_write(_last_log(), text)
+    except OSError:
+        pass
+
+
+def cap(text, limit, log=True, keep=SUMMARY_RE, head_share=0.34):
+    """Fit text into `limit` chars: escapes stripped, CRs normalised, lines over 400 chars cut to 200 + ' ... ' + 100;
+    when still too long keep head and tail lines around the marker '... [N lines cut; full output: /tmp/swe/last.log] ...'
+    and always keep the last line matching `keep` (the pytest summary). With log=True the full text goes to last.log."""
+    t = clean_text(text if isinstance(text, str) else str(text or ""))
+    lines = [_long(x) for x in t.split("\n")]
+    out = "\n".join(lines)
+    limit = int(limit)
+    if len(out) <= limit:
+        return out
+    if log:
+        _LOG_PARTS.append(t)
+        _write_last_log("\n\n".join(_LOG_PARTS))
+    ki = None
+    if keep is not None:
+        for i in range(len(lines) - 1, -1, -1):
+            if keep.search(lines[i]):
+                ki = i
+                break
+    marker_len = len(_CUT % len(lines)) + 1
+    budget = limit - marker_len - (len(lines[ki]) + 1 if ki is not None else 0)
+    head_b = int(max(0, budget) * head_share)
+    head, used = [], 0
+    for i, ln in enumerate(lines):
+        if used + len(ln) + 1 > head_b:
+            break
+        head.append(i)
+        used += len(ln) + 1
+    tail_b = max(0, budget) - used
+    tail, used2 = [], 0
+    lo = head[-1] + 1 if head else 0
+    for i in range(len(lines) - 1, lo - 1, -1):
+        if used2 + len(lines[i]) + 1 > tail_b:
+            break
+        tail.append(i)
+        used2 += len(lines[i]) + 1
+    tail.reverse()
+    keep_sep = ki is not None and ki not in head and ki not in tail
+    cut = len(lines) - len(head) - len(tail) - (1 if keep_sep else 0)
+    parts = [lines[i] for i in head] + [_CUT % cut]
+    if keep_sep:
+        parts.append(lines[ki])
+    parts += [lines[i] for i in tail]
+    res = "\n".join(parts)
+    return res if len(res) <= limit else res[:max(0, limit)]
+
+
+def _ckpt_nonempty():
+    try:
+        for e in os.scandir(os.path.join(swe_dir(), "ckpt")):
+            if e.name.endswith(".diff") and e.is_file() and e.stat().st_size > 0:
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def _restored_line(res, t):
+    ok, msg, k = False, "", None
+    if isinstance(res, bool):
+        ok = res
+    elif isinstance(res, tuple):
+        ok = bool(res[0]) if res else False
+        msg = res[1] if len(res) > 1 and isinstance(res[1], str) else ""
+    elif isinstance(res, dict):
+        ok, k, msg = bool(res.get("ok", True)), res.get("id"), str(res.get("msg") or "")
+    elif isinstance(res, str):
+        ok, msg = res.startswith("RESTORED"), res
+    elif isinstance(res, int):
+        ok, k = True, res
+    if not ok:
+        return msg if msg.startswith("RESTORE FAILED") else ""
+    if msg.startswith("RESTORED checkpoint"):
+        return msg.split("\n")[0]
+    if k is None:
+        m = re.search(r"#(\d+)", msg or "")
+        k = m.group(1) if m else "?"
+    return "RESTORED checkpoint #%s: the tree had no source change at t=%ds." % (k, int(t))
+
+
+def late_guard(t=None, src=None):
+    """At t >= 255 s with no source change, not finalized and a stored non-empty checkpoint: restore the best
+    checkpoint (lazy _swe_ckpt import; skipped when missing). Returns the line to prefix the output with, or ''."""
+    if _CACHE.get("in_guard"):
+        return ""
+    t = clock() if t is None else t
+    if t < T_SAFE or not _ckpt_nonempty():
+        return ""
+    if state_load().get("final_done"):
+        return ""
+    if src is None:
+        src = source_changed()
+    if src:
+        return ""
+    try:
+        import _swe_ckpt as K
+    except ImportError:
+        return ""
+    fn = getattr(K, "auto_restore_if_empty", None)
+    if fn is None:
+        return ""
+    _CACHE["in_guard"] = True
+    try:
+        res = fn()
+    except Exception:
+        return ""
+    finally:
+        _CACHE["in_guard"] = False
+    return _restored_line(res, t)
+
+
+def _journal_ok_edit():
+    for e in reversed(journal_entries()):
+        if e.get("h") == "edit" and e.get("ok") is True:
+            return True
+    return False
+
+
+def hint(t=None, src=None, sha=None, ctx=None):
+    """The single footer hint that applies (FINAL > TIME > FINISH > CONTEXT > EDIT NOW > LOCATOR), or ''. ctx: the
+    context meter after this call (estimated tokens); CONTEXT shows at CONTEXT_TOKENS or more."""
+    t = clock() if t is None else t
+    st = state_load()
+    if st.get("final_done") and st.get("final_sha"):
+        cur = sha if sha is not None else diff_sha()
+        if cur == st.get("final_sha"):
+            ft = st.get("final_t")
+            return FINAL_HINT % int(ft if isinstance(ft, (int, float)) else t)
+    if t >= T_TIME:
+        return TIME_HINT
+    if t >= T_FINISH:
+        return FINISH_HINT
+    if ctx is not None and ctx >= CONTEXT_TOKENS:
+        return CONTEXT_HINT
+    if t >= T_LOCATOR:
+        if src is None:
+            src = source_changed()
+        if not src:
+            if t >= T_EDIT_NOW:
+                return EDIT_NOW_HINT
+            if not _journal_ok_edit():
+                return LOCATOR_HINT
+    return ""
+
+
+def footer(t=None, src=None, sha=None, ctx=None):
+    """'[t=Ns]', preceded by at most one hint line."""
+    t = clock() if t is None else t
+    try:
+        h = hint(t, src, sha, ctx)
+    except Exception:
+        h = ""
+    return (h + "\n" if h else "") + "[t=%ds]" % int(t)
+
+
+# --------------------------------------------------------------------------------------------- token caps, context meter
+def est_tokens(s):
+    """Estimated prompt tokens of text: ASCII chars / 3 plus non-ASCII chars x 2.7. Race-1 and e74 traces: tool output
+    is about 3.06 chars/token (p10 2.2-2.4); rendered tables that are 24-35% non-ASCII measured 0.36-0.63 chars/token."""
+    if not s:
+        return 0.0
+    a = len(s.encode("ascii", "ignore"))
+    return a / 3.0 + (len(s) - a) * 2.7
+
+
+def _token_prefix(s, tokens):
+    """The longest prefix of s whose est_tokens is at most `tokens`."""
+    if est_tokens(s) <= tokens:
+        return s
+    used, i = 0.0, 0
+    for i, ch in enumerate(s):
+        used += (1 / 3.0) if ord(ch) < 128 else 2.7
+        if used > tokens:
+            return s[:i]
+    return s
+
+
+def ctx_next(ctx, name, est):
+    """The context meter (state["ctx"]) after a `name` call that added `est` tokens to the stage's prompt. Stages are
+    inferred from the prompts' fixed first steps: status.py starts a count (verifier step 1, and any stage recovering
+    after compaction, which the prompts send to status.py); the first edit.py call after the locator starts the fixer's
+    count with the views it made just before editing (the trailing view/grep calls, at most 3); the setup stage's
+    install.py is not counted."""
+    ctx = ctx if isinstance(ctx, dict) else {}
+    try:
+        n = float(ctx.get("n") or 0)
+    except (TypeError, ValueError):
+        n = 0.0
+    phase = ctx.get("phase") or "locator"
+    tail = [x for x in (ctx.get("tail") or []) if isinstance(x, list) and len(x) == 2]
+    if name == "install" and all(h == "install" for h, _ in tail):
+        n, est = 0.0, 0.0
+    elif name == "status":
+        n = 0.0
+        phase = "verifier" if phase == "fixer" else phase
+    elif name == "edit" and phase == "locator":
+        carry, k = 0.0, 0
+        for h, e in reversed(tail):
+            if h not in ("view", "grep") or k >= 3:
+                break
+            carry += float(e or 0)
+            k += 1
+        n, phase = carry, "fixer"
+    n += float(est)
+    return {"n": round(n, 1), "phase": phase, "tail": (tail + [[name, round(float(est), 1)]])[-8:]}
+
+
+def _ctx_record(name, est):
+    def fn(s):
+        s["ctx"] = ctx_next(s.get("ctx"), name, est)
+        return s
+    try:
+        state_update(fn)
+    except Exception:
+        pass
+
+
+def _in_est():
+    """Estimated tokens the model wrote for this call: the command's arguments, a heredoc body, the call overhead."""
+    try:
+        args = " ".join(str(a) for a in sys.argv[1:])
+    except Exception:
+        args = ""
+    return est_tokens(args) + float(_CACHE.get("in_stdin") or 0) + CTX_CALL
+
+
+def _write_out(s):
+    try:
+        sys.stdout.flush()
+    except Exception:
+        pass
+    try:
+        buf = sys.stdout.buffer
+        buf.write(s.encode("utf-8", "replace"))
+        buf.flush()
+    except (AttributeError, ValueError):
+        try:
+            sys.stdout.write(s)
+            sys.stdout.flush()
+        except Exception:
+            pass
+    except (BrokenPipeError, OSError):
+        pass
+
+
+def _compose(limit, tok_cap, head, body_t, tail_t, foot):
+    """(output, head, tail) within `limit` chars and about `tok_cap` estimated tokens: the body is cut first (by chars,
+    then shrunk until the token estimate fits), then the head and tail; the footer is always kept whole."""
+    room = limit - 1 - len(foot) - 1                          # final newline; newline before the footer
+    if tail_t and len(tail_t) > room // 2:
+        tail_t = tail_t[:max(0, room // 2)]
+    fixed = len(head) + (len(tail_t) + 1 if tail_t else 0)
+    if fixed > room:
+        head = head[:max(0, room - (len(tail_t) + 1 if tail_t else 0))]
+    body_room = room - len(head) - (len(tail_t) + 1 if tail_t else 0) - 1
+
+    def build(br):
+        parts = [head]
+        if body_t.strip():
+            if br >= 40:
+                parts.append(cap_text(body_t, br))
+            elif br >= len(_CUT % 0):
+                parts.append((_CUT % (body_t.count("\n") + 1))[:br])
+        if tail_t:
+            parts.append(tail_t)
+        parts.append(foot)
+        o = "\n".join(parts)
+        return o[:limit - 1] if len(o) > limit - 1 else o
+    out = build(body_room)
+    for _ in range(8):                  # box drawing and other non-ASCII text: fit the token cap by shrinking the body
+        over = est_tokens(out) - tok_cap
+        if over <= 0 or body_room < 40 or not body_t.strip():
+            break
+        be = est_tokens(cap_text(body_t, body_room))
+        body_room = max(0, min(body_room - 1, int(body_room * max(0.0, be - over) / be * 0.95))) if be else 0
+        out = build(body_room)
+    if est_tokens(out) > tok_cap:       # still over (non-ASCII head or tail): cut the text before the footer
+        keep = _token_prefix(out[:len(out) - len(foot)].rstrip("\n"), max(0.0, tok_cap - est_tokens(foot) - 1))
+        out = (keep + "\n" + foot) if keep else foot
+    return out, head, tail_t
+
+
+def emit(name, first_line, body="", cap=None, tail=None, log_text=None, src=None, sha=None):
+    """Print a helper's whole output and return it: [RESTORED line], the status/verdict line, the body capped to fit,
+    `tail` lines (kept whole), then the footer. Total length stays within cap (default CAPS[name]) and the estimated
+    tokens within CAP_TOKENS[name] (and cap / 3); the full text goes to $SWE/last.log (log_text replaces the body
+    there when given). The call is added to the context meter; at CONTEXT_TOKENS the footer carries CONTEXT_HINT."""
+    limit = int(cap or CAPS.get(name, 2000))
+    tok_cap = min(float(CAP_TOKENS.get(name, limit // 3)), limit / 3.0)
+    try:
+        t = clock()
+    except Exception:
+        t = 0.0
+    pre = ""
+    if src is None and (T_LOCATOR <= t < T_FINISH or (t >= T_SAFE and _ckpt_nonempty())):
+        src = source_changed()
+    if t >= T_SAFE:
+        try:
+            pre = late_guard(t, src)
+        except Exception:
+            pre = ""
+        if pre.startswith("RESTORED"):
+            src, sha = True, None
+    try:
+        foot = footer(t, src, sha)
+    except Exception:
+        foot = "[t=%ds]" % int(t)
+    head = clean_text(first_line if isinstance(first_line, str) else str(first_line)).strip("\n")
+    if pre:
+        head = pre + "\n" + head
+    body_t = "\n".join(str(x) for x in body) if isinstance(body, (list, tuple)) else str(body or "")
+    tail_t = "\n".join(str(x) for x in tail if x) if isinstance(tail, (list, tuple)) else str(tail or "")
+    out, head_c, tail_c = _compose(limit, tok_cap, head, body_t, tail_t, foot)
+    in_est = _in_est()
+    try:
+        proj = ctx_next(state_load().get("ctx"), name, in_est + est_tokens(out))["n"]
+    except Exception:
+        proj = 0.0
+    if proj >= CONTEXT_TOKENS:
+        try:
+            foot2 = footer(t, src, sha, proj)
+        except Exception:
+            foot2 = foot
+        if foot2 != foot:
+            foot = foot2
+            out, head_c, tail_c = _compose(limit, tok_cap, head, body_t, tail_t, foot)
+    head, tail_t = head_c, tail_c
+    _ctx_record(name, in_est + est_tokens(out))
+    full = [head, clean_text(log_text if log_text is not None else body_t)]
+    if tail_t:
+        full.append(tail_t)
+    full.append(foot)
+    if _LOG_PARTS:
+        full.append("\n--- sections cut above, in full ---\n" + "\n\n".join(_LOG_PARTS))
+    _write_last_log("\n".join(full) + "\n")
+    _write_out(out + "\n")
+    return out
+
+
+def cap_text(text, limit):
+    """cap() without writing last.log (emit writes the whole output there itself)."""
+    return cap(text, limit, log=False)
+
+
+def print_usage(name, usage=None):
+    """Print 'USAGE: <usage>' plus the footer (a helper called without its required argument)."""
+    return emit(name, "USAGE: " + (usage or _main_usage()))
+
+
+# ----------------------------------------------------------------------------------------------------------- lifecycle
+class HelperTimeout(Exception):
+    pass
+
+
+def _arm_watchdog():
+    try:
+        import signal
+        if not hasattr(signal, "setitimer"):
+            return None
+        secs = max(4.0, real_budget(HELPER_LIMIT))
+
+        def fire(signum, frame):
+            raise HelperTimeout("stopped after %ds (helper time limit)" % int(secs))
+        signal.signal(signal.SIGALRM, fire)
+        signal.setitimer(signal.ITIMER_REAL, secs)
+        return signal
+    except Exception:
+        return None
+
+
+def _where(tb):
+    last = None
+    while tb is not None:
+        fn = tb.tb_frame.f_code.co_filename
+        if _under(_real(fn), _real(_HERE)) or os.path.basename(fn).startswith("_swe_"):
+            last = "%s:%d" % (os.path.basename(fn), tb.tb_lineno)
+        tb = tb.tb_next
+    return last
+
+
+def safe_main(name, main):
+    """Run main(); never raise and never exit non-zero. UsageError prints its message; any other exception prints
+    'HELPER ERROR <name>: <Type>: <msg>' (300 chars or fewer). stderr goes to stdout; children are killed on exit."""
+    try:
+        sys.stderr = sys.stdout
+    except Exception:
+        pass
+    try:
+        import warnings
+        warnings.simplefilter("ignore")
+    except Exception:
+        pass
+    sig = _arm_watchdog()
+    try:
+        main()
+    except UsageError as e:
+        try:
+            emit(name, str(e))
+        except Exception:
+            _write_out(str(e)[:300] + "\n")
+    except SystemExit as e:
+        if e.code not in (None, 0) and not isinstance(e.code, int):
+            _write_out(_short("HELPER ERROR %s: exit: %s" % (name, e.code), 300) + "\n")
+    except BaseException as e:
+        where = _where(sys.exc_info()[2])
+        msg = "HELPER ERROR %s: %s: %s" % (name, type(e).__name__, " ".join(str(e).split()) or "-")
+        if where:
+            loc = " (%s)" % where
+            msg = (msg[:300 - len(loc) - 3] + "..." if len(msg) + len(loc) > 300 else msg) + loc
+        _write_out(msg[:300] + "\n")
+        try:
+            journal({"h": name, "msg": msg[:200]})
+        except Exception:
+            pass
+    finally:
+        if sig is not None:
+            try:
+                sig.setitimer(sig.ITIMER_REAL, 0)
+            except Exception:
+                pass
+        for pg in list(_LIVE):
+            _killpg(pg)
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
+def _precompile(d, names, fresh):
+    """Write checked-hash .pyc files for the libraries in an install dir: main scripts are always compiled from source,
+    but `import _swe_common` (and the gate/index libraries) then skip ~10-40 ms of compiling per helper call. Python
+    re-validates each pyc against the source hash, so a stale one is never used."""
+    try:
+        import importlib.util
+        todo = []
+        for n in names:
+            path = os.path.join(d, n)
+            pyc = importlib.util.cache_from_source(path)
+            if n in fresh or not os.path.exists(pyc):
+                todo.append((path, pyc))
+        if todo:
+            import py_compile
+            for path, pyc in todo:
+                py_compile.compile(path, cfile=pyc, doraise=True,
+                                   invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)
+    except Exception:
+        pass
+
+
+def install_all(src=None):
+    """Copy every *.py next to this file into each install_targets() dir (atomic, 0644, skipped when identical), write
+    VERSION when it differs and t0 when absent. -> [(target, copied, skipped, error | None)]."""
+    src = src or _HERE
+    names = sorted(f for f in os.listdir(src) if f.endswith(".py") and not f.startswith("."))
+    out = []
+    for tgt in install_targets():
+        copied = skipped = 0
+        err = None
+        fresh = set()
+        try:
+            os.makedirs(tgt, exist_ok=True)
+            same_dir = _real(tgt) == _real(src)
+            for n in names:
+                if same_dir:
+                    skipped += 1
+                    continue
+                with open(os.path.join(src, n), "rb") as f:
+                    data = f.read()
+                d = os.path.join(tgt, n)
+                try:
+                    with open(d, "rb") as f:
+                        if f.read() == data:
+                            skipped += 1
+                            continue
+                except OSError:
+                    pass
+                _atomic_write(d, data)
+                fresh.add(n)
+                copied += 1
+            vpath = os.path.join(tgt, "VERSION")
+            try:
+                with open(vpath) as f:
+                    vok = f.read().strip() == VERSION
+            except OSError:
+                vok = False
+            if not vok:
+                _atomic_write(vpath, VERSION + "\n")
+            tp = os.path.join(tgt, "t0")
+            if not os.path.exists(tp):
+                try:
+                    fd = os.open(tp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+                    try:
+                        os.write(fd, repr(time.time()).encode())
+                    finally:
+                        os.close(fd)
+                except FileExistsError:
+                    pass
+            if not same_dir:
+                _precompile(tgt, [n for n in names if n.startswith("_")], fresh)
+        except OSError as e:
+            err = "%s: %s" % (type(e).__name__, e)
+        out.append((tgt, copied, skipped, err))
+    return out
+
+
+def installed():
+    """True when this file runs from an installed helper dir (VERSION starting with v10 next to it)."""
+    try:
+        with open(os.path.join(_HERE, "VERSION")) as f:
+            return f.read(16).startswith("v10")
+    except OSError:
+        return False
+
+
+def bootstrap():
+    """First call of every helper's main: when running from a non-installed dir (the skill wrapper's temp copy),
+    silently install all helpers; then make sure a stale state from another task is reset."""
+    if not installed():
+        try:
+            install_all()
+        except Exception:
+            pass
+    try:
+        state_load()
+    except Exception:
+        pass

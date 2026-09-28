@@ -3,13 +3,22 @@
   --output run.py (timeout, ANSI strip, head+tail) + test.py timeout 45 s and ANSI strip       [context overflow, hangs]
   (default) install helpers into $TMPDIR/swe so sandbox commands can reach them       [helpers never ran]
   --gate   gate.py regression gate + repro rule in the verifier                               [never ran tests, regressions]
-Usage: python scripts/make_variant.py <base_bundle> <out_dir> [--edit] [--output] [--gate]"""
+  --work-temp T   v10 bundles only: temperature T in configs/gen_{locator,fixer,verifier}.yaml   [race-2 arm r2_v10_t06]
+A v10 bundle (scripts/_swe_common.py) carries its own install/bootstrap: the v9 $TMPDIR fix and the v9 levers are
+never applied to it (they would overwrite v10's install.py with helpers_v9/install.py); asking for a v9 lever exits 2.
+Usage: python scripts/make_variant.py <base_bundle> <out_dir> [--edit] [--output] [--gate] [--work-temp T]"""
 import argparse, os, re, shutil
 ap = argparse.ArgumentParser(); ap.add_argument("base"); ap.add_argument("out")
 for f in ("edit", "output", "gate"): ap.add_argument("--" + f, action="store_true")
 ap.add_argument("--keep-tmp-bug", action="store_true", help="do NOT apply the $TMPDIR install fix (reproduces v4 as submitted)")
+ap.add_argument("--work-temp", type=float, default=None, help="v10 only: temperature of the locator, fixer and verifier")
 a = ap.parse_args()
 H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helpers_v9")
+V10 = os.path.isfile(os.path.join(a.base, "skills/swe-tools/scripts/_swe_common.py"))
+if V10 and (a.edit or a.output or a.gate):
+    ap.exit(2, "make_variant: --edit/--output/--gate are v9 levers; a v10 bundle already has edit.py, run.py and verify.py\n")
+if a.work_temp is not None and (not V10 or not 0.0 <= a.work_temp <= 2.0):
+    ap.exit(2, "make_variant: --work-temp needs a v10 bundle and 0 <= T <= 2\n")
 if os.path.exists(a.out): shutil.rmtree(a.out)
 shutil.copytree(a.base, a.out, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "._*", ".DS_Store"))
 SK = os.path.join(a.out, "skills/swe-tools"); SC = os.path.join(SK, "scripts")
@@ -17,7 +26,7 @@ def edit(rel, fn):
     p = os.path.join(a.out, rel); s = open(p).read(); t = fn(s)
     assert t != s, f"lever did not change {rel}"; open(p, "w").write(t)
 usage = []
-if not a.keep_tmp_bug:  # helpers were installed to the host /tmp, unreachable from sandbox commands (81/85 locate calls failed in v4)
+if not a.keep_tmp_bug and not V10:  # helpers were installed to the host /tmp, unreachable from sandbox commands (81/85 locate calls failed in v4)
     for f in ("_ws.py", "install.py"): shutil.copy(os.path.join(H, f), SC)
 if a.edit:
     shutil.copy(os.path.join(H, "replace.py"), SC)
@@ -45,6 +54,9 @@ if a.gate:
             "if it still shows the bug, fix it.")
     edit("prompts/verifier.md", lambda s: re.sub(r"^2\. Run the relevant test:.*$", step.replace("\\", r"\\"), s, count=1, flags=re.M))
     usage.append("python3 /tmp/swe/gate.py [--target tests/test_x.py]")
+if a.work_temp is not None:
+    for st in ("locator", "fixer", "verifier"):
+        edit(f"configs/gen_{st}.yaml", lambda s: re.sub(r"^temperature: .*$", f"temperature: {a.work_temp:g}", s, count=1, flags=re.M))
 if usage:
     edit("skills/swe-tools/SKILL.md", lambda s: s.rstrip("\n") + "\n" + "\n".join(f"- `{u}`" for u in usage) + "\n")
-print(a.out, "tmpfix:", not a.keep_tmp_bug, "levers:", [f for f in ("edit", "output", "gate") if getattr(a, f)])
+print(a.out, "tmpfix:", "n/a (v10)" if V10 else not a.keep_tmp_bug, "work_temp:", a.work_temp, "levers:", [f for f in ("edit", "output", "gate") if getattr(a, f)])
