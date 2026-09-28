@@ -2,33 +2,21 @@
   "task": "rich_3518",
   "repo": "Textualize/rich",
   "pr_url": "https://github.com/Textualize/rich/pull/3518",
-  "linked_issue_urls": [
-    "https://github.com/Textualize/rich/issues/3517"
-  ],
   "kind": "bugfix",
-  "statement_reveals_fix": "full",
-  "gold_files": [
-    "rich/table.py"
-  ],
+  "statement_reveals_fix": "partial",
+  "gold_files": ["rich/table.py"],
   "gold_hunks": 1,
-  "gold_lines_changed": 1,
-  "new_api_names": [],
-  "root_cause": "In rich 13.8.1 cell highlighting moved to a per-Column `highlight` field (default False), which the renderer reads (render_str(..., highlight=column.highlight), table.py:827). Table.add_column fills it with `highlight if highlight is not None else self.highlight`, but add_row creates missing columns itself with `Column(_index=index)`, which leaves them at False. So `Table(highlight=True, show_header=False).add_row(...)` rendered with no highlighting (issue #3517).",
-  "best_solution": "In Table.add_row, where a column is auto-created because a row has more cells than the table has columns (`if index == len(columns): column = Column(_index=index)`), pass the table-level setting: `Column(_index=index, highlight=self.highlight)`. That makes the implicit creation path match add_column's default. The statement says it directly: Column.highlight defaults to False, so columns that add_row creates should default to Table.highlight. To find the spot, grep for `Column(` inside add_row.",
-  "acceptable_alternatives": "Any change that stores highlight == table.highlight on auto-created columns, e.g. routing implicit creation through add_column(), or setting column.highlight = self.highlight after construction. Resolving it only at render time (column.highlight or table.highlight) would not pass, because the test asserts the stored Column attribute.",
-  "hidden_test_demands": "tests/test_table.py::test_columns_highlight_added_by_add_row: Table(show_header=False, highlight=True); add_row('1', repr('FOO')); asserts table.columns[0].highlight and columns[1].highlight == table.highlight (the stored attribute), and that Console(record=True).export_text(styles=True) equals exactly '┌───┬───────┐\\n│ \\x1b[1;36m1\\x1b[0m │ \\x1b[32m\\'FOO\\'\\x1b[0m │\\n└───┴───────┘\\n' (ReprHighlighter styles: bold cyan number, green string).",
-  "locating_signals": "The title names `table` and `add_row`; the body names `Column.highlight`, `add_row` and `Table.highlight`. `grep -n 'Column(' rich/table.py` inside add_row gives the one line. The function is named outright.",
-  "our_outcome_summary": "v4, v6 and v7 PASS with a patch byte-identical to gold (529 chars; 55s/29 calls, 41s/12 calls, 45s/21 calls). v8 FAIL with an EMPTY patch after 17s and 14 calls. Its trace shows only the 'locator' role. The first call was malformed (run_skill_script with skill_name stuffed into the file_path string, giving INVALID_ARGUMENTS), then investigate.py failed. The agent found add_row at table.py:423 and read the exact loop with `Column(_index=index)`, then read tests/test_table.py, and the run ended at about 11s without an edit phase or submitted patch. So this was a pipeline/handoff failure, not a wrong fix: the locator stopped with no edit, even though it had already read the one line that needed changing.",
+  "gold_lines_changed": 2,
+  "linked_issue_urls": ["https://github.com/Textualize/rich/issues/3517"],
+  "root_cause": "Table.add_row auto-creates missing columns with Column(_index=index). Column.highlight defaults to False, so an implicitly created column ignores Table(highlight=True) and its cells render without repr highlighting (regression since 13.8.1).",
+  "best_solution": "In Table.add_row, where the loop hits index == len(columns) and builds a new Column, pass the table's setting through: Column(_index=index, highlight=self.highlight). The statement says it outright: columns added by add_row should default Column.highlight to Table.highlight. Grep add_row, find the single Column(...) constructor call, and inherit the parent's flag there. Columns made by add_column already take highlight from the table, so this is the only path that was missing.",
+  "hidden_test_demands": "tests/test_table.py::test_columns_highlight_added_by_add_row: Table(show_header=False, highlight=True).add_row('1', repr('FOO')); asserts table.columns[0].highlight == table.columns[1].highlight == table.highlight, and the recorded console export_text(styles=True) equals exactly '┌───┬───────┐\\n│ \\x1b[1;36m1\\x1b[0m │ \\x1b[32m\\'FOO\\'\\x1b[0m │\\n└───┴───────┘\\n' (number highlighted bold cyan, string green).",
+  "locating_signals": "The title names the function ('add_row') and the attribute ('highlight'). The body names Column.highlight, its default of False, and Table.highlight as the value to inherit. One grep for 'def add_row' in rich/table.py plus reading ~30 lines reaches the only Column(...) call in it. The gold function is named explicitly.",
+  "our_outcome_summary": "v4, v6 and v7 PASSED with patches byte-identical to gold (Column(_index=index, highlight=self.highlight)), in 41-55 s and 12-29 calls. v8 FAILED with an empty patch after 17 s and 14 tool calls. It was not a wrong fix: the v8 locator stage read all of rich/table.py in several chunks and then read all of tests/test_table.py (369 lines of box-drawing expected output, very token-dense). The prompt reached 28,673 tokens, which plus 4,096 reserved output tokens is past the 32,768 context limit, so litellm raised ContextWindowExceededError (retried 5 times) and the sandbox aborted before any edit. v8 also wasted early calls on a malformed run_skill_script call (missing skill_name) and on an investigate.py call that errored.",
   "failure_mode": "solved_by_some",
-  "generalizable_lesson": "(1) When a parent object has a setting that a child also carries (Table.highlight, Column.highlight), find every place the child gets built, including implicit ones like auto-created columns, lazy defaults and factory fallbacks, and pass the parent value along. Grep `ChildClass(` across the module rather than fixing only the explicit add_* API. The fix is usually one kwarg. (2) Harness guard: if a run is about to end with patch_size == 0 after the locator has already read the target snippet, force an edit/submit phase with the located file:line, not a silent exit. An empty patch on a one-line task is a control-flow bug. Validate tool-call arguments too (this run's first call packed two kwargs into one string).",
+  "generalizable_lesson": "Do not read whole test files that hold rendered or snapshot output (tables, box-drawing, ANSI): they are token-dense and can overflow a 32k context on their own. Grep for the one test or function you need and read a bounded line range. Also check the context budget before each read and edit early. Once the statement names the function and attribute and a single constructor call is found, make the edit before exploring further. On the fix itself: when a container auto-creates child objects (columns, rows, nodes) and the child has a default-False option that mirrors a parent option, the child should inherit the parent's value at the implicit-creation site.",
   "difficulty_5min": "easy",
-  "tags": [
-    "statement_is_pr_description",
-    "statement_names_fix_location",
-    "single_function_fix",
-    "repro_easy_from_statement",
-    "existing_tests_cover_area",
-    "rendering_or_ansi_output",
-    "edge_case_logic"
-  ]
+  "tags": ["statement_is_pr_description", "statement_names_fix_location", "single_function_fix", "rendering_or_ansi_output", "exact_string_or_format_required", "existing_tests_cover_area", "repro_easy_from_statement"],
+  "new_api_names": [],
+  "acceptable_alternatives": "Any change that makes add_row-created columns take highlight from the table would pass, for example setting column.highlight = self.highlight after construction. Changing Column's default to True would be wrong, because add_column(highlight=False) must stay unhighlighted."
 }

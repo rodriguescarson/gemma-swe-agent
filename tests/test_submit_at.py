@@ -54,3 +54,21 @@ def test_afternoon_arming_does_not_fire_early(tmp_path):
     log = (tmp_path / "log.txt").read_text()
     target = int(log.split("target epoch ")[1].split()[0])
     assert target - datetime.datetime.now(datetime.timezone.utc).timestamp() > 22 * 3600   # next day, ~23 h away
+
+
+def test_listing_failure_never_submits_blind(tmp_path):
+    # 2026-09-28: network outage made the listing fail and the backup submitted blind
+    calls = tmp_path / "calls.txt"; fake = tmp_path / "kaggle"
+    fake.write_text(f"""#!/bin/bash
+echo "$@" >> {calls}
+if [ "$2" = submissions ]; then echo "ConnectionError" >&2; exit 1; fi
+echo "Successfully submitted"
+""")
+    fake.chmod(0o755)
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0")
+    p = subprocess.Popen(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env)
+    try: p.wait(timeout=5)
+    except subprocess.TimeoutExpired: pass
+    finally: p.kill()
+    assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
+    assert "not submitting blind" in (tmp_path / "log.txt").read_text()
