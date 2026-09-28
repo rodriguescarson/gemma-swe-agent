@@ -7,7 +7,10 @@ cd /root/g4; export PYTHONDONTWRITEBYTECODE=1; fail() { echo "PREFLIGHT_FAIL $1 
 BUNDLE=${1:-submissions/v6}
 /root/venv/bin/hf auth whoami >/dev/null 2>&1 || fail "hf auth missing: backup would fail after the run (2026-09-27: 50 min idle pod)"
 PYTHONPYCACHEPREFIX=/tmp/pf_pycache /root/hvenv/bin/python -m compileall -q scripts train pod submissions >/dev/null || fail compileall   # never write __pycache__ into bundles
-/root/hvenv/bin/python -m pip -q install pytest >/dev/null 2>&1; PYTHONDONTWRITEBYTECODE=1 /root/hvenv/bin/python -m pytest -q -rf -p no:cacheprovider tests -k "not shellcheck and not official_compiler" >eval/preflight_tests.log 2>&1 || fail "unit tests: $(grep -E "^FAILED" eval/preflight_tests.log | head -3 | tr "\n" " ") $(tail -1 eval/preflight_tests.log)"
+# Race-relevant subset only (2026-09-28): the full suite runs on the Mac and in the Linux gate before every ship; the
+# pod has a shallow clone, no Mac caches and busy GPUs, which made env-only tests abort race 2.
+PF_TESTS=${PF_TESTS:-"tests/test_bundles.py tests/test_v10_bundle.py tests/test_v10_sandbox.py tests/test_sandbox_tmp_paths.py tests/test_gate_false_pass.py tests/test_pod_scripts.py tests/test_v10_integration.py"}
+/root/hvenv/bin/python -m pip -q install pytest >/dev/null 2>&1; PYTHONDONTWRITEBYTECODE=1 /root/hvenv/bin/python -m pytest -q -rfE -p no:cacheprovider $PF_TESTS -k "not shellcheck and not official_compiler" >eval/preflight_tests.log 2>&1 || fail "unit tests: $(grep -E "^(FAILED|ERROR)" eval/preflight_tests.log | head -3 | tr "\n" " ") $(tail -1 eval/preflight_tests.log)"
 /root/venv/bin/python - <<'PY' || fail "env/version"
 import vllm, transformers, tokenizers, fastapi
 import vllm.model_executor.models.gemma4_mm as g

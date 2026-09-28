@@ -680,6 +680,9 @@ def test_frozen_pins_match_git(tmp_path):
                            capture_output=True, text=True, timeout=30)
         assert r.returncode == 0 and r.stdout == "", f"{rel} has uncommitted changes:\n{r.stdout[:600]}"
     for rel, rev in FROZEN_GIT.items():
+        # a shallow clone (the pod clones --depth 1) lacks the pinned revision: provenance is checked on the Mac
+        if subprocess.run(["git", "cat-file", "-e", f"{rev}^{{commit}}"], cwd=ROOT, capture_output=True).returncode:
+            pytest.skip(f"revision {rev} not in this checkout (shallow clone)")
         dst = tmp_path / rev
         dst.mkdir()
         arch = subprocess.run(["git", "archive", rev, rel], cwd=ROOT, capture_output=True, timeout=60)

@@ -6,7 +6,7 @@ LABEL=${1:-manual}; REPO=rodriguescarson/gemma4-agent-artifacts; TS=$(date -u +%
 source /root/venv/bin/activate
 STAGE=/root/backup_stage/$TS-$LABEL; mkdir -p $STAGE
 cd /root/g4
-tar czf $STAGE/eval_runs.tgz eval/runs eval/progress.log 2>/dev/null
+tar czf $STAGE/eval_runs.tgz eval/runs eval/progress.log eval/preflight_tests.log eval/alerts.log 2>/dev/null
 [ -d /root/data ] && find /root/data -maxdepth 1 -name "*.jsonl" -size -3G -exec cp {} $STAGE/ \; 2>/dev/null
 for d in /root/train_out /root/g4/train/out; do [ -d $d ] && tar czf $STAGE/$(basename $d)_adapters.tgz -C $d . ; done
 cp /root/*.log /root/*.out $STAGE/ 2>/dev/null
