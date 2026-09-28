@@ -1,0 +1,134 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 00000000..04e7611f
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,62 @@
++
++from rich.repr import auto
++
++class CustomParam:
++    def __init__(self, value):
++        self.value = value
++    def __eq__(self, other):
++        return True
++    def __repr__(self):
++        return "CustomParam()"
++
++@auto
++class Foo:
++    def __init__(self, a=CustomParam(1)):
++        self.a = a
++
++def test_auto_repr_custom_class_as_default():
++    foo = Foo()
++    # If the fix works, it should not treat the default as param.empty.
++    # The current buggy code does: if param.default == param.empty:
++    # CustomParam(1) == inspect.Parameter.empty is True because CustomParam.__eq__ always returns True.
++    # So it yields getattr(self, "a"), which is CustomParam(1).
++    # The repr becomes "Foo(CustomParam())"
++    # But the expected behavior for a parameter WITH a default is to yield (name, value, default).
++    # If value == default, it is omitted.
++    # In this case, value is CustomParam(1) and default is CustomParam(1).
++    # So it should be omitted.
++    # Thus the repr should be "Foo()".
++    
++    # Wait, let's see the logic in auto_repr:
++    # if param.default == param.empty: # Bug is here
++    #     yield getattr(self, param.name)
++    # else:
++    #     yield param.name, getattr(self, param.name), param.default
++    
++    # If it incorrectly thinks it is empty, it yields CustomParam(1).
++    # Then auto_repr does:
++    # for arg in self.__rich_repr__():
++    #     if isinstance(arg, tuple): ...
++    #     else: append(repr(arg))
++    # So it appends repr(CustomParam(1)) -> "CustomParam()".
++    # Result: "Foo(CustomParam())"
++    
++    # If it correctly thinks it's NOT empty:
++    # it yields ("a", CustomParam(1), CustomParam(1)).
++    # Then auto_repr does:
++    # key, value, *default = arg
++    # if default and default[0] == value:
++    #     continue
++    # Since CustomParam(1) == CustomParam(1) is True, it continues.
++    # Result: "Foo()"
++    
++    assert repr(foo) == "Foo()"
++
++if __name__ == "__main__":
++    try:
++        test_auto_repr_custom_class_as_default()
++        print("Test passed!")
++    except AssertionError as e:
++        print(f"Test failed: {e}")
++        import sys
++        sys.exit(1)
+diff --git a/rich/repr.py b/rich/repr.py
+index 9dd65cde..95331006 100644
+--- a/rich/repr.py
++++ b/rich/repr.py
+@@ -76,7 +76,7 @@ def auto(
+                         param.POSITIONAL_OR_KEYWORD,
+                         param.KEYWORD_ONLY,
+                     ):
+-                        if param.default == param.empty:
++                        if param.default is param.empty:
+                             yield getattr(self, param.name)
+                         else:
+                             yield param.name, getattr(self, param.name), param.default
+diff --git a/tests/test_repr_custom_class.py b/tests/test_repr_custom_class.py
+new file mode 100644
+index 00000000..b6b56681
+--- /dev/null
++++ b/tests/test_repr_custom_class.py
+@@ -0,0 +1,47 @@
++import inspect
++from rich.repr import rich_repr
++
++class BadEq:
++    def __init__(self, value):
++        self.value = value
++
++    def __eq__(self, other):
++        # Only return True if other is NOT a BadEq instance to simulate 
++        # the bug where it equals inspect.Parameter.empty
++        if isinstance(other, BadEq):
++            return self.value == other.value
++        return True
++
++    def __repr__(self):
++        return f"BadEq({self.value})"
++
++def test_repr_custom_class_eq():
++    @rich_repr
++    class TestClass:
++        def __init__(self, a, b=BadEq(1)):
++            self.a = a
++            self.b = b
++
++    obj = TestClass(1)
++    r = repr(obj)
++    # a=1, b=BadEq(1), default=BadEq(1)
++    # Fixed: b is default, skipped. -> "TestClass(1)"
++    # Bugged: b treated as no-default, yielded as value -> "TestClass(1, BadEq(1))"
++    assert "BadEq(1)" not in r
++    assert "1" in r
++
++def test_repr_custom_class_eq_different_value():
++    @rich_repr
++    class TestClassDiff:
++        def __init__(self, a, b=BadEq(1)):
++            self.a = a
++            self.b = b
++            
++    obj = TestClassDiff(1)
++    obj.b = BadEq(2)
++    
++    r = repr(obj)
++    # a=1, b=BadEq(2), default=BadEq(1)
++    # Fixed: b != default, yields ('b', BadEq(2), BadEq(1)) -> "b=BadEq(2)"
++    # Bugged: b treated as no-default, yielded as value -> "BadEq(2)"
++    assert "b=BadEq(2)" in r
