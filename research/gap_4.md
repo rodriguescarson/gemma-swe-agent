@@ -1,18 +1,27 @@
 # Gap 4: compaction threshold, the "amnesia" cost, root type, and graph tools
 
 Written 2026-09-28 (IST). Read-only. Nothing was submitted, pushed or started. The only network calls were the
-Kaggle CLI `competitions files` listing and a one-file download of `HARNESS_README.md`. Scripts are in
+Kaggle CLI `competitions files` listing, a one-file download of `HARNESS_README.md`, and a read-only fetch of forum
+threads 743456 and 743752. Scripts are in
 `/private/tmp/claude-501/-Users-carson-Projects/654244a3-b38c-45a0-96af-d7e5f0aac6ce/scratchpad/gap4/`:
 `pertask.py` (per-task prompt size, compaction, outcome), `pairs.py` (paired tests), `virtual.py`
-(uncompacted-prompt reconstruction), `halluc.py` (tool names against declared tools). Each runs in about a second.
+(uncompacted-prompt reconstruction), `halluc.py` (tool names against declared tools), plus `verify.py`, `verify2.py`, `spread.py`, `exposure.py` and `helpers_race1.py`
+(re-checks added in the second pass). Each runs in about a second.
+
+**Second pass, 2026-09-28 12:36 IST (07:06 UTC).** All four original scripts were re-run and every number below
+reproduced. One count was wrong and is fixed in section 4: locator graph calls are 106, not 101. The second pass
+added five things: the Kaggle listing and forum re-checked today (section 1); proof that compaction fired every time it could on
+Kaggle (section 2.3); the v4 pod-vs-pod spread that explains the cross-bundle gap (section 2.2); the root-crash
+exposure measured over 722 task-runs (section 3); and a side finding outside this gap: race 1's helpers were
+missing in 19-25 of 51 tasks per arm (section 7).
 
 ## 0. Decisions
 
 | Question | Decision | Why, in one line |
 |---|---|---|
-| Pod compaction | **ON.** Use the README values: `EventsCompactionConfig(compaction_interval=5, overlap_size=2, token_threshold=14336, event_retention_size=5)` and `ContextCacheConfig(2048, 1800, 10)`. Also log a per-task "virtual max prompt", the uncompacted size, as the loss bound for a 32k scorer. | The official README has said 14,336 since 2026-09-25 and is unchanged today. The 32,768 figure comes from two misquotes and one rival notebook. In paired data, compaction changes 2 vs 3 outcomes out of 60. |
+| Pod compaction | **ON.** Use the README values: `EventsCompactionConfig(compaction_interval=5, overlap_size=2, token_threshold=14336, event_retention_size=5)` and `ContextCacheConfig(2048, 1800, 10)`. Also log a per-task "virtual max prompt", the uncompacted size, as the loss bound for a 32k scorer. | The official README has said 14,336 since 2026-09-25 and was unchanged at 07:06 UTC today. The 32,768 figure comes from two misquotes and one rival notebook. On Kaggle, compaction fired at every one of 155 opportunities. In paired data, compaction changes 2 vs 3 outcomes out of 60. |
 | Per-stage prompt target | **Speed first, no hard 14k cap.** Two hard guards: (a) no single tool result over about 4k tokens, because compaction cannot stop a one-step jump; (b) a static worst case of 26k or less per stage (test_plan R78), as a hedge in case the scorer uses 32,768. | Compaction's measured cost is about 7 s per event, not solves. 8 of the 21 r_v9_eog solves came from stages above 14,336 tokens, and a hard cap would cut those short. |
-| Root agent type | **Keep `SequentialAgent`.** | The crash path in config F4 can only fire before the first in-flow compaction of the whole scoring run, because one config object is shared. That window closed at task #3 in e74_v3. Measured: 0 of 74 on Kaggle L4. |
+| Root agent type | **Keep `SequentialAgent`.** | The crash path in config F4 can only fire before the first in-flow compaction of the whole scoring run, because one config object is shared. That window closed at task #3 in e74_v3. Measured: 0 of 74 on Kaggle L4. Even if the scorer built a fresh config for every task, 0 of 722 Sequential-root task-runs show the pattern that would crash. |
 | Graph tools | **Register them only on stage 1, the one that sees the harness task prompt. Drop them from fixer and verifier. Add a one-line ban in the stage-1 prompt.** | 3 of 3 unknown-tool crashes came from the agent holding the harness prompt. Fixer and verifier made 0 graph calls in 21,479 calls. `search_similar_code` output is unbounded: up to 55,164 chars, +14,027 prompt tokens in one step. |
 
 ## 1. What the scorer's threshold is (steps 1 and 2)
@@ -23,6 +32,9 @@ Kaggle CLI `competitions files` listing and a one-file download of `HARNESS_READ
 I downloaded it again: sha256 `3d6e57a13234cb4e...bbbb`, byte-identical to `data/HARNESS_README.md`,
 `data/raw/HARNESS_README.md` and three older scratchpad copies. **The README has not changed since 2026-09-25**, so
 section 7.2 did not need a re-read beyond confirming it.
+**Re-checked 2026-09-28 07:06 UTC:** 3 pages, 524 files, every creationDate still 2026-09-25, and `HARNESS_README.md`
+still 49,356 bytes at 18:36:31 (`scratchpad/gap4/files_now_p1.csv`, `_p2`, `_p3`). The local copy's sha256 still
+matches the downloaded one.
 
 **What §7.2 says** (`data/HARNESS_README.md:553-563`): the harness configures the `App` "(`scripts/inference.py`)" with
 `compaction_interval = 5`, `overlap_size = 2`, `token_threshold = 14,336`, `event_retention_size = 5`, and
@@ -46,6 +58,9 @@ as `max_model_len` (lines 128, 147, 148, 166, 178, 198, 554). The string `scorin
 **Host answers: none.** Every saved fetch shows `commentCount: 0` for both threads, including the newest
 (`scratchpad/forum6/all.json`, fetched 2026-09-27 21:55 UTC). A search of all 39 saved threads
 (`scratchpad/forum5/msgs.json`) for `compaction|14,?336|32,?768|token_threshold` finds only these two questions.
+**Re-fetched 2026-09-28 07:07 UTC** with the Kaggle API (`get_topic` plus `competition_list_topic_messages`, saved to
+`scratchpad/gap4/forum_now.json`). Each thread still holds only its opening post (messages 3528441 and 3528897), with
+no replies. The asker "htn" is not Carson's account (`carsonrodrigues`).
 
 **Still UNVERIFIED:** the scorer script is private, and I do not have any README version older than 2026-09-25. The
 competition data existed from 09-23 (thread 742911), so an earlier README could have said something else. The
@@ -87,6 +102,18 @@ Confounds, stated rather than removed: the Kaggle runs used 5 min / 60 calls / 8
 | compacted, vs v4_conc8 (sqlite) | 29 | 3 | 3 | 1 | 1 | 1.00 |
 | overflowed on p_v4 (7 tasks) | 7 | 2 (fastapi_5077, rich_3454) | 0 | 2 | 0 | 0.50 |
 | overflowed on r_v4 (rich_3468, rich_3772) | 2 | 0 | 0 | 0 | 0 | 1.00 |
+| compacted, at or above 14,336 on p_v4, no p_v4 overflow | 14 | 1 | 3 | 1 | 3 | 0.62 |
+| compacted, at or above 14,336 on r_v4, no r_v4 overflow | 13 | 0 | 3 | 0 | 3 | 0.25 |
+
+The last two rows are the closest this data gets to an "amnesia" test: tasks that ran long on both sides and did not
+overflow on the pod. They split 1 vs 3 and 0 vs 3.
+
+**The same bundle disagrees with itself by the same amount (second pass).** On the 29 tasks compacted in e74_v3,
+two uncompacted pod runs of v4 solve 7 (p_v4, also `v4_fair` in sqlite) and 3 (`v4_conc8`). Their discordant pairs
+split **5 vs 1**, which is the same split as e74_v3 against p_v4 (1 vs 5). Across p_v4, r_v4 and v4_conc8, v4 solves
+9 of the 29 at least once. So the cross-bundle gap is no larger than v4's own spread from run to run and budget to budget
+without compaction, and it cannot be attributed to compaction (`spread.py`, which reads `pertask.json` and
+`experiments.sqlite`). v4_conc8's budget is UNVERIFIED. Its mean is 311.6 s/task, above a 5-min cap, so it ran with at least 6 min.
 
 This comparison leans against compaction: 1 vs 5 and 1 vs 4. It is confounded exactly where compaction acts. p_v4
 had 6 min / 110 calls and r_v4 had 150 turns on H100, which is 1.63-1.75x faster than L4
@@ -96,6 +123,14 @@ compaction cannot explain them. fastapi_15589 hit the 5-min cap on L4 (307 s, 64
 
 ### 2.3 What compaction measurably does
 
+- **It is not absent on the Kaggle harness (second pass, answers pain_points #2 and forum F10).** In e74_v2 and e74_v3,
+  a stage call at or above 14,336 was followed by another call from the same stage 155 times. The next prompt fell below
+  70% of the previous one in 154 of them (`verify2.py`). The 155th (e74_v2 fastapi_9555, swe_fixer) fell from 16,383 to
+  11,475, which is 70.04%, so it is also a compaction that the cutoff missed. The only tasks that crossed without a drop
+  (e74_v2 rich_3472 at 14,338, e74_v3 rich_3718 locator at 14,711) crossed on a stage's final call, where in-flow
+  compaction has no next call to act on. pain_points #2 said to "treat the harness compaction as absent", citing the orphaned-call
+  barrier (`_truncate_events_before_pending_function_call`, adk-python #7236). That barrier was never observed on L4
+  with our bundles. The advice holds only for the pod, where compaction was not configured, or for a scorer that uses 32,768.
 - **Prevents gradual overflow.** Kaggle L4: 0 `ContextWindowExceeded` and 0 `No LlmAgent` errors in 148 task-runs
   (err tally of `e74_v2`/`e74_v3/results.jsonl`, plus grep of both logs). Pod: **57 overflow task-runs** in 836 across 16
   pod runs (38 of them in v4+). In **55 of 57**, the overflowing stage had already made two or more calls at or above
@@ -157,6 +192,14 @@ compaction cannot explain them. fastapi_15589 hit the 5-min cap on L4 (307 s, 64
   window that closes in the first few tasks. The nudge restart (config F12, 1-3 of 51 tasks) is a separate and small issue.
 - UNVERIFIED: that the private `scripts/inference.py` also builds one config for all tasks. If it builds one per task,
   the exposure is still 0 of 74 in e74_v3.
+- **Exposure measured more widely (second pass).** The raising call is the end-of-invocation compactor. `runners.py:598-610`
+  runs `_run_compaction_for_sliding_window(..., skip_token_compaction=invocation_context.token_compaction_checked)`,
+  which calls `_run_compaction_for_token_threshold` with `agent=app.root_agent` (`apps/compaction.py:475-491`). The
+  sliding-window branch also passes the root (`:683`). Assume the worst case, a fresh config per task. Then a task
+  crashes only if its **final** LLM call is the first one at or above 14,336, because any earlier crossing triggers an in-flow
+  compaction on an LlmAgent, which sets `token_compaction_checked` and the summarizer. Across the 722 Sequential-root
+  task-runs with traces (e74_v3 plus p_v4, p_v6, p_v7, p_v8, r_v4, the five r_v9 arms, c_v9_eg and c_v9_eog), that pattern
+  occurs **0 times** (`exposure.py`). The sliding-window branch needs 5 invocations in one session (interval 5), and one task has 1 plus a few nudges.
 
 ## 4. Graph tools: registered, dropped, or banned (step 4)
 
@@ -175,15 +218,16 @@ each stage's declared tools, including the skill toolset names from `google/adk/
   graph data is supplied. That was 74/74 prompts in e74_v3, p_v4, r_v4 and r_v9_eog, and 0/74 in e74_v2 and 0/47 in
   sw1 (graph dir not set). With `include_contents: none`, only stage 1 ever sees that prompt.
 - In v4+, graph tools were declared on every stage. The fixer made 0 graph calls in 13,640 calls and the verifier 0
-  in 7,839. The locator made 101 in 12,126 (0.8%). `search_similar_code` observations had a median of 84 chars and a
-  max of 55,164, and 2 calls added 14,027 tokens each.
+  in 7,839. The locator made **106** in 12,126 (0.9%; the first pass said 101, and the per-run counts in `halluc.py` output sum
+  to 106). 104 of the 106 were `search_similar_code`. Its observations had a median of 84 chars and a max of 55,164
+  (next largest 27,020, rich_3934 in p_v7 and p_v8), and 2 calls added 14,027 tokens each.
 - **Resolution of H2 vs config F14:** both are right about different stages. Register the three graph tools only on
   the agent(s) whose context contains the harness prompt: stage 1, plus any agent with `include_contents: default` or
   an LlmAgent root. Drop them elsewhere, which saves 1,966 declaration chars (config_space row 14) on the roughly 64%
   of calls made by fixer and verifier. With vLLM prefix caching on, which time_model assumes, the real saving is
   mostly on each stage's fresh prefill, about 1-1.5 s per task on L4 (UNVERIFIED size). Add a one-line ban in stage 1
   ("do not call search_similar_code / get_code_neighbors / get_code_subgraph"), because their output is unbounded.
-  Keep them registered so a slip cannot crash the task. The ban's effect on the 0.8% call rate is UNVERIFIED; count graph calls in the canary.
+  Keep them registered so a slip cannot crash the task. The ban's effect on the 0.9% call rate is UNVERIFIED; count graph calls in the canary.
 - Residual risk: a name no registration can cover (`git_grep`) happened 1 time in 984 task-runs.
 
 ## 5. Consequences for v10 and the pod runner (not applied: read-only)
@@ -211,3 +255,35 @@ each stage's declared tools, including the skill toolset names from `google/adk/
 - Kaggle solve rate by compaction count (e74_v3): 0: 19/45; 1: 2/16; 2: 0/5; 3 or more: 1/8. By pairing (section 2.1), this reflects task difficulty.
 - Stage maxima at or above 14,336. r_v9_eog: locator 16/51 (median max 11,988), fixer 10/51, verifier 4/50. e74_v3: locator 10/74, fixer 19/71, verifier 8/63.
 - Overflow ceiling: 32,768 - 4,096 = 28,672 prompt tokens (`research/own_data.md:142`).
+- Candidate bundles set `max_output_tokens: 4096` (`submissions/v4/configs/sampling.yaml`, `submissions/v9_eog/configs/sampling.yaml`).
+  The README's default is 16,384 (`data/HARNESS_README.md:147`). Raising the output cap lowers the prompt ceiling one for one, so keep it at 4096 or below.
+
+## 7. Side finding outside this gap: race 1 did not have working helpers in 19-25 of 51 tasks per arm
+
+This is not about compaction. It surfaced while reading the race-1 traces, and it qualifies the verified context line
+"Race 1 runs WITH WORKING HELPERS". The path fix works, but only when the model runs the install step, and it often
+does not. Counts are from `scratchpad/gap4/helpers_race1.py`. A call counts as failed when its observation contains "can't open file".
+
+| Arm | Helper calls | Failed | Tasks where helpers never worked (solved) | Tasks where they worked (solved) | Why they never worked |
+|---|---|---|---|---|---|
+| r_v9_c | 105 | 42 (40%) | 21 (7) | 26 (8) | no install call 17, failed install call 4 |
+| r_v9_eo | 254 | 64 (25%) | 25 (10) | 26 (4) | 19 / 6 |
+| r_v9_eg | 195 | 63 (32%) | 20 (10) | 31 (6) | 16 / 4 |
+| r_v9_og | 253 | 70 (28%) | 23 (8) | 28 (6) | 19 / 4 |
+| r_v9_eog | 388 | 70 (18%) | 19 (14) | 32 (7) | 15 / 4 |
+| c_v9_eg | 206 | 156 (76%) | 14 (6) | 9 (1) | 12 / 2 |
+| c_v9_eog | 149 | 27 (18%) | 11 (4) | 12 (3) | 10 / 1 |
+
+- The locator prompt's step 1 is `run_skill_script(skill_name="swe-tools", file_path="install.py")`
+  (`submissions/v9_eog/prompts/locator.md:7`). In the failing tasks the model either skipped it and called
+  `python3 /tmp/swe/locate.py` directly, or sent a malformed call. Examples: `skill_name='"swe-tools"'`, which returned SKILL_NOT_FOUND
+  (`r_v9_eog/traces/trace_fastapi_11194.json`); empty arguments (`fastapi_13537`); and `run_skill_script(...)` typed inside
+  `run_command` (`r_v9_c/traces/trace_fastapi_14616.json`).
+- Within-task, there is no helper effect to see. 24 tasks appear with helpers working in one r_v9 arm and failing in another.
+  Their mean solve rate is 0.333 with helpers and 0.309 without; tasks favouring helpers vs not: 3 vs 5. The large raw gap
+  (r_v9_eog 14/19 without vs 7/32 with) is selection. Fastapi runs skip the install more often: helpers failed in 58 of 93
+  fastapi task-runs against 50 of 158 rich task-runs.
+- Implication (UNVERIFIED until the canary): race 1 measured "helpers present in about half the tasks", not the v9
+  design. v10 should make install impossible to skip, or not needed. Options: tell stage 1 to recover when it sees
+  "can't open file" by calling the exact install line, or have every helper command check for the file and fall back.
+  Then add an install-rate KPI to the canary; the pass mark is helpers present in at least 95% of tasks.

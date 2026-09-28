@@ -27,26 +27,35 @@ files = sorted(score, key=lambda f: -score[f])[:3]
 if opt.get("target"): files = [opt["target"]] + [f for f in files if f != opt["target"]][:2]
 if not files: print(f"No existing test file mentions {sorted(names | mods)[:8]}. Write a repro in /tmp instead."); sys.exit(0)
 def run(root, extra_env):
+    """Returns (failing node ids | None on timeout, summary line, status) where status is
+    OK (pytest ran and reported), BROKEN (import/collection/internal error, exit 2-4, or no summary), NOPYTEST."""
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "-o", "addopts=", "--tb=line", "-rfE"] + files
     env = dict(os.environ, **extra_env)
     try: r = subprocess.run(cmd, cwd=root, capture_output=True, text=True, errors="replace", timeout=T, env=env)
-    except subprocess.TimeoutExpired: return None, "TIMEOUT"
+    except subprocess.TimeoutExpired: return None, "TIMEOUT", "TIMEOUT"
     out = r.stdout + r.stderr
+    if "No module named pytest" in out: return set(), "pytest is not installed", "NOPYTEST"
     fails = set(re.findall(r"^(?:FAILED|ERROR) (\S+)", out, re.M))
     summ = [l.strip("= ") for l in out.splitlines() if re.search(r"\d+ (passed|failed|error)", l)]
-    return fails, (summ[-1] if summ else "no summary: " + out.strip()[-200:])
-now_fail, now_sum = run(ROOT, {})
+    status = "OK" if summ and r.returncode in (0, 1) else "BROKEN"
+    tail = " | ".join(l.strip() for l in out.strip().splitlines()[-4:])[-400:]
+    return fails, (summ[-1] if summ else "no summary (exit %d): %s" % (r.returncode, tail)), status
+now_fail, now_sum, now_st = run(ROOT, {})
 base = os.path.join(SWE, "base_") + sh("git rev-parse --short HEAD").strip()
 if not os.path.isdir(base):
     os.makedirs(base, exist_ok=True); subprocess.run(f"git archive HEAD | tar -x -C {base}", cwd=ROOT, shell=True)
 pp = os.pathsep.join(p for p in (os.path.join(base, "src"), base) if os.path.isdir(p))
-base_fail, base_sum = run(base, {"PYTHONPATH": pp + os.pathsep + os.environ.get("PYTHONPATH", "")})
+base_fail, base_sum, base_st = run(base, {"PYTHONPATH": pp + os.pathsep + os.environ.get("PYTHONPATH", "")})
 print("TESTS RUN:", " ".join(files))
 print(f"YOUR VERSION: {now_sum}\nORIGINAL:     {base_sum}")
-if now_fail is None: print("Your version TIMED OUT: the change may cause an infinite loop."); sys.exit(0)
+if now_st == "NOPYTEST": print("GATE: UNAVAILABLE (pytest missing): verify with a repro script instead"); sys.exit(0)
+if now_fail is None: print("Your version TIMED OUT: the change may cause an infinite loop.\nGATE: FAIL"); sys.exit(0)
+if now_st == "BROKEN" and base_st != "BROKEN":
+    print("Your version cannot even run the tests (import/collection error or crash); the original can.\nGATE: FAIL"); sys.exit(0)
 if base_fail is None: base_fail = set()
 broke, fixed, still = sorted(now_fail - base_fail), sorted(base_fail - now_fail), sorted(now_fail & base_fail)
 print("REGRESSIONS (passed before, fail now: you must fix these):\n  " + ("\n  ".join(broke[:12]) or "none"))
 print("NEWLY PASSING:\n  " + ("\n  ".join(fixed[:8]) or "none"))
 if still: print(f"FAILING BEFORE AND AFTER ({len(still)}): " + " ".join(still[:5]))
-print("GATE: " + ("FAIL" if broke else "PASS"))
+if now_st == "BROKEN": print("NOTE: tests cannot run on the original either; rely on a repro script.")
+print("GATE: " + ("FAIL" if broke else ("INCONCLUSIVE" if now_st == "BROKEN" else "PASS")))
