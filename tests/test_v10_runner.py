@@ -251,9 +251,19 @@ def test_replay_reproduces_baseline():
     assert abs(pess["mean"] - 166.4) <= 1.0, pess                       # SPEC 9.1 table, pessimistic column
     _, x2, _ = _replay("--design", "final", "--base", "r_v4", "--stretch", "2")
     assert abs(x2["mean"] - 207.0) <= 1.0, x2                           # "final x2: v4:207"
-    # the gate is not trivially green: v9_eog as-is is 1.16 x v4 and projects 5 tasks past the cap
+    # review round 2: the rows above cut every stage at its footer time and cap replies at 200/100/60 tokens, so "0 at
+    # the cap" is built in. Measured replies (cut at max_output_tokens 768/2048/2048), then no footer cuts at all:
+    _, m, _ = _replay("--design", "final", "--measured")
+    assert abs(m["mean"] - 163.0) <= 1.0 and m["at_cap"] == 0, m          # SPEC 9.1, footers obeyed (1.09 x v4)
+    _, nc, _ = _replay("--design", "final", "--measured", "--no-cuts")
+    assert abs(nc["mean"] - 172.6) <= 1.0 and nc["at_cap"] == 1, nc      # SPEC 9.1, the real pessimistic row (1.15)
+    assert nc["mean"] > m["mean"] > 154.0
+    _, nc2, _ = _replay("--design", "final", "--measured", "--no-cuts", "--base", "r_v4", "--stretch", "2")
+    assert abs(nc2["mean"] - 249.8) <= 1.0 and nc2["at_cap"] == 16, nc2  # hidden-like: near the cap, like v4 x2
+    # the gate is not trivially green: v9_eog as-is (1.16 x v4) projects 5 tasks past the cap
     rc, g, _ = _replay("--run", str(RACE1 / "r_v9_eog"))
-    assert rc == 1 and not g["pass"] and g["ratio"] > 1.08
+    assert rc == 1 and not g["pass"] and g["ratio"] > 1.08 and len(g["over_cap"]) == 5
+    assert g["knob"] == RP.KNOBS[0] and g["proj_h"] < RP.CLIFF_H
 
 
 def _step(author, pt, ct, t, tool=None, args=None, obs="", tool_s=0.0):
@@ -293,17 +303,68 @@ def _good_task(resolved=True, secs_scale=1.0, **kw):
     return dict(steps=steps, resolved=resolved, **kw)
 
 
+def test_cliff_projection_unit():
+    """SPEC 9.2 H1: every task cap-saturated gives (600 + N x 309.6) / 3600 h: 10.49 h at 120 and 11.35 h at 130, under
+    12 h. A cap above 5.25 min fails at N=130 (time_model 8: never above 5.25), so the projection guards the knob that
+    actually moves the cliff. Tasks below the cap are stretched 1.9x (hidden are about 1.9x public)."""
+    assert abs(RP.cliff_hours([1000.0] * 5, n=120) - 10.49) < 0.01
+    assert abs(RP.cliff_hours([1000.0] * 5) - 11.35) < 0.01 and RP.cliff_hours([1000.0]) < RP.CLIFF_H
+    assert RP.cliff_hours([1000.0], cap=5.25 * 60) < RP.CLIFF_H < RP.cliff_hours([1000.0], cap=5.5 * 60)
+    assert abs(RP.cliff_hours([100.0]) - (600 + 130 * (3.6 + 190.0 + 1.0)) / 3600) < 1e-9
+    assert RP.cliff_hours([]) == 0.0
+
+
+def test_footer_obedience_unit(tmp_path):
+    """Review round 2: the time projection assumed the stages obey the footers; race 2 measures it. The first time a
+    hint reaches a stage counts once; obeyed = the prescribed next step (locator: reply; fixer: EDIT NOW -> edit.py,
+    CONTEXT -> reply within 2 steps, FINISH/TIME -> reply; verifier: finalize.py or submit_patch); a hint after which
+    the stage makes no further step is not counted; v9 traces (no v10 footers) give nothing."""
+    loc = 'LOCATE: 3 symbols\nLOCATOR: 75s used. Locator: stop and reply with your plan now.\n[t=76s]'
+    fin = 'VIEW pkg/m.py\nFINISH: t>=210s. Stop exploring; keep the edit you have and end your stage.\n[t=211s]'
+    tim = 'VERIFY: RED\nTIME: t>=250s. End your stage now (verifier: run finalize.py next).\n[t=251s]'
+    cmd = lambda c: {"command": c}
+    t = dict(steps=[
+        _step("locator", 4000, 40, 1.0, "run_command", cmd('python3 /tmp/swe/locate.py "x"'), loc),
+        _step("locator", 4100, 40, 2.0, "run_command", cmd("python3 /tmp/swe/view.py a.py 1 9"), loc),   # one more call:
+        _step("locator", 4200, 200, 3.0),                                                               # not obeyed
+        _step("fixer", 5000, 40, 4.0, "run_command", cmd("python3 /tmp/swe/view.py a.py 1 9"), fin),
+        _step("fixer", 5100, 40, 5.0, "run_command", cmd("python3 /tmp/swe/view.py a.py 9 19"), ""),     # ignored FINISH
+        _step("fixer", 5200, 80, 6.0),
+        _step("verifier", 6000, 40, 7.0, "run_command", cmd("python3 /tmp/swe/verify.py"), tim),
+        _step("verifier", 6100, 40, 8.0, "run_command", cmd("python3 /tmp/swe/finalize.py"), "READY"),
+        _step("verifier", 6200, 20, 9.0, "submit_patch", {}, "ok"),
+        _step("submitter", 3000, 40, 10.0, "run_command", cmd("python3 /tmp/swe/status.py"), tim)],   # no next step
+        resolved=True)
+    d = _write_run(tmp_path / "r", {"a": t, "b": _good_task()})
+    data = RP.load(str(d), keep_obs=True)
+    assert RP.footer_obedience(data["a"]["steps"]) == {"LOCATOR": [0, 1], "FINISH": [0, 1], "TIME": [1, 1]}
+    assert RP.footer_obedience(data["b"]["steps"]) == {}
+    k = RP.run_kpis(str(d), "r")
+    assert k["footer_obedience"] == {"LOCATOR": [0, 1], "FINISH": [0, 1], "TIME": [1, 1]}   # the repeat counted once
+    assert RP._obeyed("LOCATOR", "locator", [{"kind": "text", "args": "", "fn": None}]) is True
+    assert RP._obeyed("EDIT NOW", "fixer", [{"kind": "ok", "args": "view.py", "fn": "run_command"},
+                                           {"kind": "ok", "args": "edit.py x", "fn": "run_command"}]) is True
+    assert RP._obeyed("CONTEXT", "verifier", [{"kind": "ok", "args": "verify.py", "fn": "run_command"}]) is False
+    assert RP._obeyed("LOCATOR", "fixer", [{"kind": "text", "args": "", "fn": None}]) is None
+
+
 def test_gate_unit_cases(tmp_path):
     base = RP.load(str(_write_run(tmp_path / "base", {f"t{i}": _good_task() for i in range(4)})))
     same = RP.gate(RP.load(str(_write_run(tmp_path / "same", {f"t{i}": _good_task() for i in range(4)}))), base)
     assert same["pass"] and same["ratio"] == 1.0 and same["n"] == 4
+    assert same["ratio_ok"] and same["knob"] is None
+    # R117 restated (review round 2): a slower mean with every task inside the cap is not a cliff risk. It passes, and
+    # the ratio above 1.08 names the first pre-registered knob instead of blocking the ship.
     slow = RP.gate(RP.load(str(_write_run(tmp_path / "slow", {f"t{i}": _good_task(secs_scale=4) for i in range(4)}))), base)
-    assert not slow["pass"] and slow["ratio"] > 1.08
+    assert slow["pass"] and slow["ratio"] > 1.08 and not slow["ratio_ok"], slow
+    assert slow["knob"] == RP.KNOBS[0] == "verifier repair rounds 2 -> 1 (prompts/verifier.md)"
+    assert slow["proj_h"] < RP.CLIFF_H
     # one task projected past cap + 10 s fails the gate even when the mean is fine
     tasks = {f"t{i}": _good_task() for i in range(4)}
     tasks["t0"]["steps"].append(_step("fixer", 9000, 12000, 20.0, "run_command", {"command": "x"}, "ok", 0.0))
     over = RP.gate(RP.load(str(_write_run(tmp_path / "over", tasks))), base, ratio=99)
     assert not over["pass"] and over["over_cap"] == ["t0"]
+    assert over["proj_h"] < RP.CLIFF_H                                  # the cap, not the projection, failed it
     # disjoint ids -> FAIL, never a vacuous PASS
     other = RP.gate(RP.load(str(_write_run(tmp_path / "other", {"zz": _good_task()}))), base)
     assert not other["pass"] and other["n"] == 0
@@ -348,7 +409,8 @@ def test_race2_kpis_pass_on_a_clean_synthetic_race(tmp_path):
     d, base = _race(tmp_path, v10_resolved=(60, 60), ctl_resolved=(40, 40))
     ok, rows, per = RP.race2(str(d), against=str(base))
     assert ok, [r for r in rows if not r["pass"]]
-    assert len(rows) == 14 and {r["kpi"] for r in rows} >= {"resolved sum", "crashes", "time (R117 replay)"}
+    assert len(rows) == 15 and {r["kpi"] for r in rows} >= {"resolved sum", "crashes", "time (R117 replay)",
+                                                             "footer obedience"}
 
 
 @pytest.mark.parametrize("case,kpi", [

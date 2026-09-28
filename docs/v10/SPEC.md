@@ -128,7 +128,7 @@ sub_agents:
 ```yaml
 evaluation:
   max_time_minutes: 5
-  timeout_seconds: 120
+  timeout_seconds: 180
   max_tool_calls: 100
   max_turns: 200
 ```
@@ -208,7 +208,7 @@ thinking_config:
 | file | T | M | why |
 |---|---|---|---|
 | gen_setup.yaml | 0.2 | 256 | a one-call stage, near-greedy, so it copies the literal call |
-| gen_locator.yaml | 1.0 | 1536 | v4/v9 sampling (the only measured one); a runaway costs about 44 s |
+| gen_locator.yaml | 1.0 | 768 | v4/v9 sampling (the only measured one). Review round 2: 768 (from 1,536) bounds the plan at about 2.4x the 120-word target (about 321 tokens). Race-1 locator replies ran median 418-442 and p90 1,020-1,087 tokens. A runaway now costs about 27 s, not 54 s. Race-1 locator tool calls reached 768 in 3 of 5,622 (p99 172-418). |
 | gen_fixer.yaml | 1.0 | 2048 | covers every legitimate L4 tool call (time_model 3); runaway about 58 s |
 | gen_verifier.yaml | 1.0 | 2048 | same |
 | gen_submitter.yaml | 0.2 | 1024 | a one-job stage |
@@ -243,8 +243,8 @@ Prompt rules. Each rule is a lint, R87-R96.
    |---|---|---|
    | setup | 76 | 452 |
    | locator | 363 | 2,334 |
-   | fixer | 350 | 2,256 |
-   | verifier | 334 | 2,106 |
+   | fixer | 368 | 2,356 |
+   | verifier | 352 | 2,205 |
    | submitter | 169 | 1,110 |
 
    Limits enforced by R91: 370 words and 2,600 chars for each prompt, and 1,300 chars for the submitter.
@@ -333,11 +333,11 @@ You are the FIXER, stage 3 of 5. Make the code change in /workspace now.
 Issue:
 {problem_description}
 
-Locator's plan:
-{plan?}
+The locator's plan is the [locator] message below.
 
 <EDITFORM>
 Other helpers, each as python3 /tmp/swe/NAME.py: view.py FILE START END, view.py FILE NAME, grep.py "regex", run.py --timeout 20 "command", verify.py, status.py.
+View files only with view.py and run other code only with run.py.
 <RECOVER>
 <AMNESIA>
 <TIME>
@@ -362,11 +362,11 @@ Issue:
 Plan:
 {plan?}
 
-Fixer's notes:
-{fix_notes?}
+The fixer's notes are the [fixer] message below.
 
 <EDITFORM>
 Other helpers, each as python3 /tmp/swe/NAME.py: status.py, verify.py, finalize.py, view.py, grep.py, run.py.
+View files only with view.py and run other code only with run.py.
 <RECOVER>
 <AMNESIA>
 <TIME>
@@ -422,12 +422,17 @@ Any helper run through run_skill_script also installs all of them. Options work 
 |---|---|---|---|
 | harness -> setup | harness prompt (stage 1 only) | problem, budgets, rules, 150-line tree | fixed |
 | setup -> locator | `For context: [setup] said: READY` | one word | 5 tokens |
-| locator -> fixer | `{plan?}` plus the handoff event | FILES/CAUSE/FIX/REPRO/TESTS | 120 words |
-| fixer -> verifier | `{plan?}`, `{fix_notes?}` plus the handoff | CHANGED/VERIFY | 60 words |
+| locator -> fixer | the handoff event only (review round 2: `{plan?}` paid for it a second time) | FILES/CAUSE/FIX/REPRO/TESTS | 120 words asked; measured p90 1,087 tokens, cut at 768 by `max_output_tokens` |
+| fixer -> verifier | `{plan?}` plus the handoff event (the notes; `{fix_notes?}` removed in review round 2) | CHANGED/VERIFY | 60 words asked; measured p90 244 tokens |
 | any -> later | `$SWE/journal.jsonl` via `status.py`, `$SWE/repro.py`, `$SWE/state.json`, checkpoints | files | status 2,200 chars or fewer |
 | verifier -> submitter | only when the verifier replied without submitting | handoff plus `{plan?}` | small |
 
 `output_key` is written only on a final text reply, so every downstream placeholder is the optional form (`{plan?}`).
+The previous stage's final reply always reaches a stage as the handoff event (`For context:[prev] said: <reply>`,
+facts_internal 2.3), so no stage has a placeholder for its previous stage's `output_key`. Such a placeholder would
+pay for the same text twice (TP::test_handoff_paid_once). `fix_notes` is still stored but no prompt reads it. After an
+in-flow compaction the handoff becomes the summary, so the fixer's instruction no longer carries the plan. The
+summary, `status.py` (repro, journal, diff) and the checkpoints are what is left (section 6).
 
 ---
 
@@ -503,7 +508,7 @@ Any helper run through run_skill_script also installs all of them. Options work 
    CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 2800, "edit": 1500, "run": 2500,
            "verify": 2000, "finalize": 1000, "status": 2200}
    CAP_TOKENS = {k: v // 3 for k, v in CAPS.items()}
-   CONTEXT_TOKENS = 5500; CTX_CALL = 30
+   CONTEXT_TOKENS = 4700; CTX_CALL = 30
    ```
    Every timeout constant is at most 110 s, which is `timeout_seconds` - 10 (R86).
 
@@ -862,6 +867,11 @@ Any helper run through run_skill_script also installs all of them. Options work 
    - ORIGINAL and CURRENT run concurrently, at most 2 processes. Each gets `real_budget(PYTEST_SIDE)`.
    - ORIGINAL results are cached in `state.orig_tests[sha(files)]`.
    - Outcomes come from JUnit (`xml.etree`), keyed `(classname, name)` and displayed as `path::Class::name`.
+     pytest names classnames after node ids relative to ITS rootdir, the directory of the nearest ini file. All 45
+     rich snapshots ship `tests/pytest.ini`, so `tests/test_markup.py` reports as `test_markup`. `file_for()` therefore
+     tries every dotted suffix of each file, dropping the fewest leading parts first, and needs a dot boundary.
+     Module-level collection errors map the same way. Before review round 2, ids on rich tasks could not be re-run,
+     and the de-flake rerun silently ran nothing.
    - `UNKNOWN`, never pass, when: exit code 2/3/4/5, no JUnit, 0 tests, the disabled text, or a timeout on both sides.
    - Collection errors (an `<error>` on a module-level testcase) on CURRENT only mean `collects=0`; on both sides they
      mean UNKNOWN for that file.
@@ -911,8 +921,18 @@ Any helper run through run_skill_script also installs all of them. Options work 
   3. for the tracked changed paths, `git checkout <baseline> -- <p>` per path; untracked changed paths are removed;
   4. `git apply --binary <ckpt>`;
   5. verify that `diff_sha()` equals `rec.sha`;
-  6. on any failure, restore the saved current diff the same way and return `RESTORE FAILED: <why>`.
-- `auto_restore_if_empty()` is used by `late_guard()` and `finalize.py` (R71, R76).
+  6. on any failure, restore the saved current diff the same way and return `RESTORE FAILED: <why>`;
+  7. after a success, `tidy()` (review round 2). A checkpoint stores the tree as it was scored: `verify --repro-only`
+     saves the raw diff before any hygiene, and a full verify keeps root scratch. So a restore could bring back a
+     test/config edit (the hidden test_patch then fails to apply: a 0) and scratch that finalize had already deleted.
+     `tidy()` runs `hygiene_revert()` and then `clean_scratch()` on the restored tree. The message is
+     `restored checkpoint #k`, plus one line for each thing it undid (`reverted test/config edits: ...`,
+     `CLEANED: removed ...`). The sha check in step 5 runs before tidying, so the transaction stays exact.
+- `clean_scratch()`, `shadowed()` and `scratch_note()` live here (moved from `finalize.py` in review round 2), so both
+  restore paths share them.
+- `auto_restore_if_empty()` is used by `late_guard()` and `finalize.py` (R71, R76). Its message stays one line (the
+  late guard prefixes a helper's output with it): what `tidy()` undid follows in parentheses,
+  `RESTORED checkpoint #k: the tree had no source change at t=Ns. (then reverted test/config edits: ...; CLEANED: removed ...)`.
 
 ### 4.11 `verify.py`
 - **CLI.** `USAGE` = `python3 /tmp/swe/verify.py [--repro-only] [--tests FILE ...] [--list-tests]`. Flags: `--repro-only`
@@ -1009,13 +1029,15 @@ Any helper run through run_skill_script also installs all of them. Options work 
      because under the grader's `PYTHONPATH=<workspace>` a root `typing_extensions.py` or `py.py` makes every test fail
      to import (the fastapi_14448 patch shape).
   3. When there is no source change and a non-empty checkpoint exists: restore the best one (any key) and print
-     `RESTORED: ... (the tree had no source change)`.
+     `RESTORED: ... (the tree had no source change)`. Steps 1 and 2 ran before the restore, so the restore tidies the
+     restored tree itself (section 4.10, step 7). The lines for what it undid follow the RESTORED line (review round 2).
+     Before that fix, finalize printed READY for a patch holding a test-file edit and the scratch file it had just deleted.
   4. Otherwise, when the current diff sha has no score and at least `MIN_EVAL` (2 s) remain before `T_EVAL_END`: a quick
      evaluation (import plus claims, current against the cached original) within `FINALIZE_QUICK`, ended by
      `T_EVAL_END` (review round 1). Then, when `best_against()` finds a checkpoint that strictly beats the current score
      (the quick 5-tuple when either side is quick) and, if the current evaluation is incomplete, has definite evidence
      (section 4.10), `restore` it:
-     `RESTORED: checkpoint #k (GREEN, t=131s) replaced the current tree (RED, t=205s).`
+     `RESTORED: checkpoint #k (GREEN, t=131s) replaced the current tree (RED, t=205s).` It is tidied the same way.
   5. Compile every changed `.py`. A failure gives
      `NOT READY: SYNTAX ERROR FILE:LINE: <msg>. Fix it with edit.py, then run finalize.py again.`
   6. When no source change remains:
@@ -1132,7 +1154,9 @@ Fixed part of every call:
 - ADK identity, about 150 chars.
 
 That is about 2,560 tokens (2,640 with `submit_patch`) (config_space #14). Instructions are 133 / 684 / 661 / 617 / 326
-tokens. The problem is p50 140, p95 720 and max 2,970 tokens. The plan is 120 words or fewer (about 200 tokens, seen twice).
+tokens. The problem is p50 140, p95 720 and max 2,970 tokens. The plan is asked for in 120 words. Measured race-1 plans
+ran median 442 and p90 1,087 tokens, so they are now cut at 768 by `max_output_tokens`, and each stage sees a plan only once
+(review round 2, below).
 
 | stage | stage start, p50 / worst | dynamic at typical caps | peak p50 / worst | budget line |
 |---|---|---|---|---|
@@ -1156,22 +1180,58 @@ Round-1 changes and the R95 model (tests/test_v10_prompts.py, read from the prom
   2 repro-only calls (the rewrite-once rule) and 1 run. R and K are parsed from the prompts, so a looser prompt loosens
   the model with it.
 - **Caps.** view 2,800 chars (from 4,000). Every output is also capped at `CAP_TOKENS` estimated tokens.
-- **Guard.** The context meter shows CONTEXT at `CONTEXT_TOKENS` = 5,500 estimated tokens. After it the locator
-  replies, the fixer makes at most one edit, and the verifier runs finalize and submits.
-- **Checks** (statement lengths: p95 2,455 chars; the single outlier 10,095 chars, next 2,934):
-  - A. p95 statement, typical outputs at 3.06 chars/token: 12,000 tokens or fewer (fixer 11.2k).
-  - B. p95 statement, outputs at caps and 2.3 chars/token, bounded by the guard: under 14,336 (fixer 14.19k).
-  - C. outlier statement at 3.06 chars/token, guarded: under 14,336 (fixer 14.17k).
-  - D. outlier statement, the whole permitted mix at caps and 2.3, no guard, plus the largest generation: 2,048 or more
-    below 32,768 (fixer 17.9k + 2,048).
-  - A typical first fixer round (3 views, 3 edits, 1 verify, about 5.1k estimated) stays below the threshold, so the
-    hint only fires in later rounds.
+- **Guard.** The context meter shows CONTEXT at `CONTEXT_TOKENS` estimated tokens (5,500 in round 1, 4,700 since
+  round 2). After it the locator replies, the fixer makes at most one edit, and the verifier runs finalize and submits.
 
-R94 checks the stage start against the real files: 8,000 tokens or fewer.
+Round-2 changes (review round 2). The round-1 checks assumed a 120-word plan and 60-word notes. They left the fixer 144
+tokens under the line, and the fixer crossed it at the measured median plan (14,434 tokens at 442 tokens of plan).
+Three things caused that:
+- the prompts' word limits are not what the model writes: race-1 locator replies ran median 418-442 and p90 1,020-1,087
+  tokens, with 2-4 runaways of 1,536 or more, and v9's "under 250 words" was overrun 2-4x;
+- the plan was paid twice in the fixer, through `{plan?}` and again in the handoff event (and the notes twice in the
+  verifier);
+- the meter sees only helper output: raw `read_file` (up to 10,000 chars), raw `run_command` (up to 5,000 + 5,000) and
+  graph-tool results never reach it.
 
-If a stage overruns and in-flow compaction still fires: the instruction keeps the problem and the plan, AMNESIA sends the
-model to `status.py` (which also restarts the context meter), and the journal and checkpoints hold the work. Overflow
-needs about 25 or more calls in one stage, and the CONTEXT/FINISH/TIME footers make that rare.
+The fixes:
+- **Handoff paid once.** `{plan?}` is gone from the fixer and `{fix_notes?}` from the verifier; the text arrives in the
+  handoff event (TP::test_handoff_paid_once). The old fixer prompt misses the B margin below
+  (TP::test_double_paid_handoff_breaks_the_margin).
+- **The locator's `max_output_tokens` is 768** (from 1,536). This bounds the plan at about 2.4x its 120-word target and
+  halves a runaway reply (about 27 s instead of 54 s on L4). Cost: a reply that writes its analysis before `FILES:` is
+  cut first. In r_v4 and r_v9_eog, 25 of 105 locator replies were over 768 tokens. The cut would remove `FILES:` in 3 of
+  them, 2 of which the old 1,536 cap kept (rich_3935 in r_v9_eog, rich_3472 in r_v4). A fourth, a 4,096-token runaway,
+  had no `FILES:` at all. The prose before the cut still names the file and the cause.
+- **Sizes measured, not instructed.** Every earlier reply enters the model at its measured race-1 size, bounded by the
+  stage's `max_output_tokens`: p50 for A; p90 for B, C and R94 (plan 768, the cap, since the p90 of 1,087 is above it;
+  notes 244; verifier reply 188); `max_output_tokens` itself for D.
+- **Metered I/O only.** The fixer and verifier prompts say `View files only with view.py and run other code only with
+  run.py.` (R96).
+- **`CONTEXT_TOKENS` = 4,700** (from 5,500), the highest value that gives B at least 1,000 tokens of margin.
+
+- **Checks** (statement lengths: p95 2,455 chars; the single outlier 10,095 chars, next 2,934), fixer / verifier:
+  - A. p95 statement, median handoffs, typical outputs at 3.06 chars/token: 12,000 tokens or fewer (11,051 / 9,283).
+  - B. p95 statement, p90 handoffs, outputs at caps and 2.3 chars/token, bounded by the guard: at least 1,000 under
+    14,336 (13,304 / 13,046; margins 1,032 / 1,290; the locator 2,699).
+  - C. outlier statement, p90 handoffs, 3.06 chars/token, guarded: under 14,336 (13,545 / 13,325; margins 791 / 1,011).
+  - D. outlier statement, handoffs at `max_output_tokens`, the whole permitted mix at caps and 2.3, no guard, plus the
+    largest generation: 2,048 or more below 32,768 (18,070 + 2,048 / 18,420 + 2,048).
+  - A first fixer round at measured sizes (3 views, 3 edits of 256 model-written tokens, the p90 of 5,329 race-1 edit
+    calls, 1 verify: 4,598 estimated) stays below the threshold. The hint only fires in later rounds. The trade: a
+    first round of 3 edits at the old worst-case 400 tokens each (5,030 estimated) now gets the CONTEXT hint at its
+    verify. The fixer then replies, and the verifier repairs in a fresh context.
+- **Residual risk.** A runaway fixer reply (notes at the 2,048 cap; the race-1 maximum was 1,139 of 98) still puts
+  the verifier past the line in the B scenario. D shows it cannot overflow.
+
+R94 checks the stage start against the real files, handoffs at the measured p90: 8,000 tokens or fewer (verifier
+worst 7,287).
+
+If a stage overruns and in-flow compaction still fires:
+- The instruction keeps the problem. It keeps the plan only in the verifier and the submitter; the fixer's plan was in
+  the handoff, which becomes the compaction summary.
+- AMNESIA sends the model to `status.py` (which also restarts the context meter). It shows the repro, the journal tail
+  and the diff, and the checkpoints hold the work.
+- Overflow needs about 25 or more calls in one stage, and the CONTEXT/FINISH/TIME footers make that rare.
 
 ---
 
@@ -1259,7 +1319,7 @@ Test files and owners:
 | R57 | Discovery picks only collectable files (never `tests/render.py`, `tests/_card_render.py`, `tools/*.py`, `conftest.py`); the score rule; `--tests` first; 3 or fewer; `--list-tests` | TV::test_discovery_rules | CI |
 | R58 | pytest argv and env are captured with a fake `python3` on `PATH`: `-s -m pytest`, `-p no:cacheprovider -p no:anyio -o timeout=0 -o python_classes="Test* *Test"`, `--junitxml`, `PYTHONSAFEPATH=1`, `PYTHONNOUSERSITE=1`; never `-o addopts=`; never `-c ... pytest.main` | TV::test_grader_flags_and_env | CI |
 | R59 | `grader_env` re-roots `PYTHONPATH` from ws to base, prepends `tree/src` when the origin map says `src`, and sets `PYTHONPATH=tree` when it was empty | TV::test_pythonpath_mapping | CI |
-| R60 | JUnit parsing: exact ids, including params with spaces and unicode; passed-to-failed and passed-to-error are regressions; de-flake by one rerun; a collection error only on current gives RED; on both sides, UNKNOWN; exit 2/4/5, no JUnit, 0 tests or timeouts on both sides give UNKNOWN, never pass (F3 regression) | TV::test_test_outcomes_and_unknown | CI |
+| R60 | JUnit parsing: exact ids, including params with spaces and unicode; passed-to-failed and passed-to-error are regressions; de-flake by one rerun; a collection error only on current gives RED; on both sides, UNKNOWN; exit 2/4/5, no JUnit, 0 tests or timeouts on both sides give UNKNOWN, never pass (F3 regression); classnames relative to a nested pytest rootdir (`tests/pytest.ini`, every rich task) map to runnable `path::Class::name` ids and the rerun really runs them (review round 2) | TV::test_test_outcomes_and_unknown, TV::test_parse_junit_rootdir_below_workspace, TV::test_rerun_with_nested_pytest_ini | CI |
 | R61 | In a throwaway venv with the harness shim applied verbatim (`container_setup.py:968-1043` script), verify prints `TESTS: unavailable (pytest is disabled ...)`, still runs claims, and never imports pytest in-process or through `-c` | TV::test_masked_pytest | CI |
 | R62 | The verdict table of 4.11 on fixtures (every row); the regression wording contains the old-behaviour sentence and never `undo` or `must fix` (F4 regression); GREEN is possible without any related test file | TV::test_verdict_table_and_wording | CI |
 | R63 | Memo: an identical (diff, repro, tests, mode) gives `SAME AS LAST RUN` plus NEXT in 300 ms or less; the third identical run adds STOP | TV::test_memo | CI |
@@ -1270,32 +1330,32 @@ Test files and owners:
 | R68 | Hang fixture (a package with `while True: pass` at import, plus an endless claim): verify returns within its deadline + 2 s and no child survives | TV::test_verify_hang_bounded | CI |
 | R69 | Verify output is 2,000 chars or fewer on adversarial fixtures (50 regressions, 20 kB assertion lines), with the verdict on line 1 and a NEXT line | TV::test_verify_output_bounds | CI |
 | R70 | Score order, table-driven: empty < import error < collection error < hang < claims still failing < regressions < pass; 1 fixed claim with 1 regression beats 0 fixed with 0 regressions; comparisons only within the same key; quick 5-tuples | TF::test_checkpoint_score_order | CI |
-| R71 | `restore()`: afterwards the diff sha equals the checkpoint's; an injected `git apply` failure rolls back to the saved current tree byte-exactly; refused at t 285 or later | TF::test_restore_transactional | CI |
+| R71 | `restore()`: afterwards the diff sha equals the checkpoint's; an injected `git apply` failure rolls back to the saved current tree byte-exactly; refused at t 285 or later; after the sha check it tidies (protected paths reverted, scratch deleted, new package modules kept) and reports each thing it undid (review round 2) | TF::test_restore_transactional, TF::test_restore_tidy_unit | CI |
 | R72 | Finalize hygiene matrix: tracked protected files reverted; scratch patterns, extensions, files over 1 MB and vendored trees deleted; a new module inside a package kept; READY with diffstat | TF::test_finalize_hygiene_matrix | CI |
 | R73 | Finalize NOT READY for empty, test-only (after revert) and a syntax error left by raw `sed`; a large patch (26 files, 300 kB) gives READY plus NOTE, never NOT READY | TF::test_finalize_not_ready_and_notes | CI |
-| R74 | Restore rules: a strictly better same-key checkpoint replaces a worse current tree; ties keep the current; an empty tree with a checkpoint is restored; an unevaluated current tree gets a quick evaluation below t 275 and is kept as-is at 275 or later | TF::test_finalize_restore_rules | CI |
+| R74 | Restore rules: a strictly better same-key checkpoint replaces a worse current tree; ties keep the current; an empty tree with a checkpoint is restored; an unevaluated current tree gets a quick evaluation below t 275 and is kept as-is at 275 or later; a restored checkpoint holding a test-file edit and a root scratch file ends READY with neither (review round 2) | TF::test_finalize_restore_rules, TF::test_restore_never_brings_back_tests_or_scratch | CI |
 | R75 | The final diff encodes and `git apply --check`s onto a fresh baseline copy (including a file with astral characters, F11 class); `final_done`, `final_sha` and `final_t` are set; any later tree change clears the FINAL banner | TF::test_finalize_diff_roundtrip_and_final_flag | CI |
-| R76 | Late guard: at fake clock 255 or later, with no source change and a stored checkpoint, the next output of any helper starts with RESTORED and the tree equals the checkpoint; below 255, or when final, nothing happens | TF::test_late_auto_restore | CI |
+| R76 | Late guard: at fake clock 255 or later, with no source change and a stored checkpoint, the next output of any helper starts with RESTORED and the tree equals the checkpoint (tidied: no test edit, no scratch, what was undone on the same line); below 255, or when final, nothing happens | TF::test_late_auto_restore, TF::test_restore_never_brings_back_tests_or_scratch | CI |
 | R77 | Finalize takes 1.5 s or less without quick evaluation and 15 s or less with it | TF::test_finalize_timing | CI |
 | R78 | The tree is exactly Sequential[setup, locator, fixer, verifier, submitter], all LlmAgents with `include_contents: none` and the single model id, and compiles via `scripts/validate.py submissions/v10` | TB::test_tree_and_official_compile | CI |
 | R79 | Every stage has BASE8 and `skills: [skills/swe-tools]`; `submit_patch` only on verifier and submitter (YAML and compiled tool names) | TB::test_tool_sets_and_skills | CI |
 | R80 | The gen-config table of section 2; `include_thoughts: false` everywhere; no `seed` or `thinking_level`; compiled `extra_args` has `enable_thinking: False` | TB::test_generation_configs | CI |
-| R81 | `eval_config.yaml` is exactly `{max_time_minutes: 5, timeout_seconds: 120, max_tool_calls: 100, max_turns: 200}` under `evaluation:` | TB::test_eval_config | CI |
+| R81 | `eval_config.yaml` is exactly `{max_time_minutes: 5, timeout_seconds: 180, max_tool_calls: 100, max_turns: 200}` under `evaluation:` | TB::test_eval_config | CI |
 | R82 | `output_key`: locator `plan`, fixer `fix_notes`, none elsewhere | TB::test_output_keys | CI |
 | R83 | `scripts/pack_bundle.py submissions/v10 out.zip`: only allowed extensions; no `__pycache__`, dotfiles, symlinks or extensionless files; `agent.yaml` at the root; sorted entries, fixed mtime 1980-01-01, mode 0644; the same sha256 twice; under 1 MB | TB::test_pack_deterministic | CI |
 | R84 | Frozen trees unchanged. Tree sha256 (walk sorted; skip `__pycache__`, `*.pyc`, `._*`, `.DS_Store`; hash `rel\0content\0`): `submissions/v9_eog` 41db23fcd48cf2b52f21beb691097232eb4a5c5b739e7fb656fdc95fd3c940b1, `submissions/v4` 38eb7a97cdbb6aa91577231dcc1bf33fa256b60c48985445578c603d7ea181ed, `helpers_v9` c40b410b58d0fca3c26708c01032c8716683bc49e5b88b2ef5a877e97bdd4157 (integrator re-pin, 2026-09-28: the first pin ed996c63... predates Carson's committed gate fix 26dd7b9; TB::test_frozen_pins_match_git checks the pin against that commit and that no frozen tree has uncommitted changes) | TB::test_frozen_unchanged | CI |
 | R85 | 12 h arithmetic from the shipped values: `600 + N × (60 × max_time_minutes + 3.6 + 5 + 1) <= 0.95 × 43,200` for N=130 | TB::test_fits_12h | CI |
 | R86 | Every timeout constant in `_swe_common` is 110 s or less (`timeout_seconds` - 10) | TB::test_deadlines_under_command_timeout | CI |
-| R87 | Brace lint: the only `{...}` in any prompt are `{problem_description}`, `{plan?}` and `{fix_notes?}`; no other brace characters | TP::test_brace_lint | CI |
+| R87 | Brace lint: the only `{...}` in any prompt are `{problem_description}`, `{plan?}` and `{fix_notes?}`; no other brace characters; per stage exactly the set it needs (since review round 2: fixer `{problem_description}` only, verifier `{problem_description}` and `{plan?}`) | TP::test_brace_lint | CI |
 | R88 | 0 backticks in prompts and SKILL.md; every `run_skill_script(` example lists `file_path=` before `skill_name=` | TP::test_no_backticks_template_order | CI |
 | R89 | Named tools: prompts, SKILL.md and every helper string constant (AST) name only tools declared on that stage (registry names plus `run_skill_script`, `load_skill`, `list_skills`, and known hallucinations `git_grep`, `exit_loop`, `bash`); `submit_patch` only in verifier and submitter prompts and in no helper string; graph tools named nowhere in the bundle; the harness prompt rendered by `build_agent_prompt` with graphs on names only tools declared on setup, except `submit_patch` (the documented exception, 0.2) | TP::test_named_tools_declared | CI |
 | R90 | RECOVER, AMNESIA and TIME are byte-identical in locator, fixer and verifier; RECOVER is also in submitter; EDITFORM is byte-identical in fixer, verifier and submitter; all equal the section 3 text | TP::test_shared_blocks_identical | CI |
 | R91 | Sizes: at most 370 words and 2,600 chars per prompt excluding placeholders; submitter at most 1,300 chars; setup at most 600 chars | TP::test_prompt_sizes | CI |
 | R92 | Every `python3 /tmp/swe/X.py ...` command in prompts and SKILL.md names an existing script and only flags in its `FLAGS`; each rendered example parses with `parse_args` | TP::test_prompt_commands_match_flags | CI |
 | R93 | SKILL.md: `name` equals the directory, description 300 chars or fewer, the install line first, usage lines equal each script's `USAGE` | TP::test_skill_md | CI |
-| R94 | Worst-case stage-start prompt (the 10,095-char problem, a 120-word plan, 60-word notes, compiled declarations, skill boilerplate, and the harness prompt for setup) is 8,000 tokens or fewer | TP::test_static_stage_start_budget | CI |
-| R95 | Per stage, the call mix the prompts permit (section 6): A typical at 3.06 chars/token with a p95 statement, 12,000 or fewer; B at caps and 2.3 chars/token with the context meter's guard, under 14,336; C the outlier statement guarded, under 14,336; D unguarded at caps and 2.3, 2,048 or more below 32,768 | TP::test_worst_case_stage_budget, TP::test_context_meter_does_not_cut_a_normal_first_round, TC::test_context_meter_* | CI |
-| R96 | Protocol rules present: locator (title-to-code-names, `--obj`, runtime truth, CLAIM repro, "fails on original", plan fields); fixer (COMPLETE, never "nothing needs changing", the verify loop with SIBLINGS/SPEC GAPS/REGRESSIONS, the protected-files rule); verifier (status first, the empty rule, 2 repairs and t 240, the old-behaviour rule, finalize, submit last); submitter (finalize, EMPTY, submit) | TP::test_prompt_rules_present | CI |
+| R94 | Worst-case stage-start prompt (the 10,095-char problem, every earlier reply at its measured race-1 p90 bounded by `max_output_tokens` (plan 768, notes 244, verifier reply 188 tokens), paid once in the handoff and again for any placeholder, compiled declarations, skill boilerplate, and the harness prompt for setup) is 8,000 tokens or fewer; no stage has a placeholder for its previous stage's `output_key` (review round 2) | TP::test_static_stage_start_budget, TP::test_handoff_paid_once, TT::test_static_stage_render | CI |
+| R95 | Per stage, the call mix the prompts permit, with handoffs at measured sizes (section 6): A typical at 3.06 chars/token with a p95 statement and median handoffs, 12,000 or fewer; B at caps and 2.3 chars/token with p90 handoffs and the context meter's guard, at least 1,000 under 14,336; C the outlier statement guarded, under 14,336; D unguarded at caps and 2.3 with handoffs at `max_output_tokens`, 2,048 or more below 32,768; the double-paid fixer prompt fails B (control) | TP::test_worst_case_stage_budget, TP::test_double_paid_handoff_breaks_the_margin, TP::test_context_meter_does_not_cut_a_normal_first_round, TC::test_context_meter_* | CI |
+| R96 | Protocol rules present: locator (title-to-code-names, `--obj`, runtime truth, CLAIM repro, "fails on original", plan fields); fixer (COMPLETE, never "nothing needs changing", the verify loop with SIBLINGS/SPEC GAPS/REGRESSIONS, the protected-files rule); verifier (status first, the empty rule, 2 repairs and t 240, the old-behaviour rule, finalize, submit last); submitter (finalize, EMPTY, submit); fixer and verifier: view only with view.py and run code only with run.py, so no unmetered output enters the stage (review round 2) | TP::test_prompt_rules_present | CI |
 | R97 | For all 74 tasks: gold and test patch parse and round-trip; gold touches no protected file; every test_patch file is protected; the new-file classification matches; each stage renders with this statement within R94 | TT::test_static_patch_facts[tid] | CI |
 | R98 | `locate.py` recall with the problem statement as the query, on local snapshots: gold file at rank 1 in 21/40 or more, top 3 in 28/40 or more, top 8 in 34/40 or more (target 23/30/35); the 6 known misses xfail non-strict; per task 3 s or less and 1,800 chars or fewer | TT::test_locate_recall + TT::test_locate_budget[tid] | CI |
 | R99 | Every gold hunk applied by `edit.py` (SEARCH/REPLACE with the hunk's old/new lines, and separately `--lines` bottom-up; new files via `--create`) gives files byte-identical to `git apply` (40 local tasks now; baseline 122/122 hunks) | TT::test_gold_hunks_via_edit[tid] | CI |
@@ -1315,8 +1375,8 @@ Test files and owners:
 | R113 | Mock-LLM flow through the compiled bundle in the real `Evaluator` (subprocess sandbox, synthetic task, `EventsCompactionConfig(5, 2, 14336, 5)`): (a) the happy path ends at the verifier's submit + text, and the submitter never runs; (b) the verifier replies without submitting, and the submitter submits; (c) setup replies READY without a call, and the locator's "can't open file" leads to the RECOVER install; (d) compaction forced mid-fixer raises nothing and `status.py` recovers; (e) the last LLM call's prompt is under 14,336 tokens in every scenario; (f) the submitter replies without submitting, the nudge restarts the pipeline, the FINAL banner makes it converge, and the verifier submits | TFL::test_flow[a-f] | CI |
 | R114 | Scripted-gold end-to-end on 3 local tasks (rich_3278, rich_3480, rich_4075) through the real Evaluator with the mock model (install, locate, repro from the hidden tests, gold via `edit.py`, verify, finalize, submit) gives resolved=True; a scripted raw `sed` of the hidden test file is reverted and the task still resolves | TFL::test_scripted_gold_e2e[tid] | NIGHTLY |
 | R115 | `scripts/run_eval.py` sets `events_compaction_config=EventsCompactionConfig(compaction_interval=5, overlap_size=2, token_threshold=14336, event_retention_size=5)` unless `G4_COMPACTION=0`; `G4_L4_SCALE=s` divides `--max-time-minutes` and `--timeout-seconds` by s and writes `s` to `/tmp/swe/clock_scale` in every agent sandbox; `G4_NO_EDITABLE=1` skips the `-e /workspace` install; defaults are unchanged for other callers (monkeypatched EvalConfig capture) | TR::test_run_eval_compaction_scale_noeditable | CI |
-| R116 | `scripts/replay_l4.py --baseline` reproduces v4 as-is at 150.2 ± 0.5 s/task and `--design final` gives 154.0 ± 1.0 on the r_v9_eog base, from `eval/race1/runs` (skips when absent) | TR::test_replay_reproduces_baseline | CI |
-| R117 | Ship gate: `scripts/replay_l4.py --run eval/runs/r2_v10_1` re-times every v10 race-2 call with the L4 model; the mean is at most 1.08 × r_v4's replay on the same task ids; no task is projected past cap + 10 s | TR::test_replay_gate | REPLAY |
+| R116 | `scripts/replay_l4.py --baseline` reproduces v4 as-is at 150.2 ± 0.5 s/task and `--design final` gives 154.0 ± 1.0 on the r_v9_eog base; with `--measured` 163.0 ± 1.0 (0 at the cap), with `--measured --no-cuts` 172.6 ± 1.0 (1 at the cap), and 249.8 ± 1.0 (16 at the cap) on r_v4 ×2, from `eval/race1/runs` (skips when absent) | TR::test_replay_reproduces_baseline | CI |
+| R117 | Ship gate (restated in review round 2, section 9.2): `scripts/replay_l4.py --run eval/runs/r2_v10_1` re-times every v10 race-2 call with the L4 model; no task is projected past cap + 10 s and the N=130 hidden-run projection is under 12 h; the mean against r_v4's replay on the same task ids is reported, and above 1.08 × it names the first pre-registered knob; footer obedience is reported | TR::test_replay_gate, TR::test_gate_unit_cases, TR::test_cliff_projection_unit, TR::test_footer_obedience_unit | REPLAY |
 | R118 | Race-2 KPIs as pre-registered in section 10.3 | TR::test_race_kpis | RACE |
 | R119 | Linux parity: `V10_ONLY=1 scripts/linux_test.sh` runs all `tests/test_v10_*` in `python:3.12-slim` with `--cpus 2 --memory 4g`, `TMPDIR` unset and `TEST_TMPDIR=/tmp`, and they pass | TR::test_linux_parity_script (runs the script when Docker is available) | NIGHTLY |
 | R120 | The `no_orphans` fixture detects a deliberately leaked `sleep` (self-test) and is autouse in every v10 test module | TC::test_no_orphans_fixture_detects | CI |
@@ -1454,25 +1514,61 @@ base, against 3 for v4 as-is.
 Hidden-like tasks (every stage ×2, then the clock rules): v10 averages 199-221 s against v4's 236-264 s (×2, capped). That
 is 0.81-0.93 × v4 central and 0.85-0.94 pessimistic, because the footers end stages that v4 let run to the cap.
 
+**Review round 2: the table above is optimistic by construction.** Every column, including "pessimistic", cuts the
+locator at 95 s (150 s), the fixer at 210 s and the verifier at 262 s. It also caps stage replies at 200/100/60 tokens
+(`design_B_replay.py` REPLY_CAP), while race-1 locator replies ran median 418-442 and p90 1,020-1,087 tokens. No task can
+pass about 275 s under those rules, so "0 at 295 s" is a property of the model, not a result. The rows below keep each
+trajectory's measured replies, cut only at v10's `max_output_tokens` (locator 768 since round 2, fixer and verifier
+2,048). They are shown with the footers obeyed and with no footer cuts at all, the real pessimistic case, since nothing
+makes gemma obey a footer. Command: `.venv/bin/python docs/v10/final_replay.py` (last block), ported as
+`scripts/replay_l4.py --design final --measured [--no-cuts] [--stretch 2]` (R116).
+
+| base (51 tasks) | measured replies, footers obeyed | measured replies, no footer cuts | ×2, footers obeyed (vs v4 ×2 capped, 236.8) | ×2, no footer cuts |
+|---|---|---|---|---|
+| r_v4 | 147.2 (0.98), 0 at cap | 150.5 (1.00), 2 at cap | 210.3 (0.89), 0 | 249.8 (1.05), 16 |
+| r_v9_eog | 163.0 (1.09), 0 | 172.6 (1.15), 1 | 223.4 (0.94), 0 | 268.5 (1.13), 31 |
+| r_v9_c | 139.4 (0.93), 0 | 144.6 (0.96), 0 | 201.9 (0.85), 0 | 241.1 (1.02), 16 |
+| r_v9_eg | 148.6 (0.99), 0 | 151.9 (1.01), 1 | 210.4 (0.89), 0 | 241.3 (1.02), 19 |
+| r_v9_eo | 154.8 (1.03), 0 | 160.1 (1.07), 1 | 216.1 (0.91), 0 | 262.8 (1.11), 23 |
+| r_v9_og | 163.0 (1.09), 0 | 173.3 (1.15), 2 | 219.8 (0.93), 0 | 263.9 (1.11), 28 |
+
+So on public-like tasks v10 is 0.93-1.09 × v4 if the footers are obeyed and 0.96-1.15 × if they are not; the old 1.08 gate
+would fail on the v9_eog and v9_og bases either way. On hidden-like tasks the saving claimed above comes entirely from
+obeyed footers. Without them v10 is 1.02-1.13 × v4 ×2 capped, with 16-31 of 51 tasks at the cap (v4's own stages would be
+capped there as well). The 12 h cliff is unaffected (9.2): at the cap the per-task wall is the cap.
+
 ### 9.2 The 12 h cliff
 - **H1 (measured: hidden tasks are cap-saturated; v4 took about 308 s/task and about 10.4 h).** The per-task wall is
   `setup 3.6 + min(agent, 300 + 5 s maximum run_command overshoot) + teardown under 1 s` (`execution.py:27-40`).
   `run_skill_script` runs in a thread and does not delay the deadline (`skill_toolset.py:494`). Every helper finishes
   inside `real_budget`. v10 keeps the same cap, so the worst case is `600 + 120 × 309.6` = **10.49 h** for N=120 and
   11.35 h for N=130, identical to v4. **The whole-run wall is v4's or less: +0% against the +8% allowance.**
-- **H2 (public-like hidden tasks).** Central 0.86-1.03 × v4 and pessimistic 0.93-1.11 × v4 on public-like trajectories.
-  In that world, 120 tasks total about 5.3-6.1 h, so even 1.11× leaves more than 5 h of margin. The +8% line matters
-  only when tasks approach the cap, which is H1, where v10 cannot exceed v4.
+- **H2 (public-like hidden tasks).** Central 0.86-1.03 × v4 and pessimistic 0.93-1.11 × v4 on public-like trajectories
+  under the footer-cut model. With measured replies it is 0.93-1.09 × with the footers obeyed and 0.96-1.15 × without
+  (review round 2, 9.1). In that world, 120 tasks total about 5.3-6.3 h, so even 1.15× leaves more than 5 h of margin.
+  The +8% line matters only when tasks approach the cap. That is H1, where v10 cannot exceed v4.
 - **H3 (in between, ×2 stretch).** 0.81-0.94 × v4.
 - **If verification counts** (UNVERIFIED): the hang tail per task is `timeout_seconds` 120 against v4's 180. Worst case
   10.9 h for N=120.
-- **Ship gate R117.** The race-2 v10 traces, re-timed, must be at most 1.08 × r_v4's replay on the same tasks. The knobs,
-  if it fails:
-  1. the verifier repair rounds, 2 to 1 (prompt);
-  2. `T_QUICK` 270 to 250 (applied in review round 1, as 235 with the `T_VERIFY_END` clamp, section 4.1);
-  3. the LOCATOR banner, 75 to 60.
+- **Ship gate R117 (restated in review round 2, before any race-2 run; race2_checklist Addenda 1).** The cliff lives in
+  the cap-saturated regime, so the gate is stated there. The race-2 v10 traces, re-timed with the L4 model
+  (`scripts/replay_l4.py --run`), must have:
+  - no task past cap + 10 s;
+  - an N=130 hidden-run projection under 12 h: 600 s, plus per task 3.6 + min(1.9 × re-timed, 305) + 1 s. The
+    projection is at most 11.35 h while the cap holds, and it fails for a cap above 5.25 min.
 
-  Each is a one-line change covered by R18 and R65.
+  The replayed mean against r_v4 on the same ids is reported. It no longer blocks: before round 2 it was the blocker,
+  and v10 projects 0.93-1.15 × on public-like tasks (9.1), about 6.3 h in total, which says nothing about the cliff.
+  Above 1.08 ×, the pre-registered knobs apply in order:
+  1. the verifier repair rounds, 2 to 1 (prompt; first);
+  2. the LOCATOR banner, 75 to 60 (second).
+
+  Already applied: `T_QUICK` 270 to 250 (review round 1, as 235 with the `T_VERIFY_END` clamp, section 4.1) and the
+  locator's `max_output_tokens` 1,536 to 768 (review round 2). Each knob is a one-line change covered by R18 and R65.
+- **Footer obedience must be measured in race 2** (review round 2). Every "footers obeyed" figure above assumes gemma
+  heeds LOCATOR, EDIT NOW, CONTEXT, FINISH and TIME, and nothing enforces that. `replay_l4.run_kpis` reports, per footer,
+  how often the stage's next step did what it asked (race2_checklist row 14, `footer_obedience`, reported only). The
+  race-2 report states the rate next to the replayed time, and a low rate means the no-cut rows of 9.1 are the forecast.
 
 ---
 
@@ -1526,7 +1622,8 @@ These are written into `docs/v10/race2_checklist.md` **before** the run and chec
 | empty patches | 2 or fewer per 74 | 4/51 |
 | prompt tokens | every stage-run under 14,336 in at least 95%; max under 26,000 | max 25,352 |
 | compaction events | reported (no threshold; used for the pod-to-Kaggle comparison) | never measured |
-| time (R117) | replayed mean at most 1.08 × r_v4 replay on the same ids; no task projected past cap + 10 s | - |
+| time (R117, restated in review round 2, 9.2) | no task projected past cap + 10 s; N=130 hidden-run projection under 12 h; the mean against the r_v4 replay is reported, and above 1.08 × the first pre-registered knob applies | FAIL (5 past the cap; 1.16 ×; 9.79 h) |
+| footer obedience | reported, no threshold (9.2): how often the next step of the addressed stage does what LOCATOR, EDIT NOW, CONTEXT, FINISH or TIME asks | no v10 footers |
 | verify behaviour | a verdict line in at least 90% of tasks; checkpoint restores reported with outcomes | - |
 
 **Kill rule:** after run 1, if v10 is below v9_eog - 3, or any crash class is above 0, stop the chain (the pod goes down),

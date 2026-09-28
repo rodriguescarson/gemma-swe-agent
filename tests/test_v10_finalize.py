@@ -410,6 +410,101 @@ def test_late_auto_restore(scripts, tmp_path):
     assert submit_diff(ws) == good
 
 
+# ------------------------------------------------------- review round 2: a restore never brings back tests or scratch
+TEST_EDIT = "\n\ndef test_pad_two():\n    assert pad('ab', 4) == 'ab  '\n"
+SCRATCH = "from pkg.core import pad\nprint(repr(pad('ab', 4)))\n"
+
+
+def _dirty_checkpoint(ws, scripts):
+    """The fix plus a test-file edit and a root scratch file, saved as checkpoint #1 by verify --repro-only (which stores
+    the raw tree: no hygiene, no scratch cleanup). -> the clean diff (the fix alone) the patch must end up as."""
+    edit(ws, "pkg/core.py", FIX)
+    clean = submit_diff(ws)
+    with open(ws / "tests/test_core.py", "a") as f:
+        f.write(TEST_EDIT)
+    write(ws, "reproduce_bug.py", SCRATCH)
+    r = run(scripts, "verify", ws, ["--repro-only"], stdin=REPRO)
+    assert "CHECKPOINT: #1 saved (quick)" in r.out, r.out
+    ck = (swe(ws) / "ckpt" / "1.diff").read_bytes()
+    assert b"tests/test_core.py" in ck and b"reproduce_bug.py" in ck and b"pkg/core.py" in ck, ck
+    return clean
+
+
+def _status_porcelain(ws):
+    return git(ws, "status", "--porcelain", "--untracked-files=all").stdout.decode()
+
+
+def test_restore_never_brings_back_tests_or_scratch(scripts, tmp_path):
+    """Review round 2: hygiene and scratch cleanup ran BEFORE finalize's restore and never after it, and checkpoints
+    hold the raw tree, so finalize printed READY for a patch with a test-file edit (the hidden test_patch then fails to
+    apply: a 0) and the scratch file it had just deleted. The late guard's auto-restore had the same hole. Both restore
+    through _swe_ckpt.restore(), which now tidies the restored tree and reports what it undid."""
+    # finalize: a worse current tree loses to the dirty checkpoint #1
+    ws = mkrepo(tmp_path / "a", BASIC)
+    clean = _dirty_checkpoint(ws, scripts)
+    git(ws, "checkout", "_swegemma_baseline", "--", "tests/test_core.py", "pkg/core.py")
+    edit(ws, "pkg/core.py", WORSE)
+    r = finalize(scripts, ws, t=240)
+    assert re.search(r"^RESTORED: checkpoint #1 \(\w+, t=100s\) replaced the current tree \(RED, t=240s\)\.$",
+                     r.out, re.M), r.out
+    assert r.first == "READY: 1 files changed (+1 -1): pkg/core.py. Next step: submit the patch.", r.out
+    after = r.out[r.out.index("RESTORED: checkpoint #1"):]
+    assert "reverted test/config edits: tests/test_core.py" in after, r.out
+    assert "CLEANED: removed reproduce_bug.py" in after, r.out
+    assert submit_diff(ws) == clean
+    assert _status_porcelain(ws) == " M pkg/core.py\n", _status_porcelain(ws)
+    assert state(ws)["final_sha"] == hashlib.sha1(clean).hexdigest()
+    # finalize with an EMPTY tree restores the best checkpoint (any key): the same tidy applies
+    ws = mkrepo(tmp_path / "b", BASIC)
+    clean = _dirty_checkpoint(ws, scripts)
+    git(ws, "checkout", "_swegemma_baseline", "--", "tests/test_core.py", "pkg/core.py")
+    r = finalize(scripts, ws, t=200)
+    assert re.search(r"^RESTORED: checkpoint #1 \(\w+, t=100s\) \(the tree had no source change\)$", r.out, re.M), r.out
+    assert r.first.startswith("READY: 1 files changed (+1 -1): pkg/core.py."), r.out
+    assert "reverted test/config edits: tests/test_core.py" in r.out, r.out
+    assert submit_diff(ws) == clean and _status_porcelain(ws) == " M pkg/core.py\n"
+    # the late guard in any helper (t >= 255, empty tree, not final): same checkpoint, same tidy, one prefix line
+    ws = mkrepo(tmp_path / "c", BASIC)
+    clean = _dirty_checkpoint(ws, scripts)
+    git(ws, "checkout", "_swegemma_baseline", "--", "tests/test_core.py", "pkg/core.py")
+    os.unlink(ws / "reproduce_bug.py")
+    r = run(scripts, "status", ws, t=260)
+    assert r.first.startswith("RESTORED checkpoint #1: the tree had no source change at t=260s."), r.out
+    assert "reverted test/config edits: tests/test_core.py" in r.first and "removed reproduce_bug.py" in r.first, r.out
+    assert submit_diff(ws) == clean and _status_porcelain(ws) == " M pkg/core.py\n"
+
+
+def test_restore_tidy_unit(scripts, tmp_path, lib):
+    """_swe_ckpt.restore() checks the tree against the checkpoint sha BEFORE tidying (the transaction stays exact), then
+    reverts protected paths and deletes scratch; a clean checkpoint gives the old one-line message; tidy() on a clean
+    tree does nothing and costs little."""
+    ws = mkrepo(tmp_path, BASIC)
+    C, G, K = lib(ws)
+    edit(ws, "pkg/core.py", FIX)
+    clean = submit_diff(ws)
+    id_clean = K.save(C.diff_bytes(), [1, 1, 1, 1, 1], "r", "AMBER", True, rkey="r")
+    with open(ws / "setup.cfg", "a") as f:
+        f.write("[y]\n")
+    write(ws, "scratch_check.py", SCRATCH)
+    write(ws, "pkg/new_mod.py", "X = 1\n")                              # a new module inside a package: kept
+    dirty = C.diff_bytes()
+    id_dirty = K.save(dirty, [1, 1, 1, 1, 1], "r", "AMBER", True, rkey="r")
+    git(ws, "checkout", "_swegemma_baseline", "--", "setup.cfg", "pkg/core.py")
+    for p in ("scratch_check.py", "pkg/new_mod.py"):
+        os.unlink(ws / p)
+    ok, msg = K.restore(K.entry_for_sha(hashlib.sha1(dirty).hexdigest()))
+    lines = msg.split("\n")
+    assert ok and lines[0] == "restored checkpoint #%d" % id_dirty, msg
+    assert lines[1:] == ["reverted test/config edits: setup.cfg", "CLEANED: removed scratch_check.py"], msg
+    assert _status_porcelain(ws) == " M pkg/core.py\n?? pkg/new_mod.py\n", _status_porcelain(ws)
+    ok, msg = K.restore(K.entry_for_sha(hashlib.sha1(clean).hexdigest()))
+    assert ok and msg == "restored checkpoint #%d" % id_clean, msg
+    assert submit_diff(ws) == clean
+    t0 = time.monotonic()
+    assert K.tidy() == []
+    assert time.monotonic() - t0 < 1.0
+
+
 # ------------------------------------------------------------------------------------------------ R77 timing
 def test_finalize_timing(scripts, tmp_path):
     ws = mkrepo(tmp_path, BASIC)

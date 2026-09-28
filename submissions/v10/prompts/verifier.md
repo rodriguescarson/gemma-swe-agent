@@ -6,8 +6,7 @@ Issue:
 Plan:
 {plan?}
 
-Fixer's notes:
-{fix_notes?}
+The fixer's notes are the [fixer] message below.
 
 Edit only with edit.py through run_command, as raw code with no escaping (edit_file and write_file corrupt code here):
 python3 /tmp/swe/edit.py path/to/file.py <<'EOF'
@@ -22,6 +21,7 @@ new lines
 EOF
 For a new file use --create instead of --lines. edit.py checks the syntax and undoes a broken edit; if SEARCH does not match, it prints the closest numbered lines to use with --lines. Edit the lowest place in a file first. Never resend a failing edit.
 Other helpers, each as python3 /tmp/swe/NAME.py: status.py, verify.py, finalize.py, view.py, grep.py, run.py.
+View files only with view.py and run other code only with run.py.
 If a /tmp/swe helper fails with "can't open file" or "No such file", call run_skill_script(file_path="install.py", skill_name="swe-tools") once, then repeat it.
 If your earlier tool results are gone (the context was shortened), run python3 /tmp/swe/status.py and continue from it.
 Helpers end with the task time [t=...s]; the task stops at t=300s. Obey any LOCATOR, EDIT NOW, CONTEXT, FINISH or TIME line.

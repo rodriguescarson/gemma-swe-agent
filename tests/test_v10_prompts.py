@@ -16,8 +16,8 @@ from test_v10_bundle import (BUNDLE, CLI_SCRIPTS, GEN, GRAPH_TOOLS, LIB_SCRIPTS,
 
 PLACEHOLDERS = ("{problem_description}", "{plan?}", "{fix_notes?}")
 STAGE_PLACEHOLDERS = {"setup": set(), "locator": {"{problem_description}"},
-                      "fixer": {"{problem_description}", "{plan?}"},
-                      "verifier": {"{problem_description}", "{plan?}", "{fix_notes?}"}, "submitter": {"{plan?}"}}
+                      "fixer": {"{problem_description}"},       # the plan arrives as the handoff (review round 2)
+                      "verifier": {"{problem_description}", "{plan?}"}, "submitter": {"{plan?}"}}
 REGISTRY_FALLBACK = {"run_command", "read_file", "edit_file", "write_file", "get_status", "submit_patch",
                      "get_code_neighbors", "search_similar_code", "get_code_subgraph"}
 HALLUCINATED = {"git_grep", "exit_loop", "bash", "transfer_to_agent", "search_skills"}
@@ -575,6 +575,37 @@ NOTES = _cycle_words(
     "CHANGED: fastapi/dependencies/utils.py solve_dependencies (512-530) and get_sub_dependant (140-176) "
     "VERIFY: VERIFY: RED - 1/2 claims fixed; the second claim still fails on the scope order", 60)
 
+# Review round 2: the handoffs are sized from the MEASURED race-1 stage-final replies, not from the word counts the
+# prompts ask for (v9 asked for 250 words and got 2-4x that). Completion tokens, r_v4 / r_v9_eog, 46-53 replies per
+# stage per run: locator median 418 / 442, p90 1,020 / 1,087, 2 / 4 runaways of 1,536+; fixer median 144 / 145, p90
+# 244 / 205; verifier median 76 / 86, p90 147 / 188. The larger run is used. A reply longer than its stage's
+# max_output_tokens is cut there (a text reply cut at the cap still ends the stage, facts_internal 2.3), so every size
+# is also bounded by configs/gen_<stage>.yaml; "cap" is that bound itself.
+REPLY_TOKENS = {"p50": {"locator": 442, "fixer": 145, "verifier": 86},
+                "p90": {"locator": 1087, "fixer": 244, "verifier": 188}}
+REPLY_TEMPLATE = {"locator": PLAN, "fixer": NOTES, "verifier": "Submitted the patch after finalize said READY."}
+B_MARGIN = 1000             # check B must clear the compaction line by this many tokens (review round 2)
+# Model-written tokens of edit-like calls (edit_file, write_file, replace.py, edit.py) in all six race-1 runs, n=5,329:
+# median 101, p75 147, p90 256. The permitted mix keeps 400 per edit (its worst case); the first-round control uses p90.
+EDIT_TOKENS_P90 = 256
+
+
+def max_output(stage):
+    return int(load_yaml(f"configs/gen_{stage}.yaml")["max_output_tokens"])
+
+
+def reply_tokens(stage, q):
+    """A stage's final reply in tokens at quantile q ('p50', 'p90' or 'cap'), bounded by its max_output_tokens."""
+    cap = max_output(stage)
+    return cap if q == "cap" else min(REPLY_TOKENS[q][stage], cap)
+
+
+def reply_text(stage, q):
+    """Reply text of reply_tokens(stage, q) tokens at the prose density the model counts (3.4 chars/token)."""
+    n = int(round(reply_tokens(stage, q) * PROSE))
+    t = REPLY_TEMPLATE[stage]
+    return ((t + " ") * (n // (len(t) + 1) + 1))[:n]
+
 
 def worst_problem():
     tasks, ids = ROOT / "data" / "tasks.jsonl", ROOT / "data" / "kaggle_valid_ids.txt"
@@ -605,21 +636,25 @@ def fixed_chars(stage):
     return DECL_FALLBACK[stage in SUBMITTERS], SKILL_FALLBACK
 
 
-def stage_start(stage, tmp_path, problem_chars=None):
+def stage_start(stage, tmp_path, problem_chars=None, q="p90", text=None):
     """Prompt chars at a stage's first call (system instruction, declarations, turn contents) -> (parts, tokens).
-    problem_chars: the statement cut to that length (default: the longest Kaggle-valid statement)."""
+    problem_chars: the statement cut to that length (default: the longest Kaggle-valid statement). q: the size of every
+    earlier stage's reply (reply_tokens). The previous stage's reply is paid in the handoff event ('For context:' +
+    '[prev] said: <reply>', facts_internal 2.3) AND again wherever the instruction has a placeholder for it. text: the
+    prompt template to render instead of the bundle's (the double-payment control)."""
     y = load_yaml(f"sub_agents/{stage}.yaml")
     identity = f'You are an agent. Your internal name is "{y["name"]}". The description about you is "{y["description"]}".'
     problem = worst_problem()
     if problem_chars is not None:
         problem = problem[:problem_chars]
-    state = {"problem_description": problem, "plan": PLAN, "fix_notes": NOTES}
-    instruction = _manual_render(read(f"prompts/{stage}.md"), state)
+    plan, notes = reply_text("locator", q), reply_text("fixer", q)
+    state = {"problem_description": problem, "plan": plan, "fix_notes": notes}
+    instruction = _manual_render(read(f"prompts/{stage}.md") if text is None else text, state)
     decl, skill = fixed_chars(stage)
     if stage == "setup":
         contents = max(len(t) for t in harness_prompts(tmp_path, problem, worst_tree()))
     else:
-        said = {"locator": "READY", "fixer": PLAN, "verifier": NOTES, "submitter": NOTES}[stage]
+        said = {"locator": "READY", "fixer": plan, "verifier": notes, "submitter": reply_text("verifier", q)}[stage]
         contents = len("For context:") + len(f"[{PREV_STAGE[stage]}] said: {said}")
     parts = {"declarations": decl, "skill": skill, "identity": len(identity), "instruction": len(instruction),
              "contents": contents}
@@ -669,51 +704,91 @@ def guarded_peak(stage, start_tokens, density):
 
 @pytest.mark.parametrize("stage", STAGES)
 def test_static_stage_start_budget(stage, tmp_path):
-    """R94: the worst-case stage-start prompt (10,095-char problem, 120-word plan, 60-word notes, compiled
-    declarations, skill boilerplate, and the harness prompt for setup) is 8,000 tokens or fewer."""
+    """R94 (re-derived in review round 2): the worst-case stage-start prompt (10,095-char problem, every earlier reply
+    at its measured p90 bounded by max_output_tokens, compiled declarations, skill boilerplate, and the harness prompt
+    for setup) is 8,000 tokens or fewer. The sizes really are the measured ones: the plan is the locator's cap (its
+    p90 of 1,087 is above it), the notes the fixer's p90."""
     compiled_info(strict=False)   # warm the per-process compile cache so the timing below measures the budget model only
     t0 = time.monotonic()
     parts, tokens = stage_start(stage, tmp_path)
     elapsed = time.monotonic() - t0
     assert tokens <= 8000, (stage, round(tokens), parts)
-    assert len(PLAN.split()) == 120 and len(NOTES.split()) == 60
+    assert reply_tokens("locator", "p90") == max_output("locator") == 768
+    assert reply_tokens("fixer", "p90") == 244 and reply_tokens("verifier", "p90") == 188
+    assert abs(len(reply_text("locator", "p90")) - 768 * PROSE) <= 1
     assert elapsed < 5.0, f"stage-start model took {elapsed:.2f} s"
+
+
+def test_handoff_paid_once():
+    """Review round 2: a stage's previous reply already arrives as the handoff event ('For context:[prev] said: ...',
+    facts_internal 2.3), so a placeholder for that same output_key paid for it twice (fixer: {plan?}; verifier:
+    {fix_notes?}). No stage has a placeholder for its previous stage's output_key. Earlier stages' keys are fine (the
+    verifier's {plan?}, the submitter's {plan?}): the handoff carries only the stage just before."""
+    ps = prompts()
+    for s, prev in PREV_STAGE.items():
+        okey = load_yaml(f"sub_agents/{prev}.yaml").get("output_key")
+        if okey:
+            assert "{%s?}" % okey not in ps[s] and "{%s}" % okey not in ps[s], (s, okey)
+    assert "[locator] message below" in ps["fixer"] and "[fixer] message below" in ps["verifier"]
+    assert "{plan?}" in ps["verifier"] and "{plan?}" in ps["submitter"]
+
+
+def test_double_paid_handoff_breaks_the_margin(tmp_path):
+    """Control for R95 B: the fixer prompt as it was (the plan both in {plan?} and in the handoff) misses the 1,000-token
+    margin at the measured p90 plan; the shipped prompt meets it. The model sees the defect, not just the constants."""
+    old = prompts()["fixer"].replace("The locator's plan is the [locator] message below.", "Locator's plan:\n{plan?}")
+    assert "{plan?}" in old
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    _, old95 = stage_start("fixer", tmp_path / "old", P95_PROBLEM_CHARS, text=old)
+    _, new95 = stage_start("fixer", tmp_path / "new", P95_PROBLEM_CHARS)
+    assert abs((old95 - new95) - reply_tokens("locator", "p90")) < 30      # exactly one more plan, give or take a label
+    assert guarded_peak("fixer", old95, TOOL_P10) > COMPACTION - B_MARGIN
+    assert guarded_peak("fixer", new95, TOOL_P10) <= COMPACTION - B_MARGIN
 
 
 @pytest.mark.parametrize("stage", STAGES)
 def test_worst_case_stage_budget(stage, tmp_path):
-    """R95 (review round 1): the call mix each prompt PERMITS, not a lighter one, against the compaction line.
-    A. typical: a p95 statement, typical helper output at the median 3.06 chars/token: 12,000 tokens or fewer.
-    B. worst decile: a p95 statement, output at 2.3 chars/token, every output at its cap, the context meter and its
-       CONTEXT hint bounding the stage: under the 14,336 compaction line.
-    C. the outlier statement (10,095 chars) at the median density, guarded the same way: under the compaction line.
-    D. overflow: the outlier statement, the whole permitted mix at caps and 2.3 chars/token with no hint at all, plus
-       the stage's largest generation, stays 2,048 tokens or more below 32,768."""
-    (tmp_path / "p95").mkdir()
-    (tmp_path / "worst").mkdir()
+    """R95 (review rounds 1 and 2): the call mix each prompt PERMITS, not a lighter one, against the compaction line,
+    with every earlier reply at its MEASURED size (reply_tokens), not the size the prompt asks for.
+    A. typical: a p95 statement, median replies, typical helper output at the median 3.06 chars/token: 12,000 tokens
+       or fewer.
+    B. worst decile: a p95 statement, p90 replies, output at 2.3 chars/token, every output at its cap, the context
+       meter and its CONTEXT hint bounding the stage: at least B_MARGIN (1,000) tokens under the 14,336 compaction line.
+    C. the outlier statement (10,095 chars), p90 replies, the median density, guarded the same way: under the line.
+    D. overflow: the outlier statement, every earlier reply at its max_output_tokens, the whole permitted mix at caps
+       and 2.3 chars/token with no hint at all, plus the stage's largest generation, stays 2,048 tokens or more below
+       32,768."""
+    for d in ("p50", "p95", "worst", "cap"):
+        (tmp_path / d).mkdir()
+    _, start50 = stage_start(stage, tmp_path / "p50", P95_PROBLEM_CHARS, q="p50")
     _, start95 = stage_start(stage, tmp_path / "p95", P95_PROBLEM_CHARS)
     parts, start = stage_start(stage, tmp_path / "worst")
-    typical = stage_peak(stage, start95, False, TOOL)
-    assert typical <= 12000, ("A", stage, round(start95), round(typical))
+    _, start_cap = stage_start(stage, tmp_path / "cap", q="cap")
+    typical = stage_peak(stage, start50, False, TOOL)
+    assert typical <= 12000, ("A", stage, round(start50), round(typical))
     g95 = guarded_peak(stage, start95, TOOL_P10)
-    assert g95 < COMPACTION, ("B", stage, round(start95), round(g95))
+    assert g95 <= COMPACTION - B_MARGIN, ("B", stage, round(start95), round(g95), round(COMPACTION - g95))
     gworst = guarded_peak(stage, start, TOOL)
     assert gworst < COMPACTION, ("C", stage, round(start), round(gworst), parts)
-    unguarded = stage_peak(stage, start, True, TOOL_P10)
-    assert unguarded + GEN[stage][1] <= 32768 - 2048, ("D", stage, round(unguarded))
-    assert typical < unguarded
+    unguarded = stage_peak(stage, start_cap, True, TOOL_P10)
+    assert unguarded + max_output(stage) <= 32768 - 2048, ("D", stage, round(unguarded))
+    assert typical < unguarded and start50 <= start95 <= start <= start_cap
 
 
 def test_context_meter_does_not_cut_a_normal_first_round():
     """R95 control: a typical first fixer round (the plan's 3 views, 3 edits, 1 verify) and a typical verifier pass
     (status, verify, one repair, finalize) stay below CONTEXT_TOKENS as the meter estimates them (ASCII / 3 plus the
-    model-written tokens plus CTX_CALL), so the hint only fires in later rounds."""
+    model-written tokens plus CTX_CALL), so the hint only fires in later rounds. Review round 2 lowered CONTEXT_TOKENS
+    for R95 B's margin, so "typical" is now measured: an edit writes EDIT_TOKENS_P90 (256) tokens, the p90 of 5,329
+    race-1 edit calls (the permitted mix keeps 400 as its worst case)."""
     thr, per_call = meter_consts()
 
     def est(calls):
         return sum(n * (HELPER_OUT[h][0] / 3.0 + o + per_call) for h, n, o in calls)
-    fixer_round1 = est([("view", 3, 30), ("edit", 3, 400), ("verify", 1, 30)])
-    verifier_pass = est([("status", 1, 30), ("verify", 2, 30), ("view", 1, 30), ("edit", 1, 400), ("finalize", 1, 30)])
+    fixer_round1 = est([("view", 3, 30), ("edit", 3, EDIT_TOKENS_P90), ("verify", 1, 30)])
+    verifier_pass = est([("status", 1, 30), ("verify", 2, 30), ("view", 1, 30), ("edit", 1, EDIT_TOKENS_P90),
+                         ("finalize", 1, 30)])
     assert fixer_round1 < thr and verifier_pass < thr, (fixer_round1, verifier_pass, thr)
     fixer_all = est(permitted_mix()["fixer"][0])
     assert fixer_all > thr, (fixer_all, thr)        # the full permitted fixer mix does reach it: the guard matters
@@ -737,6 +812,9 @@ def test_budget_model_unit():
 
 
 # ---------------------------------------------------------------- R96 protocol rules
+# Review round 2: the context meter sees only helper output, so raw read_file (up to 10,000 chars) and raw run_command
+# output (5,000 + 5,000) would fill a stage unseen; the fixer and verifier are told to use the metered helpers.
+RAW_IO = "View files only with view.py and run other code only with run.py."
 RULES = {
     "setup": ["Your whole job is one tool call", INSTALL_CALL, "reply with the single word READY",
               "Do not call any other tool"],
@@ -748,11 +826,11 @@ RULES = {
     "fixer": ["smallest COMPLETE change", "never conclude that nothing needs changing", "python3 /tmp/swe/verify.py",
               "at most 2 rounds", "SIBLINGS", "SPEC GAPS", "REGRESSIONS", "fix the code (not the reproduction)",
               "Never edit tests, conftest.py, pytest.ini, pyproject.toml, setup.cfg or tox.ini", "CHANGED:",
-              "VERIFY:", "under 60 words", "first edit by t=150s", "stop editing by t=210s"],
+              "VERIFY:", "under 60 words", "first edit by t=150s", "stop editing by t=210s", RAW_IO],
     "verifier": ["1. python3 /tmp/swe/status.py", "If no source file is changed", "at most 2 repair rounds",
                  "none after t=240s", "OLD behaviour the issue asks to change, keep your fix",
                  "python3 /tmp/swe/finalize.py", "If it says NOT READY", "Call submit_patch",
-                 "submit_patch is your last tool call", "If a helper prints TIME, go straight to step 4"],
+                 "submit_patch is your last tool call", "If a helper prints TIME, go straight to step 4", RAW_IO],
     "submitter": ["1. python3 /tmp/swe/finalize.py", "Only if it says EMPTY", "Call submit_patch",
                   "The patch has not been submitted yet"],
 }

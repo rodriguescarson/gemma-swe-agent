@@ -3,14 +3,22 @@ restored transactionally. Stdlib only.
 
   save(diff_bytes, score, key, verdict, quick) -> id | None
   best(key=None, quick=False) -> entry | None
-  restore(rec) -> (ok, msg)                    refused at t >= T_NO_RESTORE; rolls back on any failure
+  restore(rec) -> (ok, msg)                    refused at t >= T_NO_RESTORE; rolls back on any failure; tidies after
   auto_restore_if_empty() -> (ok, msg) | None  used by _swe_common.late_guard() and finalize.py
+  clean_scratch() -> [removed]                 finalize.py step 2, and tidy() after every restore
 """
+import fnmatch
 import hashlib
 import os
 import shutil
+import sys
 
 import _swe_common as C
+
+ROOT_FILES = ("repro*", "reproduce*", "scratch*", "debug*", "tmp*", "temp*", "try*", "demo*", "test_*.py", "*_test.py")
+ROOT_DIRS = ("repro*", "reproduce*", "scratch*", "debug*", "tmp*", "temp*", "try*", "demo*")
+ANY_FILES = ("*.log", "*.orig", "*.rej", "*.bak", "*.swp", ".coverage")
+BIG_BYTES = 1024 * 1024
 
 
 def _sha(b):
@@ -224,9 +232,204 @@ def _set_tree(data):
     return _apply(data)
 
 
+def _z(b):
+    return [p for p in b.decode("utf-8", "surrogateescape").split("\0") if p]
+
+
+def _vendor_marker(parts):
+    return any(x in ("site-packages", "_pytest") or x.endswith(".dist-info") for x in parts[:-1]) or \
+        parts[-1].endswith(".dist-info")
+
+
+_SPEC_PROBE = r"""
+import importlib.util, sys
+for n in sys.argv[1:]:
+    try:
+        s = importlib.util.find_spec(n)
+    except BaseException:
+        s = None
+    o = ""
+    if s is not None:
+        o = s.origin if s.origin not in (None, "namespace") else ""
+        if not o and s.submodule_search_locations:
+            o = list(s.submodule_search_locations)[0]
+        o = o or "?"
+    sys.stdout.write("SWE-SPEC\t%s\t%s\n" % (n, o))
+sys.stdout.flush()
+"""
+
+
+def shadowed(stems):
+    """The names among `stems` that import from OUTSIDE the workspace once the workspace is off the path: an installed
+    or stdlib module that a same-named untracked root file or directory would shadow under the grader's
+    PYTHONPATH=<workspace> (the fastapi_14448 patch shipped typing_extensions.py and py.py; every test then failed to
+    import). One child of the grader's python3, run from an empty directory. -> set (empty when it cannot run)."""
+    stems = sorted({s for s in stems if s and s.isidentifier()})
+    if not stems:
+        return set()
+    wsr = os.path.realpath(C.ws())
+    std = {s for s in stems if C.is_stdlib_name(s)}
+    rest = [s for s in stems if s not in std]
+    if not rest:
+        return std
+
+    def inside(p):
+        rp = os.path.realpath(p)
+        return rp == wsr or rp.startswith(wsr + os.sep)
+    env = C.grader_env(C.ws(), "spec")
+    env["PYTHONPATH"] = os.pathsep.join(x for x in (env.get("PYTHONPATH") or "").split(os.pathsep)
+                                        if x and not inside(x))
+    py = "python3" if shutil.which("python3", path=env.get("PATH")) else (sys.executable or "python3")
+    rc, out = C.sh([py, "-s", "-c", _SPEC_PROBE] + rest, C.real_budget(5), cwd=env["TMPDIR"], env=env)
+    got = set(std)
+    for ln in (out or "").splitlines():
+        f = ln.split("\t")
+        if len(f) == 3 and f[0] == "SWE-SPEC" and f[2] and (not os.path.isabs(f[2]) or not inside(f[2])):
+            got.add(f[1])
+    return got
+
+
+def clean_scratch():
+    """Delete untracked scratch and vendored trees. Untracked .py files inside directories with tracked files stay (new
+    modules); a root-level one stays only when C.root_module_kept says it is a module. Any untracked root file or
+    directory whose name shadows an installed or stdlib module is deleted. -> [removed paths]."""
+    ws = C.ws()
+    rc, out, _ = _git(["ls-files", "--others", "--exclude-standard", "-z"])
+    if rc != 0:
+        return []
+    untracked = _z(out)
+    if not untracked:
+        return []
+    rc, out, _ = _git(["ls-files", "-z"])
+    tracked_dirs = {""}
+    for p in _z(out) if rc == 0 else []:
+        d = os.path.dirname(p)
+        while d and d not in tracked_dirs:
+            tracked_dirs.add(d)
+            d = os.path.dirname(d)
+    wsr = os.path.realpath(ws)
+
+    def top_untracked(p):
+        """The highest ancestor directory of p that holds no tracked file (None if p's own dir holds tracked files)."""
+        d = os.path.dirname(p)
+        best = None
+        while d and d not in tracked_dirs:
+            best = d
+            d = os.path.dirname(d)
+        return best
+
+    kill_dirs, kill_files, root_py = set(), set(), []
+    for p in untracked:
+        parts = p.split("/")
+        base = parts[-1]
+        if len(parts) > 1 and parts[0] not in tracked_dirs and any(fnmatch.fnmatchcase(parts[0], x) for x in ROOT_DIRS):
+            kill_dirs.add(parts[0])
+            continue
+        if len(parts) == 1 and any(fnmatch.fnmatchcase(base, x) for x in ROOT_FILES):
+            kill_files.add(p)
+            continue
+        if any(fnmatch.fnmatchcase(base, x) for x in ANY_FILES):
+            kill_files.add(p)
+            continue
+        if _vendor_marker(parts) or (base == "setup.py" and len(parts) > 1):
+            top = top_untracked(p)
+            if top:
+                kill_dirs.add(top)
+                continue
+        try:
+            if os.path.getsize(os.path.join(ws, p)) > BIG_BYTES:
+                kill_files.add(p)
+                continue
+        except OSError:
+            pass
+        if len(parts) == 1 and base.endswith(".py") and not C.is_protected(p):
+            root_py.append(p)
+    if root_py:
+        rc, out, _ = _git(["diff", "--name-only", "-z", "--no-renames", C.baseline()])
+        tracked = [q for q in _z(out) if q.endswith(".py")] if rc == 0 else []
+        for p in root_py:
+            if not C.root_module_kept(p, tracked):
+                kill_files.add(p)
+    # names at the root that would shadow an installed or stdlib module (files and untracked top-level dirs)
+    roots = {}
+    for p in untracked:
+        parts = p.split("/")
+        if parts[0] in kill_dirs or p in kill_files:
+            continue
+        if len(parts) == 1:
+            stem, ext = os.path.splitext(parts[0])
+            if ext in (".py", ".pyi", ".pyc", ".so", ".pyd"):
+                roots.setdefault(stem.split(".")[0], ("file", p))
+        elif parts[0] not in tracked_dirs:
+            roots.setdefault(parts[0], ("dir", parts[0]))
+    if roots:
+        for stem in sorted(shadowed(list(roots))):
+            kind, what = roots[stem]
+            (kill_dirs if kind == "dir" else kill_files).add(what)
+    removed = []
+    for d in sorted(kill_dirs):
+        fp = os.path.join(ws, d)
+        rp = os.path.realpath(fp)
+        if not rp.startswith(wsr + os.sep) or os.path.islink(fp):
+            continue
+        shutil.rmtree(fp, ignore_errors=True)
+        removed.append(d + "/")
+    for p in sorted(kill_files):
+        if any(p.startswith(d + "/") for d in kill_dirs):
+            continue
+        fp = os.path.join(ws, p)
+        try:
+            os.unlink(fp)
+            removed.append(p)
+        except OSError:
+            pass
+        d = os.path.dirname(fp)
+        while d and os.path.realpath(d).startswith(wsr + os.sep):
+            try:
+                os.rmdir(d)
+            except OSError:
+                break
+            d = os.path.dirname(d)
+    return removed
+
+
+def scratch_note(removed):
+    """The one line finalize prints after clean_scratch() removed something ('' when nothing was)."""
+    if not removed:
+        return ""
+    more = len(removed) - 6
+    return "CLEANED: removed %s%s" % (", ".join(removed[:6]), " (+%d more)" % more if more > 0 else "")
+
+
+def tidy():
+    """Clean a just-restored tree (review round 2). A checkpoint stores the tree as it was scored: verify --repro-only
+    saves the raw diff before any hygiene and full verify keeps root scratch, so a restore can bring back a test/config
+    edit (the hidden test_patch then fails to apply: a 0) and scratch that finalize had already deleted. Reverts
+    protected paths, then deletes scratch. -> [note lines], empty when nothing was done."""
+    notes = []
+    try:
+        rev = C.hygiene_revert() or []
+    except Exception:
+        rev = []
+    if rev:
+        notes.append(C.hygiene_note(rev))
+    try:
+        removed = clean_scratch()
+    except Exception:
+        removed = []
+    if removed:
+        notes.append(scratch_note(removed))
+    return notes
+
+
+def _tidy_msg(msg):
+    return "\n".join([msg] + tidy())
+
+
 def restore(rec):
     """Transactional restore of checkpoint `rec`: refused at t >= T_NO_RESTORE; the current tree is saved first and put
-    back byte-exactly if anything fails."""
+    back byte-exactly if anything fails. After a successful restore (checked against rec's sha first), tidy() reverts
+    protected paths and deletes scratch; msg is 'restored checkpoint #k' plus one line per thing tidy() undid."""
     t = float(C.clock())
     if t >= C.T_NO_RESTORE:
         return False, "RESTORE REFUSED: t=%ds is past %ds; kept the current tree." % (int(t), C.T_NO_RESTORE)
@@ -237,7 +440,7 @@ def restore(rec):
         return False, "RESTORE FAILED: checkpoint file missing; kept the current tree."
     cur = C.diff_bytes()
     if _sha(cur) == rec.get("sha"):
-        return True, "checkpoint #%s is already the current tree" % rec.get("id")
+        return True, _tidy_msg("checkpoint #%s is already the current tree" % rec.get("id"))
     if cur:
         save(cur, None, None, "SAVED", False)
     ok, why = _set_tree(data)
@@ -254,12 +457,13 @@ def restore(rec):
         C.journal({"h": "restore", "id": rec.get("id"), "verdict": rec.get("verdict"), "ok": True})
     except Exception:
         pass
-    return True, "restored checkpoint #%s" % rec.get("id")
+    return True, _tidy_msg("restored checkpoint #%s" % rec.get("id"))
 
 
 def auto_restore_if_empty():
     """When no source change exists and a non-empty checkpoint is stored, restore the best one (any key).
-    -> (ok, msg) or None when nothing applies."""
+    -> (ok, msg) or None when nothing applies. msg is ONE line (late_guard prefixes a helper's output with it): what
+    tidy() undid follows in parentheses."""
     ch = C.changes() or {}
     if ch.get("source"):
         return None
@@ -270,5 +474,7 @@ def auto_restore_if_empty():
         return None
     ok, msg = restore(rec)
     if ok:
-        return True, "RESTORED checkpoint #%s: the tree had no source change at t=%ds." % (rec.get("id"), int(C.clock()))
+        undid = [x for x in msg.split("\n")[1:] if x]
+        return True, "RESTORED checkpoint #%s: the tree had no source change at t=%ds.%s" % (
+            rec.get("id"), int(C.clock()), (" (then %s)" % "; ".join(undid)) if undid else "")
     return False, msg

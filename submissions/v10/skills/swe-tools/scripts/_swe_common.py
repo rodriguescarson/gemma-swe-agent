@@ -34,12 +34,14 @@ CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 2800, "edit": 1500
 CAP_TOKENS = {k: v // 3 for k, v in CAPS.items()}
 # Context meter (state["ctx"]): estimated tokens that the current stage's tool calls added to its prompt (output,
 # model-written input, CTX_CALL per call). At CONTEXT_TOKENS the footer shows CONTEXT_HINT. tests/test_v10_prompts.py
-# (R95) derives the value: a p95 statement plus CONTEXT_TOKENS at 2.3 chars/token stays under the 14,336 compaction
-# line, and a typical first fixer round (3 views, 3 edits, 1 verify) stays below it.
-CONTEXT_TOKENS = 5500
+# (R95) derives the value: with a p95 statement, the measured p90 handoff and CONTEXT_TOKENS at 2.3 chars/token, the
+# fixer stays 1,000 tokens under the 14,336 compaction line (review round 2: 5,500 left 144 tokens at a 120-word plan
+# and crossed it at the measured median plan), and a first fixer round at measured sizes (3 views, 3 edits of 256
+# model-written tokens, the race-1 p90, 1 verify: about 4,600) stays below it.
+CONTEXT_TOKENS = 4700
 CTX_CALL = 30
 GIT_TIMEOUT = 10
-HELPER_LIMIT = 110          # whole-helper watchdog (s), always clamped by real_budget; timeout_seconds is 120
+HELPER_LIMIT = 110          # whole-helper watchdog (s), always clamped by real_budget; timeout_seconds is 180 (was 120)
 
 _SH_MAX = 4 << 20           # merged child output kept by sh(), bytes
 _STDIN_MAX = 32 << 20       # read_stdin() safety cap, bytes

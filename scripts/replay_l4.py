@@ -8,11 +8,17 @@ Cost model (research/time_model.md 2, fitted on 6,730 Kaggle 4xL4 calls; own_dat
 
 Modes (all print one summary line; --json prints a machine-readable object instead):
   --baseline [--base r_v4]                        v4 as-is, 150.2 s/task on eval/race1/runs
-  --design final [--base r_v9_eog] [--stretch 2] [--pessimistic] [--loc-cut 150]
-                                                  the SPEC 9.1 v10 counterfactual (154.0 on r_v9_eog)
-  --run DIR [--against r_v4] [--ratio 1.08]       ship gate R117: re-time every call of a real run with the L4 model
-                                                  (plus 5.6 s per detected compaction, time_model 3.4) and compare the
-                                                  mean with the --against run's as-is replay on the SAME task ids.
+  --design final [--base r_v9_eog] [--stretch 2] [--pessimistic] [--loc-cut 150] [--measured] [--no-cuts]
+                                                  the SPEC 9.1 v10 counterfactual (154.0 on r_v9_eog). --measured keeps
+                                                  each trajectory's measured stage replies, cut only at v10's
+                                                  max_output_tokens; --no-cuts drops the footer-time cuts (review
+                                                  round 2: the real pessimistic row, 172.6 on r_v9_eog)
+  --run DIR [--against r_v4] [--ratio 1.08]       ship gate R117 (restated in review round 2 for the cap-saturated
+                                                  regime): re-time every call of a real run with the L4 model (plus
+                                                  5.6 s per detected compaction, time_model 3.4). PASS = no task past
+                                                  cap + 10 s and the N=130 hidden-run projection under 12 h. The mean
+                                                  against the --against run's as-is replay on the SAME task ids is
+                                                  reported; above --ratio it names the pre-registered knob to apply.
                                                   Exit 0 = PASS, 1 = FAIL.
   --race2 DIR [--control r2_v9_eog] [--treatment r2_v10] [--runs 2]
                                                   every pre-registered KPI of docs/v10/race2_checklist.md. Exit 0 only
@@ -38,6 +44,14 @@ OUT_CAP = {"locator": 1536}
 COMPACTION_LINE = 14336        # Kaggle token_threshold (HARNESS_README 553-561)
 COMPACTION_EXTRA_S = 5.6       # median extra seconds of the call after a compaction on L4 (time_model 3.4)
 GATE_RATIO, GATE_OVER_S = 1.08, 10.0
+# R117 cliff projection (SPEC 9.2): hidden tasks take about 1.9x the public ones and are cap-saturated (v4: about
+# 308 s/task on Kaggle); per task the wall is setup 3.6 + min(agent, cap + 5 s run_command overshoot) + teardown 1.
+CLIFF_N, CLIFF_H, HIDDEN_STRETCH = 130, 12.0, 1.9
+STARTUP_S, SETUP_S, TEARDOWN_S, OVERSHOOT_S = 600.0, 3.6, 1.0, 5.0
+# Pre-registered (review round 2), applied in this order when the replayed mean is above GATE_RATIO x r_v4.
+KNOBS = ("verifier repair rounds 2 -> 1 (prompts/verifier.md)", "LOCATOR banner 75 s -> 60 s (T_LOCATOR)")
+# v10's max_output_tokens per stage (configs/gen_*.yaml): what --measured cuts measured replies at (review round 2).
+MEASURED_REPLY_CAP = {"locator": 768, "fixer": 2048, "verifier": 2048}
 
 # Pre-registered race-2 thresholds (docs/v10/race2_checklist.md; tests/test_v10_runner.py keeps the two in sync).
 KPI = {
@@ -53,8 +67,10 @@ KPI = {
     "stage_under_line_min": 0.95,   # stage-runs whose max prompt < 14,336
     "prompt_max": 26000,
     "verdict_share_min": 0.90,      # tasks with a VERIFY verdict line
-    "time_ratio_max": GATE_RATIO,
+    "time_ratio_max": GATE_RATIO,   # the knob trigger since review round 2, not a ship blocker
     "time_over_s": GATE_OVER_S,
+    "time_proj_h_max": CLIFF_H,
+    "time_n_hidden": CLIFF_N,
     "kill_floor": -3,               # after run 1: v10 < v9_eog - 3 kills the chain
 }
 CRASH = {
@@ -67,6 +83,11 @@ SCRATCH_ROOT = re.compile(r"^(repro|reproduce|scratch|debug|tmp|temp|try|demo)[^
 SCRATCH_ANY = re.compile(r"\.(log|orig|rej|bak|swp)$|(^|/)\.coverage$")
 VENDORED = re.compile(r"(^|/)(site-packages|_pytest|[^/]+\.dist-info)(/|$)")
 VERDICT = re.compile(r"VERIFY: (GREEN|AMBER|RED|UNKNOWN)")
+# The v10 footer hints (_swe_common: LOCATOR_HINT, EDIT_NOW_HINT, CONTEXT_HINT, FINISH_HINT, TIME_HINT). Review round 2:
+# the time projection assumed the stages obey them; race 2 measures how often they do (reported, no threshold).
+HINTS = (("LOCATOR", "LOCATOR: 75s used"), ("EDIT NOW", "EDIT NOW: no source file changed"),
+         ("CONTEXT", "CONTEXT: this stage's context is nearly full"), ("FINISH", "FINISH: t>=210s"),
+         ("TIME", "TIME: t>=250s"))
 
 
 def resolve(run, runs_dir=RUNS_DIR):
@@ -167,7 +188,9 @@ def retime(task):
 # ---------------------------------------------------------------------------------------------------------------------
 # design B collapse rules + the final v10 design (final_replay.final)
 # ---------------------------------------------------------------------------------------------------------------------
-def stages(task, drop_vgate=True):
+def stages(task, drop_vgate=True, reply_cap=None, out_cap=None):
+    reply_cap = REPLY_CAP if reply_cap is None else reply_cap
+    out_cap = OUT_CAP if out_cap is None else out_cap
     stt, seen, streak, nchecks = collections.defaultdict(float), collections.Counter(), False, 0
     for s in task["steps"]:
         a = s["author"] if s["author"] in ("locator", "fixer", "verifier") else "fixer"
@@ -182,9 +205,9 @@ def stages(task, drop_vgate=True):
         seen[(a, s["fn"], s["args"])] += 1
         if s["fn"] in ("run_command", "read_file") and seen[(a, s["fn"], s["args"])] >= 3:
             continue
-        ct = min(s["ct"], OUT_CAP.get(a, 2048))
+        ct = min(s["ct"], out_cap.get(a, 2048))
         if s["kind"] == "text":
-            ct = min(ct, REPLY_CAP[a])
+            ct = min(ct, reply_cap[a])
         if a == "verifier":
             if s["fn"] in ("submit_patch", "get_status") or s["kind"] == "text" or "git diff" in s["args"] or "preflight" in s["args"]:
                 continue
@@ -205,23 +228,45 @@ REPRO = 1.3 * call(1, 300, 500, 2.0)   # repro heredoc + one verify --repro-only
 CLAIMS = call(0, 60, 0, 0.5)           # '# CLAIM n:' header lines + per-claim processes
 
 
-def final(task, stretch=1.0, loc_cut=95.0, pessim=False):
-    s = stages(task, drop_vgate=not pessim)
+def final(task, stretch=1.0, loc_cut=95.0, pessim=False, measured=False, cuts=True):
+    """The SPEC 9.1 v10 counterfactual. measured: stage replies as measured, cut only at MEASURED_REPLY_CAP (the default
+    caps them at REPLY_CAP 200/100/60). cuts=False: no footer-time cuts, every stage runs its whole replayed length
+    (review round 2: the default cuts make '0 tasks at the cap' a property of the model)."""
+    caps = (MEASURED_REPLY_CAP, {"locator": MEASURED_REPLY_CAP["locator"]}) if measured else (None, None)
+    s = stages(task, drop_vgate=not pessim, reply_cap=caps[0], out_cap=caps[1])
     t = call(2, 40, 6000, 0.4)                                        # setup
     loc = stretch * (s["locator"] + REPRO + CLAIMS)
-    t += min(loc, (150.0 if pessim else loc_cut) - t)                 # LOCATOR banner at 75 s -> reply by ~95 s
     fix = stretch * (s["fixer"] + call(1, 40, 700, 2.0))              # + one verify.py (cached original)
-    t += min(fix, max(0.0, 210.0 - t))                                # FINISH footer at 210 s
     ver = call(5, 190, 3000 + 4 * 600, 8.0) + stretch * s["check"]    # status, verify, finalize, submit, reply
+    sub = 0.05 * call(3, 60, 3500, 1.0)                               # submitter backstop
+    if not cuts:
+        return min(CAP, t + loc + fix + ver + sub)
+    t += min(loc, (150.0 if pessim else loc_cut) - t)                 # LOCATOR banner at 75 s -> reply by ~95 s
+    t += min(fix, max(0.0, 210.0 - t))                                # FINISH footer at 210 s
     t += min(ver, max(12.0, 262.0 - t))                               # TIME footer at 250 s -> finalize + submit
-    t += 0.05 * call(3, 60, 3500, 1.0)                                # submitter backstop
+    t += sub
     return min(CAP, t)
 
 
 # ---------------------------------------------------------------------------------------------------------------------
 # R117 gate
 # ---------------------------------------------------------------------------------------------------------------------
+def cliff_hours(raw, n=CLIFF_N, stretch=HIDDEN_STRETCH, cap=CAP):
+    """Whole-run wall (h) of n hidden tasks shaped like `raw` (re-timed seconds per task): startup, then per task
+    setup + min(stretch x agent, cap + overshoot) + teardown (SPEC 9.2, H1). At most (600 + n x 309.6) / 3600."""
+    vals = list(raw)
+    if not vals:
+        return 0.0
+    per = st.mean(SETUP_S + min(cap + OVERSHOOT_S, stretch * x) + TEARDOWN_S for x in vals)
+    return (STARTUP_S + n * per) / 3600.0
+
+
 def gate(run_data, base_data, ratio=GATE_RATIO, over_s=GATE_OVER_S, cap=CAP):
+    """R117, restated in review round 2 for the cap-saturated regime the 12 h cliff lives in. PASS = no task projected
+    past cap + over_s AND the CLIFF_N hidden-run projection under CLIFF_H. The replayed mean against base_data on the
+    same ids is reported; above `ratio` (ratio_ok False) the first pre-registered knob is named. On public-like tasks
+    v10 projects 0.93-1.09 x v4 with the footers obeyed and 0.96-1.15 x without (SPEC 9.1), about 6.3 h in total, so
+    the ratio says nothing about the cliff; the cap does."""
     ids = sorted(set(run_data) & set(base_data))
     if not ids:
         return {"pass": False, "why": "no common task ids", "n": 0}
@@ -230,8 +275,12 @@ def gate(run_data, base_data, ratio=GATE_RATIO, over_s=GATE_OVER_S, cap=CAP):
     base_mean = st.mean(asis(base_data[i]) for i in ids)
     over = sorted(i for i in ids if raw[i] > cap + over_s)
     r = run_mean / base_mean if base_mean else float("inf")
-    return {"pass": r <= ratio and not over, "n": len(ids), "run_mean": round(run_mean, 1), "base_mean": round(base_mean, 1),
-            "ratio": round(r, 3), "limit": ratio, "over_cap": over, "max_task_s": round(max(raw.values()), 1),
+    proj = cliff_hours(raw.values(), cap=cap)
+    ratio_ok = r <= ratio
+    return {"pass": not over and proj < CLIFF_H, "n": len(ids), "run_mean": round(run_mean, 1),
+            "base_mean": round(base_mean, 1), "ratio": round(r, 3), "limit": ratio, "ratio_ok": ratio_ok,
+            "knob": None if ratio_ok else KNOBS[0], "proj_h": round(proj, 2), "proj_limit_h": CLIFF_H,
+            "over_cap": over, "max_task_s": round(max(raw.values()), 1),
             "compactions": sum(compactions(run_data[i]) for i in ids)}
 
 
@@ -268,13 +317,70 @@ def scratch_files(files):
                                                or VENDORED.search(p))]
 
 
+def _obeyed(hint, author, nxt):
+    """Did the author's next steps (at most 2) do what `hint` asks of that stage? None when it does not address the
+    stage. Locator: reply (text). Fixer: EDIT NOW -> an edit.py call; CONTEXT -> reply within 2 steps (one missing edit
+    allowed); FINISH/TIME -> reply. Verifier and submitter: EDIT NOW -> an edit; CONTEXT/FINISH/TIME -> finalize.py or
+    submit_patch next (FINISH also accepts a reply)."""
+    text = lambda x: x["kind"] == "text"
+    edit = lambda x: "edit.py" in x["args"]
+    fin = lambda x: "finalize.py" in x["args"] or x["fn"] == "submit_patch"
+    first = nxt[:1]
+    if author == "locator":
+        return any(text(x) for x in first)
+    if author == "fixer":
+        if hint == "LOCATOR":
+            return None
+        if hint == "EDIT NOW":
+            return any(edit(x) for x in nxt[:2])
+        if hint == "CONTEXT":
+            return any(text(x) for x in nxt[:2])
+        return any(text(x) for x in first)
+    if author in ("verifier", "submitter"):
+        if hint == "LOCATOR":
+            return None
+        if hint == "EDIT NOW":
+            return any(edit(x) for x in nxt[:2])
+        if hint == "FINISH":
+            return any(fin(x) or text(x) for x in first)
+        return any(fin(x) for x in first)
+    return None
+
+
+def footer_obedience(steps):
+    """{hint: [obeyed, seen]} over the first time each hint reaches each stage in one task. A hint after which the
+    stage makes no further step (the task was cut) is not counted."""
+    out, seen = {}, set()
+    for i, s in enumerate(steps):
+        obs = s.get("obs") or ""
+        if not obs or s["fn"] is None:
+            continue
+        for hint, needle in HINTS:
+            if needle not in obs or (s["author"], hint) in seen:
+                continue
+            seen.add((s["author"], hint))
+            nxt = [x for x in steps[i + 1:] if x["author"] == s["author"]][:2]
+            ok = _obeyed(hint, s["author"], nxt) if nxt else None
+            if ok is None:
+                continue
+            c = out.setdefault(hint, [0, 0])
+            c[0] += bool(ok)
+            c[1] += 1
+    return out
+
+
 def run_kpis(d, name):
     data = load(d, keep_obs=True)
     n = len(data)
     crashes = {k: sorted(i for i, t in data.items() if rx.search(str(t["row"].get("error") or ""))) for k, rx in CRASH.items()}
     helper_ok = cant_open = malformed = verdicts = restores = 0
     stage_max, empty, protected, scratch = [], [], [], []
+    obey = {}
     for iid, t in data.items():
+        for h, (o, n_) in footer_obedience(t["steps"]).items():
+            c = obey.setdefault(h, [0, 0])
+            c[0] += o
+            c[1] += n_
         ok = seen_verdict = False
         run_stage = (None, 0)
         for s in t["steps"]:
@@ -318,7 +424,7 @@ def run_kpis(d, name):
             "scratch_patches": scratch, "empty_patches": empty,
             "stage_under_line": (sum(m < COMPACTION_LINE for m in stage_max) / len(stage_max)) if stage_max else 1.0,
             "prompt_max": max(stage_max) if stage_max else 0, "compactions": sum(compactions(t) for t in data.values()),
-            "verdict_share": verdicts / n if n else 0.0, "restores": restores}
+            "verdict_share": verdicts / n if n else 0.0, "restores": restores, "footer_obedience": obey}
 
 
 def race2(d, control="r2_v9_eog", treatment="r2_v10", runs=2, against="r_v4"):
@@ -369,8 +475,18 @@ def race2(d, control="r2_v9_eog", treatment="r2_v10", runs=2, against="r_v4"):
     row("compaction events", {r["run"]: r["compactions"] for r in per.values()}, True, "reported only")
     base = load(against)
     gates = [gate(load(os.path.join(d, f"{treatment}_{k}")), base) for k in ks]
-    row("time (R117 replay)", [{k: g.get(k) for k in ("ratio", "run_mean", "base_mean", "n", "over_cap")} for g in gates],
-        all(g["pass"] for g in gates), f"<= {GATE_RATIO} x r_v4, none past cap + {GATE_OVER_S:.0f} s")
+    row("time (R117 replay)", [{k: g.get(k) for k in ("ratio", "run_mean", "base_mean", "n", "over_cap", "proj_h", "knob")}
+                               for g in gates],
+        all(g["pass"] for g in gates),
+        f"none past cap + {GATE_OVER_S:.0f} s, N={CLIFF_N} projection < {CLIFF_H:.0f} h; above {GATE_RATIO} x r_v4 "
+        f"apply the knob named")
+    fo = {}
+    for r in tr:
+        for h, (o, n_) in (r.get("footer_obedience") or {}).items():
+            c = fo.setdefault(h, [0, 0])
+            c[0] += o
+            c[1] += n_
+    row("footer obedience", {h: f"{o}/{n_}" for h, (o, n_) in sorted(fo.items())}, True, "reported only (SPEC 9.2)")
     vs = min(r["verdict_share"] for r in tr)
     row("verify verdict line", round(vs, 3), vs >= KPI["verdict_share_min"], f"restores: {sum(r['restores'] for r in tr)}")
     return all(r["pass"] for r in rows), rows, per
@@ -405,6 +521,8 @@ def main(argv=None):
     ap.add_argument("--stretch", type=float, default=1.0)
     ap.add_argument("--loc-cut", type=float, default=95.0)
     ap.add_argument("--pessimistic", action="store_true")
+    ap.add_argument("--measured", action="store_true")
+    ap.add_argument("--no-cuts", action="store_true")
     ap.add_argument("--control", default="r2_v9_eog")
     ap.add_argument("--treatment", default="r2_v10")
     ap.add_argument("--runs", type=int, default=2)
@@ -421,12 +539,16 @@ def main(argv=None):
     if a.design:
         base = a.base or "r_v9_eog"
         data = load(base, a.runs_dir)
-        m = st.mean(final(t, stretch=a.stretch, loc_cut=a.loc_cut, pessim=a.pessimistic) for t in data.values())
+        vals = [final(t, stretch=a.stretch, loc_cut=a.loc_cut, pessim=a.pessimistic, measured=a.measured,
+                      cuts=not a.no_cuts) for t in data.values()]
+        m = st.mean(vals)
+        at_cap = sum(v >= CAP - 5 for v in vals)
         v4 = st.mean(asis(t) for t in load("r_v4", a.runs_dir).values()) if os.path.isdir(resolve("r_v4", a.runs_dir)) else None
         ratio = m / v4 if v4 else None
         say({"mode": "design", "design": a.design, "base": base, "mean": round(m, 2), "n": len(data),
-             "ratio_to_v4": round(ratio, 4) if ratio else None},
-            f"DESIGN {a.design} on {base}: mean {m:.1f} s/task (n={len(data)})" + (f", {ratio:.2f} x v4 as-is" if ratio else ""))
+             "ratio_to_v4": round(ratio, 4) if ratio else None, "at_cap": at_cap},
+            f"DESIGN {a.design} on {base}: mean {m:.1f} s/task (n={len(data)}, {at_cap} at >= {CAP - 5:.0f} s)"
+            + (f", {ratio:.2f} x v4 as-is" if ratio else ""))
         return 0
     if a.run:
         r = gate(load(a.run, a.runs_dir), load(a.against, a.runs_dir), ratio=a.ratio)

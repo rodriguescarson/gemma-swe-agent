@@ -25,10 +25,10 @@ BASE8 = ["run_command", "read_file", "edit_file", "write_file", "get_status", "g
 SUBMITTERS = ("verifier", "submitter")
 SKILL_TOOLS = {"list_skills", "load_skill", "load_skill_resource", "run_skill_script"}
 GRAPH_TOOLS = {"get_code_neighbors", "search_similar_code", "get_code_subgraph"}
-GEN = {"setup": (0.2, 256), "locator": (1.0, 1536), "fixer": (1.0, 2048), "verifier": (1.0, 2048),
+GEN = {"setup": (0.2, 256), "locator": (1.0, 768), "fixer": (1.0, 2048), "verifier": (1.0, 2048),
        "submitter": (0.2, 1024)}
 OUTPUT_KEYS = {"locator": "plan", "fixer": "fix_notes"}
-EVAL = {"max_time_minutes": 5, "timeout_seconds": 120, "max_tool_calls": 100, "max_turns": 200}
+EVAL = {"max_time_minutes": 5, "timeout_seconds": 180, "max_tool_calls": 100, "max_turns": 200}
 CLI_SCRIPTS = ("install", "locate", "grep", "view", "edit", "run", "verify", "finalize", "status")
 LIB_SCRIPTS = ("_swe_common", "_swe_index", "_swe_gate", "_swe_ckpt")
 CONFIG_FILES = (["agent.yaml", "eval_config.yaml"] + [f"configs/gen_{s}.yaml" for s in STAGES]
@@ -731,7 +731,9 @@ def test_deadlines_under_command_timeout():
     timeout_seconds - 10 (110 s); the clock thresholds are ordered and end at the task cap."""
     ev = load_yaml("eval_config.yaml")["evaluation"]
     limit = ev["timeout_seconds"] - 10
-    assert limit == 110
+    # 2026-09-28: timeout_seconds 120 -> 180 (it also caps the hidden-test pytest run in verification,
+    # verification.py:492-503; v4 = 180; research/update_0928.md). Helper watchdogs stay at 110 s, well inside.
+    assert limit >= 110
     consts = common_constants()
     if consts is None:
         pytest.skip("_swe_common.py not built yet (helpers-core)")

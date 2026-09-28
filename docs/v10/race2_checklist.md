@@ -46,7 +46,8 @@ Faithful settings for both arms (`scripts/run_eval.py`, R115):
 | 9 | empty patches | 2 or fewer per 74 tasks, in each v10 run | result rows with `agent_patch_size` 0 and no saved patch text | 4/51 |
 | 10 | prompt tokens | at least 95% of stage-runs peak under 14,336; the largest prompt under 26,000 | a stage-run is a maximal run of consecutive agent steps by one author; its peak is the largest `prompt_tokens` | 81% under; max 25,657 |
 | 11 | compaction events | reported, no threshold | same-author call at 14,336 or more followed by a call under 70% of it (gap_4 rule) | 0 (pod runs never compacted) |
-| 12 | time (R117) | replayed mean at most 1.08 x the r_v4 replay on the same ids; no task projected past cap + 10 s | `replay_l4.py --run eval/runs/r2_v10_k --against r_v4`: every call re-timed with the L4 model plus 5.6 s per detected compaction (time_model 3.4) | - |
+| 12 | time (R117, restated 2026-09-28, see Addenda) | no task projected past cap + 10 s, and the N=130 hidden-run projection (600 s + per task 3.6 + min(1.9 x re-timed, 305) + 1 s) under 12 h. The replayed mean against the r_v4 replay on the same ids is reported. Above 1.08 x, the first pre-registered knob is applied (verifier repair rounds 2 -> 1), then the second (LOCATOR banner 75 -> 60 s) | `replay_l4.py --run eval/runs/r2_v10_k --against r_v4`: every call re-timed with the L4 model plus 5.6 s per detected compaction (time_model 3.4) | v9_eog: FAIL, 5 tasks past the cap; 1.16 x; 9.79 h |
+| 14 | footer obedience | reported, no threshold | the first time each footer (LOCATOR, EDIT NOW, CONTEXT, FINISH, TIME) reaches a stage in a task: did that stage's next step do what it asks (`replay_l4.footer_obedience`) | n/a (v9 prints no v10 footer) |
 | 13 | verify behaviour | a `VERIFY:` verdict line in at least 90% of tasks, in each v10 run; checkpoint restores reported | any tool result containing `VERIFY: GREEN`, `AMBER`, `RED` or `UNKNOWN`; restores = count of `RESTORED` | n/a (v9 prints no verdict) |
 
 Machine-readable thresholds. `tests/test_v10_runner.py` fails if these differ from `replay_l4.KPI`:
@@ -66,6 +67,8 @@ prompt_max = 26000
 verdict_share_min = 0.90
 time_ratio_max = 1.08
 time_over_s = 10
+time_proj_h_max = 12
+time_n_hidden = 130
 kill_floor = -3
 ```
 
@@ -93,4 +96,15 @@ task, gap_4) to judge how faithful the pod was.
 
 ## Addenda
 
-None.
+1. **2026-09-28, review round 2, before any race-2 run.** Row 12 changed. It used to be the replayed mean at most
+   1.08 x r_v4 plus no task past cap + 10 s. The ratio was a ship blocker, and the ratio is not what the 12 h cliff
+   depends on:
+   - The SPEC 9.1 projection behind it cut every stage at its footer time and capped stage replies at 200/100/60
+     tokens, so it could not show a task at the cap.
+   - With measured replies, v10 projects 0.93-1.09 x v4 on public-like tasks with the footers obeyed and 0.96-1.15 x
+     with no footer cuts. That is about 6.3 h for a whole run.
+   - On hidden, cap-saturated tasks the per-task wall is bounded by the cap (10.49 h at N=120, 11.35 h at N=130),
+     whatever the ratio.
+   So the blocker is now the cap: no task past cap + 10 s, and the N=130 projection under 12 h. The ratio triggers the
+   pre-registered knobs. Row 14, footer obedience, is new and reported only: the projection assumes the footers are
+   obeyed, and race 2 measures whether they are. The thresholds were changed before any race-2 data existed.

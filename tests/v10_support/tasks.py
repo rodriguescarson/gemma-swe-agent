@@ -935,8 +935,10 @@ STAGES = ("setup", "locator", "fixer", "verifier", "submitter")
 # ADK identity about 150 chars; prose at 3.4 chars/token.
 DECL_CHARS, SUBMIT_DECL_CHARS, SKILL_CHARS, IDENTITY_CHARS, CHARS_PER_TOKEN = 7200, 250, 1333, 150, 3.4
 STAGE_BUDGET_TOKENS = 8000                                       # R94
-PLAN_120 = " ".join(["planned"] * 120)
-NOTES_60 = " ".join(["changed"] * 60)
+# Review round 2 (R94 re-derived): earlier replies at their measured race-1 p90 in tokens, bounded by the stage's
+# max_output_tokens (tests/test_v10_prompts.py REPLY_TOKENS), paid in the handoff event and again for any placeholder.
+REPLY_P90_TOKENS = {"locator": 1087, "fixer": 244, "verifier": 188}
+PREV_STAGE = {"locator": "setup", "fixer": "locator", "verifier": "fixer", "submitter": "verifier"}
 # `find . -maxdepth 3 ... | sort | head -150` (agent_runner.py:312): rich's real tree is 3,283 chars; 150 lines of 31
 # chars (4,650) matches the SPEC section 6 worst case and leaves room for fastapi's longer docs_src paths.
 TREE_150 = "\n".join(f"./pkg_dir/subdir/module_{i:03d}.py" for i in range(150))
@@ -957,15 +959,26 @@ def harness_prompt(task: dict) -> str:
     return build_agent_prompt(t, cfg, workspace_tree=TREE_150)
 
 
+def reply_p90_chars(stage: str) -> int:
+    """A stage's p90 final reply in chars: min(measured p90, max_output_tokens) tokens at 3.4 chars/token."""
+    m = re.search(r"^max_output_tokens:\s*(\d+)", (BUNDLE / "configs" / f"gen_{stage}.yaml").read_text(), re.M)
+    cap = int(m.group(1)) if m else REPLY_P90_TOKENS[stage]
+    return int(round(min(REPLY_P90_TOKENS[stage], cap) * CHARS_PER_TOKEN))
+
+
 def stage_start_tokens(stage: str, task: dict) -> int:
     text = (BUNDLE / "prompts" / f"{stage}.md").read_text(encoding="utf-8")
-    text = (text.replace("{problem_description}", task["problem_statement"]).replace("{plan?}", PLAN_120)
-            .replace("{fix_notes?}", NOTES_60))
+    plan, notes = "p" * reply_p90_chars("locator"), "n" * reply_p90_chars("fixer")
+    text = (text.replace("{problem_description}", task["problem_statement"]).replace("{plan?}", plan)
+            .replace("{fix_notes?}", notes))
     chars = len(text) + DECL_CHARS + SKILL_CHARS + IDENTITY_CHARS
     if stage in ("verifier", "submitter"):
         chars += SUBMIT_DECL_CHARS
     if stage == "setup":
         chars += len(harness_prompt(task))
+    else:
+        said = {"locator": "READY", "fixer": plan, "verifier": notes, "submitter": "v" * reply_p90_chars("verifier")}
+        chars += len("For context:") + len(f"[{PREV_STAGE[stage]}] said: ") + len(said[stage])
     return math.ceil(chars / CHARS_PER_TOKEN)
 
 
