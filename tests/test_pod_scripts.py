@@ -87,7 +87,7 @@ def test_full_runs_are_preceded_by_a_canary():
 
 def test_preflight_failures_name_the_failing_tests_and_keep_the_log():
     s = (POD / "preflight.sh").read_text()
-    assert "eval/preflight_tests.log" in s and "^FAILED" in s      # the failing test once lived only in /tmp and was lost
+    assert "eval/preflight_tests.log" in s and "^(FAILED|ERROR)" in s      # the failing test once lived only in /tmp and was lost
 
 def test_backup_pushes_results_to_github_after_hf():
     s = (POD / "backup.sh").read_text()   # Carson 2026-09-27: push pod results to GitHub before every shutdown
