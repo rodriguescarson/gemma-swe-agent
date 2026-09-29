@@ -489,7 +489,8 @@ def test_guard_scratch_without_finalize(tmp_path):
             "site-packages/x/a.py", "lib/site-packages/y.py", "foo-1.0.dist-info/METADATA", "_pytest/z.py",
             "tests/new/test_q.py", "tests/data.json", "pkg/sub/conftest.py", "test_root.py", "root_test.py",
             "sitecustomize.py", "usercustomize.py", "x.pth", "pkg/tests/helper.py", "pkg/test/h.py", "testing/t.py",
-            "tox.ini", "pkg/pytest.ini", "scratch_dir/notes.py", "debug/x.py"]
+            "tox.ini", "pkg/pytest.ini", "scratch_dir/notes.py", "debug/x.py",
+            "pkg/testing/new_mod.py", "pkg/Tests/n.py", "a/TEST/b/c.py", "Testing/r.py"]   # graders' git clean deletes
     for rel in junk:
         p = ws / rel
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -503,14 +504,18 @@ def test_guard_keeps_real_changes(tmp_path):
     modules such as pkg/tmp_utils.py or a unicode path ship."""
     files = dict(FILES)
     files.update({"templates/a.html": "a\n", "src/_pytest/x.py": "y = 1\n", "debug.py": "D = 1\n",
-                  "tmp_data/d.txt": "d\n"})
+                  "tmp_data/d.txt": "d\n", "pkg/testing/util.py": "U = 1\n", "pkg/Tests/h.py": "H = 1\n"})
     ws, swe, sc = task(tmp_path, files)
     helper(sc, "install", ws=ws, swe=swe, t=2)
-    for rel in ("templates/new.html", "src/_pytest/new.py", "tmp_data/e.txt", "pkg/tmp_utils.py", "pkg/ünï.py"):
+    for rel in ("templates/new.html", "src/_pytest/new.py", "tmp_data/e.txt", "pkg/tmp_utils.py", "pkg/ünï.py",
+                "pkg/testing/data.txt", "pkg/testing.py", "pkg/mytesting/m.py"):
+        (ws / rel).parent.mkdir(parents=True, exist_ok=True)
         (ws / rel).write_text("n = 1\n")
-    (ws / "debug.py").write_text("D = 2\n")
+    for rel in ("debug.py", "pkg/testing/util.py", "pkg/Tests/h.py"):      # tracked: the graders keep these edits
+        (ws / rel).write_text("D = 2\n")
     got = submit_patch(ws)
-    for rel in ("templates/new.html", "src/_pytest/new.py", "tmp_data/e.txt", "pkg/tmp_utils.py", "debug.py"):
+    for rel in ("templates/new.html", "src/_pytest/new.py", "tmp_data/e.txt", "pkg/tmp_utils.py", "debug.py",
+                "pkg/testing/data.txt", "pkg/testing.py", "pkg/mytesting/m.py", "pkg/testing/util.py", "pkg/Tests/h.py"):
         assert "b/" + rel in got, (rel, patch_paths(got))
     assert "\\303\\274n\\303\\257.py" in got or "ünï.py" in got
 
@@ -615,8 +620,11 @@ def test_guard_only_in_a_harness_workspace(tmp_path):
 
 def test_finalize_enforces_patch_rules(tmp_path):
     """finalize never prints READY while the graders' view of the patch carries a test/config or scratch file: a root
-    scratch file the model staged with git add, a new .py under a nested testing/ dir and an edit to a tracked one (the
-    harness rule is case-insensitive and covers nested dirs) are undone, and the rules match replay_l4's KPI 7/8."""
+    scratch file the model staged with git add and a new .py under a nested testing/ dir (the graders' git clean deletes
+    it; their rule is case-insensitive and covers nested dirs) are undone. For NEW files the rules match replay_l4's
+    KPI 7/8 exactly; for tracked files they are the helpers' own rule (_protected_git), because the graders' checkout of
+    tracked files always aborts on a missing pathspec (harness_runtime 7.2), so a tracked pkg/testing/u.py edit ships
+    (review 2026-09-29: see test_protection_one_rule_nested_testing)."""
     files = dict(FILES)
     files["pkg/testing/util.py"] = "U = 1\n"
     ws, swe, sc = task(tmp_path, files)
@@ -625,10 +633,12 @@ def test_finalize_enforces_patch_rules(tmp_path):
     (ws / "repro_steps.txt").write_text("x\n")
     git(ws, "add", "-f", "repro_steps.txt")               # the guard makes a plain git add refuse it
     (ws / "pkg/testing/new_helper.py").write_text("H = 1\n")
-    (ws / "pkg/testing/util.py").write_text("U = 2\n")
+    git(ws, "add", "-f", "pkg/testing/new_helper.py")     # staged too: status A, not only untracked
     out = helper(sc, "finalize", ws=ws, swe=swe, t=100)
     assert out.startswith("READY: 1 files changed"), out
     assert "CLEANED: the patch carried" in out and "repro_steps.txt (scratch or vendored file)" in out, out
+    assert "reverted test/config edits: pkg/testing/new_helper.py" in out, out
+    assert not (ws / "pkg/testing/new_helper.py").exists()
     assert patch_paths(submit_patch(ws)) == ["pkg/mod.py"]
     sys.path.insert(0, str(ROOT / "scripts"))
     import replay_l4 as R
@@ -636,10 +646,104 @@ def test_finalize_enforces_patch_rules(tmp_path):
     table = [("tests/test_x.py", False), ("pkg/testing/u.py", False), ("Tests/x.py", True), ("pkg/conftest.py", True),
              ("pyproject.toml", False), ("x.pth", True), ("repro.py", True), ("Repro.txt", True), ("pkg/repro.py", True),
              ("a.log", True), ("lib/site-packages/a.py", True), ("x.dist-info/M", True), ("pkg/mod.py", False),
-             ("pkg/new.py", True), ("docs/tmp.md", True), ("debug.py", False), ("test_root.py", True)]
+             ("pkg/new.py", True), ("docs/tmp.md", True), ("debug.py", False), ("test_root.py", True),
+             ("pkg/testing/u.py", True), ("pkg/Tests/h.py", True), ("pkg/Tests/h.py", False), ("TESTING/x.py", False),
+             ("tests/data.json", False), ("pkg/testing/data.json", True)]
     for p, new in table:
         kpi = R.is_protected(p) or bool(R.scratch_files([(p, new)]))
-        assert bool(C.patch_violations([(p, new)])) == kpi, (p, new)
+        got = bool(C.patch_violations([(p, new)]))
+        if new:
+            assert got == kpi, (p, new)
+        else:
+            assert got == bool(C._protected_git(p)), (p, new)
+
+
+# The graders' reset of test/config files, verbatim (swegemma/harness/verification.py:392-415, with the path list the
+# agent patch produces): the checkout aborts on the first unknown pathspec, the clean still runs.
+def _grader_reset(ws, paths):
+    lst = " ".join(list(paths) + ["conftest.py", "pytest.ini", "sitecustomize.py", "usercustomize.py",
+                                  "_swegemma_stubs.py"])
+    for cmd in ("git checkout HEAD -- %s 2>/dev/null || true" % lst, "git clean -f -- %s 2>/dev/null || true" % lst):
+        subprocess.run(["bash", "-c", "cd %s && %s" % (ws, cmd)], capture_output=True, text=True,
+                       env=dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1"))
+
+
+def test_protection_one_rule_nested_testing(tmp_path):
+    """Review finding 2026-09-29 (major): finalize's patch rule (the graders' _is_protected_test_or_config_path: .py
+    under tests/test/testing at any depth, any case) and edit.py's refusal (is_protected: root testing/, nested
+    lower-case tests/ and test/) disagreed. edit.py accepted pkg/testing/util.py; finalize undid it (NOT READY: EMPTY with
+    an EDIT TARGET pointing back at the same file), the next finalize restored the EDITED checkpoint and undid it again,
+    and from t>=255 the late guard restored it on any helper call. Now one rule, per file kind:
+    - a TRACKED file there is editable and ships (the graders' checkout aborts on a missing pathspec, so they keep the
+      edit): edit OK, finalize READY with it, a second finalize and status at t=260 restore nothing, submit_patch carries
+      it, and the verbatim graders' reset leaves it in place; the same for a case variant (pkg/Tests/helper.py);
+    - a NEW .py there (the graders' git clean deletes it) is REFUSED by edit.py up front, both --create and an untracked
+      file written natively, and a native one is reverted by the helpers and never reaches the fallback diff; a new
+      non-.py file there (the graders keep it) is accepted and ships;
+    - for every sample, edit.py refuses a path exactly when patch_violations would undo it."""
+    files = dict(FILES)
+    files.update({"pkg/testing/__init__.py": "", "pkg/testing/util.py": "def u():\n    return 1\n",
+                  "pkg/Tests/helper.py": "H = 1\n"})
+    ws, swe, sc = task(tmp_path, files)
+    helper(sc, "install", ws=ws, swe=swe, t=2)
+    out = helper(sc, "edit", ["pkg/testing/util.py", "--lines", "2-2"], ws=ws, swe=swe, t=140, stdin="    return 2\n")
+    assert out.startswith("OK (lines): pkg/testing/util.py"), out
+    out = helper(sc, "finalize", ws=ws, swe=swe, t=150)
+    assert out.startswith("READY: 1 files changed"), out
+    assert "CLEANED" not in out and "EDIT TARGET" not in out and "RESTORED" not in out, out
+    assert patch_paths(submit_patch(ws)) == ["pkg/testing/util.py"]
+    out = helper(sc, "finalize", ws=ws, swe=swe, t=160)
+    assert out.startswith("READY: 1 files changed") and "RESTORED" not in out, out
+    out = helper(sc, "status", ws=ws, swe=swe, t=260)
+    assert "RESTORED" not in out, out
+    assert (ws / "pkg/testing/util.py").read_text() == "def u():\n    return 2\n"
+    # the case variant of the harness rule (Tests/): same behaviour
+    out = helper(sc, "edit", ["pkg/Tests/helper.py", "--lines", "1-1"], ws=ws, swe=swe, t=170, stdin="H = 2\n")
+    assert out.startswith("OK (lines): pkg/Tests/helper.py"), out
+    out = helper(sc, "finalize", ws=ws, swe=swe, t=180)
+    assert out.startswith("READY: 2 files changed") and "CLEANED" not in out, out
+    assert patch_paths(submit_patch(ws)) == ["pkg/Tests/helper.py", "pkg/testing/util.py"]
+    # new files: a .py is refused up front (the graders delete it), a data file is not (the graders keep it)
+    for rel in ("pkg/testing/new_helper.py", "pkg/Tests/new_mod.py", "pkg/sub/TESTING/n.py"):
+        out = helper(sc, "edit", [rel, "--create"], ws=ws, swe=swe, t=190, stdin="N = 1\n")
+        assert out.startswith("REFUSED: new file in a test directory (%s)" % rel), out
+        assert not (ws / rel).exists()
+    (ws / "pkg/testing/native.py").write_text("N = 1\n")         # written by a native tool or the shell
+    out = helper(sc, "edit", ["pkg/testing/native.py", "--lines", "1-1"], ws=ws, swe=swe, t=195, stdin="N = 2\n")
+    assert out.startswith("REFUSED: new file in a test directory (pkg/testing/native.py)"), out
+    assert patch_paths(submit_patch(ws)) == ["pkg/Tests/helper.py", "pkg/testing/util.py"]   # the guard hides it
+    out = helper(sc, "edit", ["pkg/testing/notes.txt", "--create"], ws=ws, swe=swe, t=200, stdin="n\n")
+    assert out.startswith("OK (create"), out
+    assert "reverted test/config edits: pkg/testing/native.py" in out, out   # hygiene after every landed write
+    assert not (ws / "pkg/testing/native.py").exists()
+    (ws / "pkg/Tests/native2.py").write_text("N = 1\n")         # again, then straight to finalize
+    out = helper(sc, "finalize", ws=ws, swe=swe, t=210)
+    assert out.startswith("READY: 3 files changed") and "CLEANED: the patch carried" not in out, out
+    assert "reverted test/config edits: pkg/Tests/native2.py" in out, out
+    assert not (ws / "pkg/Tests/native2.py").exists()
+    got = submit_patch(ws)
+    assert patch_paths(got) == ["pkg/Tests/helper.py", "pkg/testing/notes.txt", "pkg/testing/util.py"], got
+    # the graders' own reset keeps every tracked edit and the new data file: nothing the helpers kept is lost
+    _grader_reset(ws, patch_paths(got))
+    assert (ws / "pkg/testing/util.py").read_text() == "def u():\n    return 2\n"
+    assert (ws / "pkg/Tests/helper.py").read_text() == "H = 2\n" and (ws / "pkg/testing/notes.txt").exists()
+    # one rule: edit.py's refusal == patch_violations' test/config verdict, tracked and new, over a table
+    tracked = ["pkg/testing/util.py", "pkg/Tests/helper.py", "tests/test_mod.py", "tests/__init__.py", "setup.cfg",
+               "pkg/mod.py", "pyproject.toml"]
+    new = ["pkg/testing/x.py", "pkg/Tests/x.py", "a/b/testing/c/d.py", "Test/x.py", "tests/data.json",
+           "pkg/testing/d.json", "pkg/new.py", "pkg/tests/h.py", "testing/t.py", "pkg/conftest.py", "x.pth",
+           "pkg/test_new.py", "pkg/ünï.py"]
+    code = ("import json\nrows = json.loads(%r)\nout = []\nfor p, n in rows:\n"
+            "    v = [w for q, w in C.patch_violations([(p, n)]) if w == 'test/config file']\n"
+            "    out.append([p, n, bool(C.write_protected(p)), bool(v)])\nprint(json.dumps(out))\n"
+            % json.dumps([[p, False] for p in tracked] + [[p, True] for p in new]))
+    r = run_py(sc, code, env=env_at(ws, swe), cwd=ws)
+    rows = json.loads(r.stdout.strip().splitlines()[-1])
+    assert [x for x in rows if x[2] != x[3]] == [], rows
+    assert {p for p, _, refused, _ in rows if refused} == {
+        "tests/test_mod.py", "tests/__init__.py", "setup.cfg", "pyproject.toml", "pkg/testing/x.py", "pkg/Tests/x.py",
+        "a/b/testing/c/d.py", "Test/x.py", "tests/data.json", "pkg/tests/h.py", "testing/t.py", "pkg/conftest.py",
+        "x.pth", "pkg/test_new.py"}, rows
 
 
 # ---------------------------------------------------------------------------------------------------------------------

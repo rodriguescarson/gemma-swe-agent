@@ -839,7 +839,7 @@ def run(x, opts, pos):
 
     x.ab, x.rel = resolve(C.ws(), fname)
     rel, ab = x.rel, x.ab
-    reason = C.is_protected(rel)
+    reason = C.write_protected(rel)        # the same rule finalize's patch check undoes (review 2026-09-29)
     if reason:
         raise Fail("REFUSED: %s (%s); graders replace test files; this edit would make grading fail; put checks in a "
                    "reproduction." % (reason, rel), why="REFUSED", counts=False)

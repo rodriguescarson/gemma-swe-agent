@@ -945,7 +945,9 @@ def test_verify_ends_by_the_end_game_line(scripts, tmp_path):
 
     def go(t):
         return t, verify(scripts, cases[t], t=t, timeout=180)
-    with ThreadPoolExecutor(len(clocks)) as ex:
+    # at most one case per CPU: 4 concurrent slow cases on the 2-CPU Linux gate contend and overrun the deadline, a test
+    # artifact (the scorer runs one task at a time); the deadline itself is still asserted per case below
+    with ThreadPoolExecutor(max(1, min(len(clocks), (os.cpu_count() or 2) // 2))) as ex:
         got = dict(ex.map(go, clocks))
     for t in clocks:
         r = got[t]

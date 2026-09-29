@@ -670,6 +670,14 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
     - absolute, or containing `..`, or outside `ws()`.
 
     Nested `pkg/testing/util.py` is allowed (R20).
+
+    **`write_protected(rel)`** (review 2026-09-29, R130) is the one rule for what a helper may write: `is_protected`, or
+    a path the graders' rule alone covers (`harness_protected`: a `.py` under `tests`/`test`/`testing` at any depth, in
+    any case) that the baseline does not have (`git cat-file -e <baseline>:<rel>`, run only for that rare kind) - reason
+    `new file in a test directory`. The graders' `git checkout HEAD -- <files> sitecustomize.py ...` aborts on the
+    missing pathspec, so a tracked edit there ships; their `git clean -f -- <files>` deletes a new file there. `edit.py`
+    refuses by it, finalize's EDIT TARGET skips by it, `changes()` lists such new files (status `?` or `A`) as protected
+    (so hygiene removes them), and the submit guard hides them (`**/<tests|test|testing, any case>/**/*.py`).
 11. **`hygiene_revert()`.**
     - Tracked protected paths that were modified or deleted: `git checkout <baseline> -- <p>`, one call per path.
     - Untracked protected paths: removed.
@@ -711,10 +719,13 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
       baseline root entries and tracked vendored-named directories a pattern would hide (a tracked `templates/` or
       `src/_pytest/` keeps shipping new files);
     - called by `install.py` and at the top of `finalize.py` (a failed install, or a `read-tree` that dropped the marks);
-    - `patch_violations(files)` applies the graders' rules to `[(path, is_new)]` (the harness's
-      `_is_protected_test_or_config_path`, case-insensitive at any depth, plus new scratch or vendored files: KPI 7 and
-      8), and `enforce_patch_rules()` undoes whatever the harness-view patch still carries (a staged scratch file, a
-      new `.py` under a nested `testing/`).
+    - `patch_violations(files)` applies to `[(path, is_new)]` the same rule `write_protected` gives `edit.py`: a
+      tracked path when `_protected_git` flags it; a new path also by the harness's `_is_protected_test_or_config_path`
+      (case-insensitive at any depth); plus new scratch or vendored files. For new files that is KPI 7 and 8 exactly;
+      a tracked edit under a nested `testing/` or `Tests/` ships (the graders keep it) although KPI 7 counts it.
+      `enforce_patch_rules()` undoes whatever the harness-view patch still carries (a staged scratch file, a new `.py`
+      under a nested `testing/`), and never an edit `edit.py` accepted (review 2026-09-29: it used to undo a tracked
+      `pkg/testing/util.py` edit, so finalize said EMPTY, and restores and the late guard looped on it).
     `diff_bytes()` keeps no override, so it still equals what `submit_patch` produces (R21).
 
 ### 4.2 `install.py`
@@ -865,7 +876,7 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
   - `REVERTED: syntax error at line L (line k of your new text): <msg>. FILE unchanged.` The `.py` targets are compiled in
     memory, `compile(src_bytes, path, "exec", dont_inherit=True)`, with no .pyc. A file that did not compile before the
     edit is written with `WARNING: FILE did not compile before this edit either` instead.
-  - `REFUSED: <reason from is_protected>` (plus `graders replace test files; this edit would make grading fail; put checks in a reproduction`)
+  - `REFUSED: <reason from write_protected>` (plus `graders replace test files; this edit would make grading fail; put checks in a reproduction`)
     or `REFUSED: outside the repository`, or `REFUSED: FILE looks binary (NUL bytes); only text files can be edited.`
   - `NO CHANGE: the new text equals the old text.`
   - `ALREADY TRIED: this exact edit failed at t=Ns (<reason>). Do something different: python3 /tmp/swe/view.py FILE A B, then python3 /tmp/swe/edit.py FILE --lines A-B.`
@@ -1520,9 +1531,10 @@ Test files and owners:
 | R124 | v10.1 finalize EMPTY: the time left, "an empty patch always fails", EDIT TARGET (latest undone edit, else latest source view; never a test file; none without a view); output 1,400 chars or fewer | T101::test_finalize_empty_text_and_edit_target | CI |
 | R125 | v10.1 edit.py early EOF: named, nothing changed, not counted; a missing divider alone keeps the old message; EDITFORM states the EOF rule | T101::test_edit_early_eof_message | CI |
 | R126 | v10.1 submit guard: protected files overwritten, appended or deleted after READY, and every scratch, vendored and new test/config sample without any finalize, stay out of the harness's exact submit and fallback commands; real changes under matching tracked dirs, a tracked root debug.py, new modules and a unicode path still ship | T101::test_guard_post_finalize_native_edit, test_guard_scratch_without_finalize, test_guard_keeps_real_changes, TFL::test_flow[g], TFL::test_flow[h] | CI |
-| R127 | v10.1 guard, helpers' view and upkeep: changes() lists hidden edits, verify reverts them with the reason and the mark survives, finalize still cleans scratch, the base-tree copy ignores guard-matched files; arming is idempotent, under 1 s on 3,000 files, repaired by finalize after a read-tree, never done without the baseline tag; finalize undoes what the graders' rules forbid (the same rules as replay_l4 KPI 7/8) | T101::test_guard_helpers_view_unchanged, test_guard_fast_path_never_hides_a_dirty_file, test_guard_idempotent_fast_and_rearmed, test_guard_only_in_a_harness_workspace, test_finalize_enforces_patch_rules | CI |
+| R127 | v10.1 guard, helpers' view and upkeep: changes() lists hidden edits, verify reverts them with the reason and the mark survives, finalize still cleans scratch, the base-tree copy ignores guard-matched files; arming is idempotent, under 1 s on 3,000 files, repaired by finalize after a read-tree, never done without the baseline tag; finalize undoes what the graders' rules forbid (for new files the same rules as replay_l4 KPI 7/8; tracked files by `_protected_git`) | T101::test_guard_helpers_view_unchanged, test_guard_fast_path_never_hides_a_dirty_file, test_guard_idempotent_fast_and_rearmed, test_guard_only_in_a_harness_workspace, test_finalize_enforces_patch_rules | CI |
 | R128 | v10.1 view.py L-ranges (`L2-3`, `FILE:L2-3`, `L2 L3`) and status.py's VIEWED line (newest first, 4 at most, no test files) | T101::test_view_accepts_l_ranges, test_status_lists_viewed_ranges | CI |
 | R129 | v10.1 replay_l4 diagnostic KPIs: each counter on a synthetic trace; on race 2 round 1 they reproduce the diagnoses (1 parsed and 29 unparsed invented tool names, 9/69 verifier first turns, 6 helpers and 2 tools typed into the shell, 11 locator replies at 768, 65 grep misses, the KPI 7/8 mechanisms, 3 tasks past cap + 10 s over all ids) and v9_eog's zeros | T101::test_replay_diag_kpis_unit, test_replay_diag_reproduces_race2_round1 | CI (REPLAY data when present) |
+| R130 | One protection rule (review 2026-09-29): a tracked edit under a nested `testing/` or a `Tests/` dir is accepted by edit.py, reaches READY, survives a second finalize and status at t=260 (no restore loop), ships in submit_patch and survives the graders' verbatim reset; a new `.py` there is REFUSED by edit.py (`--create` and a natively written file), reverted by the helpers and hidden by the guard; a new non-`.py` there ships; over a tracked and new table, edit.py refuses exactly what patch_violations undoes | T101::test_protection_one_rule_nested_testing, test_finalize_enforces_patch_rules, test_guard_scratch_without_finalize, test_guard_keeps_real_changes | CI |
 
 ### 7.1 v9 bugs and their regression tests
 

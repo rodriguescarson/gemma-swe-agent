@@ -1254,8 +1254,8 @@ def _new_module(p, tracked_changed=()):
 def changes(hidden=True):
     """Changes since baseline() -> dict(source, protected, untracked, deleted, status). source: changed tracked
     non-protected files plus untracked new modules; deleted: deleted tracked non-protected files; protected: every
-    changed/new protected path; untracked: every untracked non-protected file; status: path -> M/A/D/T/?. Reads only
-    (no write to the real index). The helpers keep their own view under the submit guard (v10.1): untracked files are
+    changed/new protected path (a new one also by the graders' rule, harness_protected: see write_protected);
+    untracked: every untracked non-protected file; status: path -> M/A/D/T/?. Reads only (no write to the real index). The helpers keep their own view under the submit guard (v10.1): untracked files are
     listed without the guard's exclude file, and with hidden=True the protected files the guard marked
     assume-unchanged are compared too (on a temp copy of the index), so hygiene still sees and reverts them."""
     b = baseline()
@@ -1279,7 +1279,7 @@ def changes(hidden=True):
             if not code or _skip_path(p):
                 continue
             res["status"][p] = code
-            if _protected_git(p):
+            if _protected_git(p) or (code == "A" and harness_protected(p)):   # A: new, the graders delete it
                 res["protected"].append(p)
             elif code == "D":
                 res["deleted"].append(p)
@@ -1292,7 +1292,7 @@ def changes(hidden=True):
             if not p or _skip_path(p) or p in res["status"]:
                 continue
             res["status"][p] = "?"
-            if _protected_git(p):
+            if _protected_git(p) or harness_protected(p):
                 res["protected"].append(p)
             else:
                 res["untracked"].append(p)
@@ -1520,6 +1520,7 @@ GUARD_ROOT_PREFIXES = ("repro", "scratch", "debug", "tmp", "temp", "try", "demo"
 GUARD_ANY = ("*.log", "*.orig", "*.rej", "*.bak", "*.swp", ".coverage")
 GUARD_VENDOR = ("site-packages/", "_pytest/", "*.dist-info/")
 GUARD_PROTECTED = ("test_*.py", "*_test.py", "*.pth", "tests/", "test/", "/testing/")
+GUARD_TEST_DIRS = ("tests", "test", "testing")   # new .py below one, any depth and case: the graders' git clean deletes it
 
 
 def _ci(word):
@@ -1541,11 +1542,13 @@ def _guard_vendor_dir(base):
 
 def guard_exclude_text(root_names, tracked_dirs):
     """The exclude file: root scratch prefixes (any case), scratch anywhere, vendored trees, new protected files (the
-    is_protected rules), then re-includes for baseline root entries and tracked directories that a pattern would
-    otherwise hide, so a real new file under a tracked templates/ or src/_pytest/ still ships."""
+    is_protected rules, and write_protected's new .py under a tests/test/testing dir of any depth and case), then
+    re-includes for baseline root entries and tracked directories that a pattern would otherwise hide, so a real new
+    file under a tracked templates/ or src/_pytest/ still ships."""
     lines = ["# swe-tools %s submit guard: git add -N . never adds these untracked paths" % VERSION]
     lines += ["/%s*" % _ci(p) for p in GUARD_ROOT_PREFIXES]
     lines += list(GUARD_ANY) + list(GUARD_VENDOR) + sorted(_PROT_NAMES) + list(GUARD_PROTECTED)
+    lines += ["**/%s/**/*.py" % _ci(d) for d in GUARD_TEST_DIRS]       # harness_protected's new files (write_protected)
     keep = set()
     for n in root_names:
         if n.lower().startswith(GUARD_ROOT_PREFIXES):
@@ -1710,11 +1713,42 @@ def harness_protected(rel):
     return bool({"tests", "test", "testing"} & {p.lower() for p in parts[:-1]} and name.endswith(".py"))
 
 
+# One rule for every helper (review 2026-09-29): what edit.py refuses is exactly what finalize undoes. The graders'
+# reset (verification.py:392-415) runs `git checkout HEAD -- <files> sitecustomize.py ...`, which aborts on the missing
+# pathspec and restores nothing, then `git clean -f -- <files>`, which does delete NEW files. So a tracked file their rule
+# alone covers (pkg/testing/util.py, pkg/Tests/x.py) keeps the agent's edit and may ship (is_protected allows it, R20),
+# while a new .py there is deleted before the tests run and is refused like a test file.
+NEW_IN_TEST_DIR = "new file in a test directory"
+
+
+def in_baseline(rel):
+    """True when the baseline tree has this repo-relative path (a file edit.py changes rather than creates)."""
+    rc, _ = git(["cat-file", "-e", "%s:%s" % (baseline(), rel)])
+    return rc == 0
+
+
+def write_protected(rel):
+    """Why no helper may write this path, or None: is_protected, or a path the graders' rule alone covers that the
+    baseline does not have (their git clean deletes it). The git call runs only for that rare second kind."""
+    why = is_protected(rel)
+    if why:
+        return why
+    p = str(rel).replace("\\", "/").strip()
+    if os.path.isabs(p):                      # is_protected already refused one outside ws()
+        p = os.path.relpath(_real(p), ws()).replace(os.sep, "/")
+    p = "/".join(x for x in p.split("/") if x not in ("", "."))
+    if p and harness_protected(p) and not in_baseline(p):
+        return NEW_IN_TEST_DIR
+    return None
+
+
 def patch_violations(files):
-    """[(path, why)] for the paths a patch must never carry: files = [(path, is_new)] as in the patch."""
+    """[(path, why)] for the paths a patch must never carry: files = [(path, is_new)] as in the patch. Tracked paths
+    follow the helpers' rule (_protected_git; the graders' checkout keeps tracked edits), new ones the graders' rule
+    as well (their git clean deletes them), plus new scratch or vendored files."""
     out = []
     for p, new in files:
-        if harness_protected(p) or _protected_git(p):
+        if _protected_git(p) or (new and harness_protected(p)):
             out.append((p, "test/config file"))
         elif new and (("/" not in p and _KPI_SCRATCH_ROOT.search(p)) or _KPI_SCRATCH_ANY.search(p)
                       or _KPI_VENDORED.search(p)):

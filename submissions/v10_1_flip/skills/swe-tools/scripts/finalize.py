@@ -102,7 +102,7 @@ def edit_target(st, room):
                 cands.append((float(v[2]), 0, f, int(v[0]), int(v[1])))
     ws = C.ws()
     for t, _, f, a, b in sorted(cands, reverse=True):
-        if C.is_protected(f) or not f.endswith(".py"):
+        if not f.endswith(".py") or C.write_protected(f):
             continue
         try:
             with open(os.path.join(ws, f), "rb") as fh:
