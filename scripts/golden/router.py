@@ -13,7 +13,7 @@ One stdlib ThreadingHTTPServer serves every case of a run: case ``key`` has the 
 - a request with neither an agent name nor the summariser mark marks the case ``infra_error: unknown_request``.
 
 Forwarding keeps the body verbatim except ``model`` (plus ``--upstream-extra``, the OpenRouter ``provider`` pin and an
-optional ``seed``); retries only 429/502/503 (twice, Retry-After else 4 s then 8 s). OpenRouter runs are pinned to one
+optional ``seed``); retries only 429/502/503 (5 times by default, G4_GOLDEN_RETRIES; Retry-After else 5/10/20/30/45 s). OpenRouter runs are pinned to one
 provider endpoint by default (``OR_PROVIDER_DEFAULT``, bf16 with tools) with fallbacks off, so every arm is served by
 the same quantization; ``--or-provider any`` lifts the pin. Cost: OpenRouter's billed ``usage.cost`` when the reply
 carries it (``cost_source: billed``), else tokens x prices (reasoning tokens counted as completion; ``estimate``).
@@ -149,8 +149,10 @@ class Endpoint:
     price_in: float = PRICE_IN_DEFAULT
     price_out: float = PRICE_OUT_DEFAULT
     timeout: float = 300.0
-    retries: int = 2
-    backoff: tuple = (4.0, 8.0)
+    # 2026-09-30 smoke: the pinned provider rate-limited 53 of 165 calls (HTTP 429); 2 short retries turned one F case
+    # into infra_error. More patience; retried calls are logged (retries, latency) so their clock cost is visible.
+    retries: int = int(os.environ.get("G4_GOLDEN_RETRIES", "5"))
+    backoff: tuple = (5.0, 10.0, 20.0, 30.0, 45.0)
     sleep: Callable[[float], None] = field(default=time.sleep, repr=False)
 
     @property

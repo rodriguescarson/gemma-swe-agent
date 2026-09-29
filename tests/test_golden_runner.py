@@ -353,12 +353,13 @@ def test_router_retries_only_429_502_503():
         ep.sleep = sleeps.append
         r = route_router(ep, live="fixer")
         st, _ = r.answer("k", body_for("fixer"))
-        assert st == 200 and sleeps == [4.0, 8.0] and r.route("k").records[0]["retries"] == 2
+        assert st == 200 and sleeps == [5.0, 10.0] and r.route("k").records[0]["retries"] == 2
         up.fail, up.retry_after, sleeps[:] = [429], "3", []
         assert r.answer("k", body_for("fixer"))[0] == 200 and sleeps == [3.0]          # Retry-After honoured
-        up.fail, sleeps[:] = [502, 502, 502], []
+        up.fail, sleeps[:] = [502] * (ep.retries + 1), []
         st, _ = r.answer("k", body_for("fixer"))
-        assert st == 502 and len(sleeps) == 2 and r.route("k").upstream_failed_last       # twice, then give up
+        assert ep.retries == 5 and st == 502 and sleeps == [5.0, 10.0, 20.0, 30.0, 45.0]   # 5 retries (2026-09-30), then give up
+        assert r.route("k").upstream_failed_last
         up.fail, sleeps[:] = [500], []
         n = len(up.seen)
         st, out = r.answer("k", body_for("fixer"))
