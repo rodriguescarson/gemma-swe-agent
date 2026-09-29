@@ -10,7 +10,7 @@ import time
 import json
 
 # ---------------------------------------------------------------------------------------------------------- constants
-VERSION = "v10.0"
+VERSION = "v10.1"
 DOCKER_TMP = os.environ.get("SWE_DOCKER_TMP_FOR_TESTS") or "/tmp"
 DOCKER_WS = os.environ.get("SWE_DOCKER_WS_FOR_TESTS") or "/workspace"
 DISPLAY_SWE = "/tmp/swe"
@@ -28,7 +28,7 @@ QUICK_PAD = 15
 RUN_DEFAULT = 20; RUN_MAX = 90; VIEW_OBJ = 15; LOCATE_PARSE = 15; ORIGIN_PROBE = 5; VERIFY_TOTAL = 60
 IMPORT_CHECK = 10; CLAIM_TIMEOUT = 10; CLAIMS_TOTAL = 25; PYTEST_SIDE = 40; FINALIZE_QUICK = 12; MAX_PAR = 2
 CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 2800, "edit": 1500, "run": 2500,
-        "verify": 2000, "finalize": 1000, "status": 2200}
+        "verify": 2000, "finalize": 1400, "status": 2200}   # finalize 1,000 -> 1,400 in v10.1 (EDIT TARGET)
 # Output is also capped by ESTIMATED tokens (est_tokens: ASCII chars / 3 + non-ASCII chars x 2.7), so rendered tables
 # and box drawing (0.36-0.63 chars/token measured) cannot spend 3x a helper's budget. ASCII output never hits these.
 CAP_TOKENS = {k: v // 3 for k, v in CAPS.items()}
@@ -54,15 +54,21 @@ _CACHE = {}
 _LIVE = set()               # process groups of running children, killed by safe_main on any exit
 _LOG_PARTS = []             # full texts of sections cut by cap(), written to last.log
 
+# Hint and next-step lines name a helper only as its full command, python3 /tmp/swe/NAME.py (v10.1, SPEC 4.0.10 and
+# R89b): race 2 showed the model turning bare helper names into tool names (call:view.py, a parsed crash).
 FINAL_HINT = ("FINAL: the patch was finalized at t=%ds; nothing more to change. The stage that can submit should "
               "submit now; any other stage should reply done.")
-TIME_HINT = "TIME: t>=250s. End your stage now (verifier: run finalize.py next)."
-FINISH_HINT = "FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage."
-EDIT_NOW_HINT = ("EDIT NOW: no source file changed at t>=150s. Locator: reply with your plan now. Other stages: make "
-                 "the plan's change with edit.py now.")
+TIME_HINT = ("TIME: t>=250s. End your stage now; reply in one line, under 30 words (verifier: run "
+             "python3 /tmp/swe/finalize.py next).")
+FINISH_HINT = "FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage with a short reply."
+# v10.1: shown whenever the tree has no source change once t >= T_EDIT_NOW or the locator stage is over, above TIME,
+# FINISH and CONTEXT: an empty tree never hears "end your stage" (race 2: fastapi_14851, 14306, 15280).
+EDIT_NOW_HINT = ("EDIT NOW: no source file changed at t=%ds; an empty patch always fails. Locator: reply with your plan "
+                 "now. Other stages: make the smallest plausible version of the plan's change now.")
+EDIT_NOW_LATE = " Then run python3 /tmp/swe/finalize.py once."
 LOCATOR_HINT = "LOCATOR: 75s used. Locator: stop and reply with your plan now. Other stages: ignore this line."
 CONTEXT_HINT = ("CONTEXT: this stage's context is nearly full. Locator: reply with your plan now. Fixer: make any "
-                "missing edit, then reply with your notes. Verifier: run finalize.py next.")
+                "missing edit, then reply with your notes. Verifier: run python3 /tmp/swe/finalize.py next.")
 REPEAT_NOTES = {
     "run": "NOTE: same command, same output 3 times; change something.",
     "verify": "STOP re-running verify; decide now.",
@@ -543,7 +549,7 @@ def _reset_task_files():
         names = os.listdir(sd)
     except OSError:
         return
-    drop = {"state.json", "journal.jsonl", "repro.py", "idx", "j_orig.xml", "j_cur.xml", "t0"}
+    drop = {"state.json", "journal.jsonl", "repro.py", "idx", "j_orig.xml", "j_cur.xml", "t0", GUARD_STAT}
     for n in names:
         p = os.path.join(sd, n)
         if n in drop or n.startswith("index_") and n.endswith(".marshal"):
@@ -1241,14 +1247,25 @@ def _new_module(p, tracked_changed=()):
     return root_module_kept(p, tracked_changed)
 
 
-def changes():
+def changes(hidden=True):
     """Changes since baseline() -> dict(source, protected, untracked, deleted, status). source: changed tracked
     non-protected files plus untracked new modules; deleted: deleted tracked non-protected files; protected: every
     changed/new protected path; untracked: every untracked non-protected file; status: path -> M/A/D/T/?. Reads only
-    (no index writes)."""
+    (no write to the real index). The helpers keep their own view under the submit guard (v10.1): untracked files are
+    listed without the guard's exclude file, and with hidden=True the protected files the guard marked
+    assume-unchanged are compared too (on a temp copy of the index), so hygiene still sees and reverts them."""
     b = baseline()
     res = {"source": [], "protected": [], "untracked": [], "deleted": [], "status": {}}
-    rc, out = git(["diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--ignore-submodules", b])
+    args = ["diff", "--name-status", "-z", "--no-renames", "--no-ext-diff", "--ignore-submodules", b]
+    flagged = []
+    env = _unguarded_index_env(flagged) if hidden and not _hidden_clean() else None
+    try:
+        rc, out = git(args, env=env)
+    finally:
+        if env is not None:
+            _drop_index(env)
+    if env is not None and rc == 0:
+        _note_hidden_clean(flagged, set(out.split("\0")[1::2]))
     if rc == 0:
         parts = out.split("\0")
         i = 0
@@ -1264,7 +1281,7 @@ def changes():
                 res["deleted"].append(p)
             else:
                 res["source"].append(p)
-    rc, out = git(["ls-files", "--others", "--exclude-standard", "-z"])
+    rc, out = git(NO_GUARD + ["ls-files", "--others", "--exclude-standard", "-z"])
     if rc == 0:
         root_py = []
         for p in out.split("\0"):
@@ -1291,7 +1308,7 @@ def changes():
 def source_changed():
     """True when the tree has a source change (or when that cannot be determined)."""
     try:
-        ch = changes()
+        ch = changes(hidden=False)          # the guard hides only protected files, never source
         return bool(ch["source"] or ch["deleted"])
     except Exception:
         return True
@@ -1476,7 +1493,296 @@ def hygiene_note(paths):
     if not paths:
         return ""
     shown = ", ".join(paths[:6]) + (" (+%d more)" % (len(paths) - 6) if len(paths) > 6 else "")
-    return "reverted test/config edits: " + shown
+    return "reverted test/config edits: " + shown + HYGIENE_WHY
+
+
+# v10.1 (race 2, fastapi_14077): a bare "reverted pyproject.toml" read like a lost edit, and the model made it again.
+HYGIENE_WHY = " (graders replace test and config files, so a patch never carries them; do not redo this)"
+
+
+# ----------------------------------------------------------------------------------------------------- the submit guard
+# v10.1 (race 2, diagnosis 3). Every hygiene step above runs only inside a helper call, but the harness snapshots the
+# patch whenever it likes: submit_patch after a native edit_file (fastapi_14077 re-edited pyproject.toml after
+# finalize), and the fallback diff `git add -N . && git diff --binary _swegemma_baseline` at a timeout, a tool-budget
+# end or a nudge end (fastapi_14258 shipped a root repro.py; finalize never ran). arm_submit_guard() makes that diff
+# blind to those paths from the first tool call on, passively: protected tracked files are marked assume-unchanged in
+# the real index (git diff <tag> and git add then treat the worktree copy as unchanged), and an exclude file named by
+# core.excludesFile keeps untracked scratch, vendored trees and new test/config files out of `git add -N .`. The
+# helpers keep their own view (NO_GUARD, changes(hidden=True)), so HYGIENE and CLEANED still see and undo them.
+GUARD_FILE = "swe_exclude"                    # <gitdir>/swe_exclude: inside .git, so it can never enter a patch
+GUARD_STAT = "guard_stat.json"                # $SWE: stat of the guarded files last found clean (_hidden_clean)
+NO_GUARD = ["-c", "core.excludesFile=" + os.devnull]   # untracked listings of the helpers' own view
+GUARD_ROOT_PREFIXES = ("repro", "scratch", "debug", "tmp", "temp", "try", "demo")   # reproduce* is repro*
+GUARD_ANY = ("*.log", "*.orig", "*.rej", "*.bak", "*.swp", ".coverage")
+GUARD_VENDOR = ("site-packages/", "_pytest/", "*.dist-info/")
+GUARD_PROTECTED = ("test_*.py", "*_test.py", "*.pth", "tests/", "test/", "/testing/")
+
+
+def _ci(word):
+    """A gitignore glob matching `word` in any letter case: repro -> [Rr][Ee][Pp][Rr][Oo]."""
+    return "".join("[%s%s]" % (c.upper(), c.lower()) if c.isalpha() else c for c in word)
+
+
+def _gi_escape(name):
+    """A literal path for a gitignore line (leading ! or #, glob characters, trailing spaces escaped)."""
+    out = re.sub(r"([\\*?\[\]])", r"\\\1", name)
+    if out[:1] in ("!", "#"):
+        out = "\\" + out
+    return re.sub(r" +$", lambda m: "\\ " * len(m.group(0)), out)
+
+
+def _guard_vendor_dir(base):
+    return base in ("site-packages", "_pytest") or base.endswith(".dist-info")
+
+
+def guard_exclude_text(root_names, tracked_dirs):
+    """The exclude file: root scratch prefixes (any case), scratch anywhere, vendored trees, new protected files (the
+    is_protected rules), then re-includes for baseline root entries and tracked directories that a pattern would
+    otherwise hide, so a real new file under a tracked templates/ or src/_pytest/ still ships."""
+    lines = ["# swe-tools %s submit guard: git add -N . never adds these untracked paths" % VERSION]
+    lines += ["/%s*" % _ci(p) for p in GUARD_ROOT_PREFIXES]
+    lines += list(GUARD_ANY) + list(GUARD_VENDOR) + sorted(_PROT_NAMES) + list(GUARD_PROTECTED)
+    keep = set()
+    for n in root_names:
+        if n.lower().startswith(GUARD_ROOT_PREFIXES):
+            keep.add("!/" + _gi_escape(n))
+    for d in tracked_dirs:
+        if _guard_vendor_dir(d.rsplit("/", 1)[-1]):
+            keep.add("!/" + _gi_escape(d) + "/")
+    return "\n".join(lines + sorted(keep)) + "\n"
+
+
+def _guard_path():
+    """<gitdir>/swe_exclude, or '' when the workspace has no git dir."""
+    v = _CACHE.get("guard_path")
+    if v is None:
+        gd = git_dir()
+        if not gd:
+            rc, out = git(["rev-parse", "--absolute-git-dir"])
+            gd = out.strip() if rc == 0 and out.strip() else ""
+        v = _CACHE["guard_path"] = os.path.join(gd, GUARD_FILE) if gd else ""
+    return v
+
+
+def guard_armed():
+    p = _guard_path()
+    return bool(p) and os.path.isfile(p)
+
+
+def arm_submit_guard():
+    """Arm (or re-arm) the submit guard; idempotent, a few git calls, never touches the worktree. -> (flagged paths
+    newly marked, total flagged) or None when the workspace is no git repository. Called by install.py (the first tool
+    call, before any agent write) and at the top of finalize.py (after a failed install, or a read-tree/reset that
+    dropped the flags)."""
+    path = _guard_path()
+    if not path or not _tag_sha():           # only a harness workspace (it has the baseline tag) is ever armed
+        return None
+    rc, out = git(["ls-files", "-v", "-z"], timeout=20)
+    if rc != 0:
+        return None
+    todo, total, dirs = [], 0, set()
+    for rec in out.split("\0"):
+        if len(rec) < 3:
+            continue
+        tag, p = rec[0], rec[2:]
+        d = os.path.dirname(p)
+        while d and d not in dirs:
+            dirs.add(d)
+            d = os.path.dirname(d)
+        if _protected_git(p):
+            total += 1
+            if not tag.islower():
+                todo.append(p)
+    text = guard_exclude_text(_root_entries()[0], dirs)
+    try:
+        with open(path) as f:
+            same = f.read() == text
+    except OSError:
+        same = False
+    if not same:
+        _atomic_write(path, text)
+    rc, cur = git(["config", "--local", "--get", "core.excludesFile"])
+    if cur.strip() != path:
+        git(["config", "--local", "core.excludesFile", path])
+    if todo:
+        git_run(["update-index", "-z", "--assume-unchanged", "--stdin"], timeout=20,
+                input="\0".join(todo).encode("utf-8", "surrogateescape"))
+        try:                                 # newly guarded files are not in the clean snapshot: check them fully
+            os.remove(os.path.join(swe_dir(), GUARD_STAT))
+        except OSError:
+            pass
+    return len(todo), total
+
+
+def _drop_index(env):
+    try:
+        os.remove(env["GIT_INDEX_FILE"])
+    except (OSError, KeyError, TypeError):
+        pass
+
+
+def _stat_sig(rel):
+    try:
+        st = os.lstat(os.path.join(ws(), rel))
+    except OSError:
+        return None
+    return [st.st_size, st.st_mtime_ns]
+
+
+def _hidden_clean():
+    """True when the last full check found every guarded file equal to the baseline and none of them has changed size
+    or mtime since (the stat test git itself makes): changes() then skips the index copy and its three git calls, which
+    cost about 20 ms per call (v10.1, speed)."""
+    try:
+        with open(os.path.join(swe_dir(), GUARD_STAT)) as f:
+            snap = json.load(f)
+    except (OSError, ValueError):
+        return False
+    return isinstance(snap, dict) and bool(snap) and all(_stat_sig(p) == v for p, v in snap.items())
+
+
+def _note_hidden_clean(flagged, changed):
+    """Remember the stat of every guarded file the full check found unchanged; a changed one is recorded as "dirty",
+    which never matches, so every later call checks fully until a check finds it clean again."""
+    snap = {p: ("dirty" if p in changed else _stat_sig(p)) for p in flagged}
+    try:
+        _atomic_write(os.path.join(swe_dir(), GUARD_STAT), json.dumps(snap))
+    except OSError:
+        pass
+
+
+def _unguarded_index_env(flagged_out=None):
+    """None when no path is marked assume-unchanged; else an env whose GIT_INDEX_FILE is a private copy of the real
+    index with those marks cleared (the index's own timestamps kept, as in _tmp_index_env), so git diff compares the
+    protected files the guard hides from the patch. The caller removes the copy (_drop_index). flagged_out, a list,
+    receives the marked paths."""
+    if not guard_armed():
+        return None
+    rc, out = git(["ls-files", "-v", "-z"], timeout=20)
+    flagged = [r[2:] for r in out.split("\0") if len(r) > 2 and r[0].islower()] if rc == 0 else []
+    if flagged_out is not None:
+        flagged_out.extend(flagged)
+    if not flagged:
+        return None
+    src = _index_path()
+    idx = os.path.join(swe_dir(), "gidx.%d" % os.getpid())
+    try:
+        with open(src, "rb") as f:
+            st = os.fstat(f.fileno())
+            data = f.read()
+        _atomic_write(idx, data)
+        os.utime(idx, ns=(st.st_atime_ns, st.st_mtime_ns))
+    except OSError:
+        return None
+    env = dict(os.environ)
+    env["GIT_INDEX_FILE"] = idx
+    rc, _, _ = git_run(["update-index", "-z", "--no-assume-unchanged", "--stdin"], timeout=20, env=env,
+                       input="\0".join(flagged).encode("utf-8", "surrogateescape"))
+    if rc != 0:
+        _drop_index(env)
+        return None
+    return env
+
+
+# The graders' view of a patch (replay_l4 KPI 7 and 8; tests keep the two in sync): the harness rule
+# swegemma.harness.verification._is_protected_test_or_config_path, and NEW scratch or vendored files.
+_H_PROT_NAMES = frozenset(("conftest.py", "pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg", ".pytest.ini",
+                           "sitecustomize.py", "usercustomize.py", "_swegemma_stubs.py"))
+_KPI_SCRATCH_ROOT = re.compile(r"^(repro|reproduce|scratch|debug|tmp|temp|try|demo)[^/]*$|^test_[^/]*\.py$|"
+                               r"^[^/]*_test\.py$", re.I)
+_KPI_SCRATCH_ANY = re.compile(r"\.(log|orig|rej|bak|swp)$|(^|/)\.coverage$")
+_KPI_VENDORED = re.compile(r"(^|/)(site-packages|_pytest|[^/]+\.dist-info)(/|$)")
+
+
+def harness_protected(rel):
+    """The graders' reset rule (verification.py:60-83): test/config names anywhere, *.pth, and .py files under a
+    tests/test/testing directory at any depth, in any case."""
+    parts = rel.split("/")
+    name = parts[-1]
+    if name in _H_PROT_NAMES or name.endswith(".pth"):
+        return True
+    if (name.startswith("test_") and name.endswith(".py")) or name.endswith("_test.py"):
+        return True
+    return bool({"tests", "test", "testing"} & {p.lower() for p in parts[:-1]} and name.endswith(".py"))
+
+
+def patch_violations(files):
+    """[(path, why)] for the paths a patch must never carry: files = [(path, is_new)] as in the patch."""
+    out = []
+    for p, new in files:
+        if harness_protected(p) or _protected_git(p):
+            out.append((p, "test/config file"))
+        elif new and (("/" not in p and _KPI_SCRATCH_ROOT.search(p)) or _KPI_SCRATCH_ANY.search(p)
+                      or _KPI_VENDORED.search(p)):
+            out.append((p, "scratch or vendored file"))
+    return out
+
+
+def patch_file_list(diff):
+    """[(path, is_new)] of a `git diff --binary` (bytes or str), paths unquoted the way git quotes them."""
+    text = diff.decode("utf-8", "surrogateescape") if isinstance(diff, bytes) else str(diff or "")
+    out, cur = [], None
+    for line in text.split("\n"):
+        if line.startswith("diff --git "):
+            rest = line[len("diff --git "):]
+            if rest.endswith('"'):
+                j = rest.rfind(' "b/')
+                p = _unquote_git(rest[j + 1:])[2:] if j >= 0 else rest
+            else:
+                j = rest.rfind(" b/")
+                p = rest[j + 3:] if j >= 0 else rest
+            cur = [p, False]
+            out.append(cur)
+        elif cur is not None and line.startswith("new file mode"):
+            cur[1] = True
+    return [(p, n) for p, n in out]
+
+
+def _unquote_git(s):
+    """A C-quoted git path ("a\\303\\251.py") -> str."""
+    if not (len(s) >= 2 and s[0] == '"' and s[-1] == '"'):
+        return s
+    body, out, i = s[1:-1], bytearray(), 0
+    esc = {"n": 10, "t": 9, '"': 34, "\\": 92, "a": 7, "b": 8, "f": 12, "r": 13, "v": 11}
+    while i < len(body):
+        c = body[i]
+        if c == "\\" and i + 1 < len(body):
+            nx = body[i + 1]
+            if re.match(r"[0-7]{3}", body[i + 1:i + 4]):
+                out.append(int(body[i + 1:i + 4], 8))
+                i += 4
+                continue
+            out.append(esc.get(nx, ord(nx)))
+            i += 2
+            continue
+        out += c.encode("utf-8", "surrogateescape")
+        i += 1
+    return out.decode("utf-8", "surrogateescape")
+
+
+def enforce_patch_rules(diff=None):
+    """Undo whatever the harness-view patch still carries against patch_violations: a tracked path is checked out
+    from the baseline, a new one is unstaged (if the model staged it) and deleted. -> [(path, why)] undone."""
+    if diff is None:
+        diff = diff_bytes()
+    files = patch_file_list(diff)
+    is_new = dict(files)
+    b, w, done = baseline(), ws(), []
+    for p, why in patch_violations(files):
+        if is_new.get(p):
+            git(["--literal-pathspecs", "rm", "-q", "--cached", "--ignore-unmatch", "--", p])
+            fp = os.path.join(w, p)
+            try:
+                if os.path.islink(fp) or os.path.isfile(fp):
+                    os.remove(fp)
+            except OSError:
+                continue
+        else:
+            rc, _ = git(["--literal-pathspecs", "checkout", b, "--", p])
+            if rc != 0:
+                continue
+        done.append((p, why))
+    return done
 
 
 def unrewrite(text):
@@ -1690,16 +1996,29 @@ def late_guard(t=None, src=None):
     return _restored_line(res, t)
 
 
-def _journal_ok_edit():
+def locator_over(st=None):
+    """True once a later stage has worked (v10.1): the journal holds an edit, a finalize, a restore or a full verify,
+    or the context meter has left the locator phase or seen status.py. Then LOCATOR ("Other stages: ignore this
+    line") gives way to EDIT NOW on an empty tree (race 2: fastapi_15280's verifier and fastapi_14873's submitter
+    read LOCATOR on an empty tree)."""
+    st = state_load() if st is None else st
+    ctx = st.get("ctx") if isinstance(st.get("ctx"), dict) else {}
+    if (ctx.get("phase") or "locator") != "locator":
+        return True
+    if any(isinstance(x, list) and x[:1] == ["status"] for x in (ctx.get("tail") or [])):
+        return True
     for e in reversed(journal_entries()):
-        if e.get("h") == "edit" and e.get("ok") is True:
+        h = e.get("h")
+        if h in ("edit", "finalize", "restore") or (h == "verify" and e.get("mode") != "repro-only"):
             return True
     return False
 
 
 def hint(t=None, src=None, sha=None, ctx=None):
-    """The single footer hint that applies (FINAL > TIME > FINISH > CONTEXT > EDIT NOW > LOCATOR), or ''. ctx: the
-    context meter after this call (estimated tokens); CONTEXT shows at CONTEXT_TOKENS or more."""
+    """The single footer hint that applies (FINAL > EDIT NOW > TIME > FINISH > CONTEXT > LOCATOR), or ''. ctx: the
+    context meter after this call (estimated tokens); CONTEXT shows at CONTEXT_TOKENS or more. EDIT NOW (v10.1):
+    no source change at t >= T_EDIT_NOW, or at t >= T_LOCATOR once the locator stage is over; from T_TIME on it adds
+    the finalize command. An empty tree is never told to end its stage."""
     t = clock() if t is None else t
     st = state_load()
     if st.get("final_done") and st.get("final_sha"):
@@ -1707,20 +2026,19 @@ def hint(t=None, src=None, sha=None, ctx=None):
         if cur == st.get("final_sha"):
             ft = st.get("final_t")
             return FINAL_HINT % int(ft if isinstance(ft, (int, float)) else t)
+    if t >= T_LOCATOR:
+        if src is None:
+            src = source_changed()
+        if not src and (t >= T_EDIT_NOW or locator_over(st)):
+            return EDIT_NOW_HINT % int(t) + (EDIT_NOW_LATE if t >= T_TIME else "")
     if t >= T_TIME:
         return TIME_HINT
     if t >= T_FINISH:
         return FINISH_HINT
     if ctx is not None and ctx >= CONTEXT_TOKENS:
         return CONTEXT_HINT
-    if t >= T_LOCATOR:
-        if src is None:
-            src = source_changed()
-        if not src:
-            if t >= T_EDIT_NOW:
-                return EDIT_NOW_HINT
-            if not _journal_ok_edit():
-                return LOCATOR_HINT
+    if t >= T_LOCATOR and not src:
+        return LOCATOR_HINT
     return ""
 
 
@@ -1873,7 +2191,7 @@ def emit(name, first_line, body="", cap=None, tail=None, log_text=None, src=None
     except Exception:
         t = 0.0
     pre = ""
-    if src is None and (T_LOCATOR <= t < T_FINISH or (t >= T_SAFE and _ckpt_nonempty())):
+    if src is None and t >= T_LOCATOR:       # v10.1: EDIT NOW outranks FINISH and TIME, so it is needed late too
         src = source_changed()
     if t >= T_SAFE:
         try:

@@ -15,7 +15,7 @@ pytestmark = pytest.mark.skipif(not (SCRIPTS_SRC / "run.py").exists() or not (SC
 
 HANG_NOTE = "If the issue is about a hang or loop, this may be the bug."
 DISABLED_NOTE = ("Test runners are disabled by the harness here: check behaviour with a reproduction "
-                 "(verify.py --repro-only) instead.")
+                 "(python3 /tmp/swe/verify.py --repro-only) instead.")
 
 
 @pytest.fixture
@@ -102,7 +102,9 @@ def test_run_contract(tmp_path, scripts, ws, swe, env):
     assert lines(out)[:2] == ["exit=0", "ok"] and "NOTE: --timeout must be an integer; used 20" in out
     # the session clamp shows when the task is almost out of time
     out = run(scripts, ["--timeout", "30", "echo late"], ws, dict(env, SWE_FAKE_CLOCK="290"))
-    assert "NOTE: timeout cut to 6s by the remaining task time." in out and "TIME: t>=250s." in out
+    assert "NOTE: timeout cut to 6s by the remaining task time." in out
+    # v10.1: the tree is empty, so the late footer is EDIT NOW with the finalize command, never "end your stage"
+    assert "EDIT NOW: no source file changed at t=290s;" in out and "Then run python3 /tmp/swe/finalize.py once." in out
     # no command: USAGE
     out = run(scripts, [], ws, env)
     assert lines(out)[0] == 'USAGE: python3 /tmp/swe/run.py [--timeout N] "COMMAND"'
@@ -192,7 +194,7 @@ def status(scripts, ws, env, *args):
 
 def test_status_contract(tmp_path, scripts, ws, swe, env):
     out = status(scripts, ws, env)
-    assert re.match(r"^STATUS \[t=\d+s\] helpers v10\.0 \| repro: none \| checkpoints: 0\n", out)
+    assert re.match(r"^STATUS \[t=\d+s\] helpers v10\.1 \| repro: none \| checkpoints: 0\n", out)
     assert "JOURNAL: empty" in out and "DIFF: no source change" in out and lines(out)[-1].startswith("[t=")
     # journal tail of 8, diffstat, bounded diff, repro and checkpoint summaries
     code = ("for i in range(10):\n    C.journal({'h': 'run', 'msg': 'run echo %d: exit=0' % i, 't': 10 + i})\n"
@@ -213,7 +215,7 @@ def test_status_contract(tmp_path, scripts, ws, swe, env):
     j = ls.index("JOURNAL (last 8):")
     assert ls[j + 1] == "  t=12s run echo 2: exit=0" and ls[j + 8] == "  t=19s run echo 9: exit=0"
     assert "DIFF: pkg/mod.py +1 -1 | pkg/new.py +2 -0" in out
-    assert "PROTECTED (reverted by edit.py, verify.py and finalize.py): tests/test_mod.py" in out
+    assert "PROTECTED (the helpers revert these; graders replace them): tests/test_mod.py" in out
     assert "UNTRACKED (not source): repro.py" in out
     assert "+    return x * 2" in out and "+NEW = 1" in out and "diff --git a/pkg/new.py b/pkg/new.py" in out
     assert "test_mod" not in out.split("DIFF:")[1].split("PROTECTED")[1].split("\n", 1)[1]   # diff: source only
@@ -230,7 +232,7 @@ def test_status_contract(tmp_path, scripts, ws, swe, env):
     assert "CHANGED AFTER FINALIZE" not in out and "FINAL: the patch was finalized at t=131s;" in out
     (ws / "pkg/new.py").write_text("NEW = 1\nOTHER = 3\n")
     out = status(scripts, ws, env)
-    assert "CHANGED AFTER FINALIZE: run finalize.py again." in out and "FINAL:" not in out
+    assert "CHANGED AFTER FINALIZE: run python3 /tmp/swe/finalize.py again." in out and "FINAL:" not in out
 
 
 def test_status_bounds_with_huge_diff_and_timing(tmp_path, scripts, swe):

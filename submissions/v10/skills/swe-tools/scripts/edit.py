@@ -26,6 +26,11 @@ LINE_CUT = 150           # a displayed code line is cut to this many chars
 RESERVE = 330            # chars kept free for the footer, a late-guard prefix, NEXT and hygiene lines
 RECIPE = "python3 /tmp/swe/edit.py %s --lines %d-%d <<'EOF' ... EOF"
 RETRY_WHY = ("NO MATCH", "AMBIGUOUS", "REVERTED", "NO CHANGE", "ALREADY TRIED")
+# v10.1 (race 2, fastapi_14873 steps 36-37): a stray EOF line inside the block ends the heredoc early; the rest of the
+# block then runs as shell commands ("=======: command not found") and only the SEARCH half reaches this script.
+EARLY_EOF = ("ERROR: the edit ended early: no ======= line and no >>>>>>> REPLACE line arrived, so nothing changed. A "
+             "line EOF inside the block ends the heredoc and the rest ran as shell commands. Put EOF once, as the last "
+             "line, and send the whole edit again.")
 
 _MS = re.compile(r"^[ \t]*<{5,9} ?(?:SEARCH|ORIGINAL|FIND|OLD)[ \t]*$", re.I)
 _MD = re.compile(r"^[ \t]*={5,9}[ \t]*$")
@@ -194,6 +199,8 @@ def parse_blocks(text):
             while body and not body[-1].strip():
                 body.pop()
         divs = [d for d, s in enumerate(body) if _MD.match(s)]
+        if not divs and not closed and not any(_MD.match(s) or _MR.match(s) for s in L):
+            raise Fail(EARLY_EOF, why="EARLY EOF", counts=False)
         if not divs:
             raise Fail("ERROR: block %d has no ======= line between <<<<<<< SEARCH and >>>>>>> REPLACE; nothing changed."
                        % (len(blocks) + 1), counts=False)
@@ -860,7 +867,7 @@ def run(x, opts, pos):
         with open(ab, "rb") as fh:
             raw = fh.read()
         if b"\0" in raw[:8192]:
-            raise Fail("REFUSED: %s looks binary (NUL bytes); edit.py only edits text files." % rel, why="REFUSED",
+            raise Fail("REFUSED: %s looks binary (NUL bytes); only text files can be edited." % rel, why="REFUSED",
                        counts=False)
         txt, bom = decode(raw)
         lines, final_nl = split_text(txt)
@@ -875,7 +882,7 @@ def run(x, opts, pos):
             a, b = int(h[0]), int(h[1])
             why = e.get("first_why") or e.get("why")
             raise Fail("ALREADY TRIED: this exact edit failed at t=%ds (%s). Do something different: python3 "
-                       "/tmp/swe/view.py %s %d %d, then edit.py %s --lines %d-%d."
+                       "/tmp/swe/view.py %s %d %d, then python3 /tmp/swe/edit.py %s --lines %d-%d."
                        % (int(float(e.get("t") or 0)), why, rel, max(1, a - 3), b + 3, rel, a, b),
                        why="ALREADY TRIED", hint=(a, b), ev={"first_why": why})
 
@@ -970,6 +977,14 @@ def report_ok(x, head, new_lines, spans, edits, warn, py):
     note = x.hyg.note() if x.hyg is not None else C.hygiene_note(C.hygiene_revert() or [])
     if note:
         x.extra.append(note)
+    try:                                     # v10.1: a landed edit is restorable even if it is undone later
+        d = C.diff_bytes()
+        if d:
+            import _swe_ckpt as K
+            # the edited file is in the diff: a source change for sure (a quoted path falls back to the full check)
+            K.save_edited(d if (" b/%s\n" % rel).encode("utf-8", "surrogateescape") in d else None)
+    except Exception:
+        pass
     if py:
         x.extra.append("NEXT: python3 /tmp/swe/verify.py")
 

@@ -35,8 +35,8 @@ import _swe_common as C
 # How each known helper is called for a "normal" run: (argv, skill dict args, first-line regex).
 EDIT_TEXT = "def other(y):\n    return y + 2\n"
 CALLS = {
-    "install": ([], {}, r"^swe-tools v10\.0 ready in /tmp/swe \(\d+ helpers\)"),
-    "status": ([], {}, r"^STATUS \[t=\d+s\] helpers v10\.0"),
+    "install": ([], {}, r"^swe-tools v10\.1 ready in /tmp/swe \(\d+ helpers\)"),
+    "status": ([], {}, r"^STATUS \[t=\d+s\] helpers v10\.1"),
     "run": (["--timeout", "5", "echo hi"], {"cmd": "echo hi", "timeout": 5}, r"^exit=0$"),
     "locate": (["parse_header"], {"query": "parse_header"}, r"^LOCATE:"),
     "grep": (["parse_header"], {"regex": "parse_header"}, r"^GREP:"),
@@ -358,7 +358,7 @@ def test_swe_dir_resolution(case, tmp_path, scripts, ws):
         kw.update(TEST_TMPDIR=s, TMPDIR=s)
         want, targets = s / "swe", [s / "swe"]
     elif case == "installed":
-        (scripts / "VERSION").write_text("v10.0\n")
+        (scripts / "VERSION").write_text("v10.1\n")
         kw.update(SWE_DIR=t / "a/swe", TMPDIR=t / "c")
         want, targets = scripts, [t / "a/swe"]
     got = py_json(scripts, "import json; print(json.dumps([C.swe_dir(), C.install_targets(), C.in_rewriting_sandbox()]))",
@@ -375,14 +375,14 @@ def test_install_contract(tmp_path, scripts, ws, swe, env):
     wall = time.monotonic() - t0
     out = r.stdout
     assert r.returncode == 0 and r.stderr == ""
-    assert re.match(r"^swe-tools v10\.0 ready in /tmp/swe \((\d+) helpers\)\. Next: python3 /tmp/swe/locate\.py ", out)
+    assert re.match(r"^swe-tools v10\.1 ready in /tmp/swe \((\d+) helpers\)\. Next: python3 /tmp/swe/locate\.py ", out)
     assert int(re.search(r"\((\d+) helpers\)", out).group(1)) == len(CLI)
     assert len(out.rstrip("\n")) <= 400 and out.rstrip("\n").splitlines()[-1].startswith("[t=")
     for p in scripts.glob("*.py"):
         dst = swe / p.name
         assert dst.read_bytes() == p.read_bytes(), p.name
         assert (dst.stat().st_mode & 0o777) == 0o644
-    assert (swe / "VERSION").read_text().strip() == "v10.0"
+    assert (swe / "VERSION").read_text().strip() == "v10.1"
     assert float((swe / "t0").read_text()) > 0
     libs = sorted(p.stem for p in scripts.glob("_*.py"))              # libraries precompiled in $SWE, never the bundle
     assert sorted(p.name.split(".")[0] for p in (swe / "__pycache__").glob("*.pyc")) == libs
@@ -450,7 +450,7 @@ def test_install_dual_target(case, tmp_path, scripts, ws):
     assert dual_written == (case == "dual"), case
     if dual_written:
         assert sorted(p.name for p in (dock / "swe").glob("*.py")) == names
-        assert (dock / "swe/VERSION").read_text().strip() == "v10.0" and (dock / "swe/t0").exists()
+        assert (dock / "swe/VERSION").read_text().strip() == "v10.1" and (dock / "swe/t0").exists()
 
 
 # ----------------------------------------------------------------------------------------------------------------- R09
@@ -831,16 +831,23 @@ FOOTER_CASES = [
     # (name, fake t, tree setup, want hint prefix or "")
     ("early", 10, None, ""),
     ("locator", 80, None, "LOCATOR: 75s used."),
-    ("locator_ok_edit_logged", 80, "journal_ok_edit", ""),
+    # v10.1: once the journal shows a later stage (an edit that was undone, a finalize, a full verify), an empty tree
+    # hears EDIT NOW, not "Other stages: ignore this line" (race 2: fastapi_15280, fastapi_14873)
+    ("locator_over_edit_now", 80, "journal_ok_edit", "EDIT NOW: no source file changed at t=80s;"),
+    ("locator_over_finalize", 80, "journal_finalize", "EDIT NOW:"),
+    ("locator_over_full_verify", 80, "journal_verify", "EDIT NOW:"),
+    ("locator_repro_only_is_locator", 80, "journal_repro_only", "LOCATOR: 75s used."),
     ("locator_src_changed", 80, "src", ""),
-    ("edit_now", 160, None, "EDIT NOW: no source file changed at t>=150s."),
+    ("edit_now", 160, None, "EDIT NOW: no source file changed at t=160s; an empty patch always fails."),
     ("edit_now_despite_ok_edit", 160, "journal_ok_edit", "EDIT NOW:"),
     ("edit_now_protected_only", 160, "protected", "EDIT NOW:"),
     ("edit_now_scratch_only", 160, "scratch", "EDIT NOW:"),
     ("no_edit_now_new_module", 160, "new_module", ""),
     ("no_edit_now_src", 160, "src", ""),
-    ("finish", 215, None, "FINISH: t>=210s."),
+    # v10.1: an empty tree is never told to end its stage (race 2: fastapi_14851 step 38, fastapi_14306 step 54)
+    ("finish_empty", 215, None, "EDIT NOW: no source file changed at t=215s;"),
     ("finish_src", 215, "src", "FINISH: t>=210s."),
+    ("time_empty", 255, None, "EDIT NOW: no source file changed at t=255s;"),
     ("time", 255, "src", "TIME: t>=250s."),
     ("final", 100, "final", "FINAL: the patch was finalized at t=131s;"),
     ("final_beats_time", 260, "final", "FINAL:"),
@@ -862,6 +869,12 @@ def test_footer_hints_matrix(name, t, setup, want, tmp_path, scripts, ws, swe):
         (ws / "pkg/new.py").write_text("X = 1\n")
     if setup == "journal_ok_edit":
         code += "C.journal({'h': 'edit', 'ok': True, 'file': 'pkg/mod.py'})\n"
+    if setup == "journal_finalize":
+        code += "C.journal({'h': 'finalize', 'first': 'NOT READY: EMPTY'})\n"
+    if setup == "journal_verify":
+        code += "C.journal({'h': 'verify', 'first': 'VERIFY: NO SOURCE CHANGE'})\n"
+    if setup == "journal_repro_only":
+        code += "C.journal({'h': 'verify', 'mode': 'repro-only', 'first': 'REPRO: fails on original'})\n"
     if setup in ("final", "final_changed"):
         code += "C.state_update(lambda s: s.update(final_done=True, final_sha=C.diff_sha(), final_t=131.0))\n"
     if setup == "final_changed":
@@ -873,20 +886,26 @@ def test_footer_hints_matrix(name, t, setup, want, tmp_path, scripts, ws, swe):
     hint = lines[0] if len(lines) == 2 else ""
     assert len(lines) <= 2
     assert hint.startswith(want) if want else hint == "", (name, got)
+    if hint.startswith("EDIT NOW"):          # from T_TIME on it also names the finalize command
+        assert ("python3 /tmp/swe/finalize.py" in hint) == (t >= 250), (name, hint)
     for tool in TOOL_NAMES:
         assert tool not in got
 
 
 def test_footer_hint_texts(C):
-    assert C.TIME_HINT == "TIME: t>=250s. End your stage now (verifier: run finalize.py next)."
-    assert C.FINISH_HINT == "FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage."
-    assert C.EDIT_NOW_HINT == ("EDIT NOW: no source file changed at t>=150s. Locator: reply with your plan now. "
-                               "Other stages: make the plan's change with edit.py now.")
+    assert C.TIME_HINT == ("TIME: t>=250s. End your stage now; reply in one line, under 30 words (verifier: run "
+                           "python3 /tmp/swe/finalize.py next).")
+    assert C.FINISH_HINT == ("FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage with a short "
+                             "reply.")
+    assert C.EDIT_NOW_HINT % 160 == ("EDIT NOW: no source file changed at t=160s; an empty patch always fails. "
+                                     "Locator: reply with your plan now. Other stages: make the smallest plausible "
+                                     "version of the plan's change now.")
+    assert C.EDIT_NOW_LATE == " Then run python3 /tmp/swe/finalize.py once."
     assert C.LOCATOR_HINT == ("LOCATOR: 75s used. Locator: stop and reply with your plan now. Other stages: ignore "
                               "this line.")
     assert C.FINAL_HINT % 5 == ("FINAL: the patch was finalized at t=5s; nothing more to change. The stage that can "
                                 "submit should submit now; any other stage should reply done.")
-    for h in (C.TIME_HINT, C.FINISH_HINT, C.EDIT_NOW_HINT, C.LOCATOR_HINT, C.FINAL_HINT):
+    for h in (C.TIME_HINT, C.FINISH_HINT, C.EDIT_NOW_HINT, C.EDIT_NOW_LATE, C.LOCATOR_HINT, C.FINAL_HINT):
         assert not any(tool in h for tool in TOOL_NAMES)
     assert (C.T_LOCATOR, C.T_EDIT_NOW, C.T_FINISH, C.T_TIME, C.T_SAFE) == (75, 150, 210, 250, 255)
 
@@ -1312,10 +1331,12 @@ def test_context_meter_rules(C):
     assert C.ctx_next({"n": "junk", "tail": "junk"}, "view", 10)["n"] == 10.0
     # the hint: below FINISH and TIME, above EDIT NOW and LOCATOR; it names no tool
     assert C.hint(100, True, None, C.CONTEXT_TOKENS) == C.CONTEXT_HINT
-    assert C.hint(160, False, None, C.CONTEXT_TOKENS) == C.CONTEXT_HINT
+    # v10.1: an empty tree at t >= T_EDIT_NOW hears EDIT NOW even with a full context (the edit matters more)
+    assert C.hint(160, False, None, C.CONTEXT_TOKENS) == C.EDIT_NOW_HINT % 160
     assert C.hint(100, True, None, C.CONTEXT_TOKENS - 1) == ""
     assert C.hint(215, True, None, 99999) == C.FINISH_HINT and C.hint(255, True, None, 99999) == C.TIME_HINT
-    assert not any(tool in C.CONTEXT_HINT for tool in TOOL_NAMES) and "finalize.py" in C.CONTEXT_HINT
+    assert not any(tool in C.CONTEXT_HINT for tool in TOOL_NAMES)
+    assert "python3 /tmp/swe/finalize.py" in C.CONTEXT_HINT
 
 
 def test_context_meter_through_real_helpers(scripts, ws, swe):

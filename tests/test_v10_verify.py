@@ -396,7 +396,7 @@ def test_import_check(scripts, tmp_path, lib):
     r = verify(scripts, ws)
     assert r.first == "VERIFY: RED - import error", r.out
     assert re.search(r"^IMPORT: RED .*SyntaxError.*\(pkg/text\.py:9\)", r.out, re.M), r.out
-    assert "NEXT: fix the error at pkg/text.py:9 with edit.py" in r.out
+    assert "NEXT: fix the error at pkg/text.py:9 with python3 /tmp/swe/edit.py" in r.out
     assert not list(ws.rglob("*.pyc")) and not list(ws.rglob("__pycache__"))
     write(ws, "pkg/text.py", TEXT_PY + "\nundefined_zz\n")
     r = verify(scripts, ws)
@@ -753,7 +753,7 @@ def test_verdict_table_and_wording(scripts, tmp_path, lib):
     C, G, K = lib(ws)
     ok_tests = {"status": "ok", "regressions": [], "collects": 1, "hang_now": False}
     table = [
-        (_R(ne=False), "VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first."),
+        (_R(ne=False), "VERIFY: NO SOURCE CHANGE - make the plan's change with python3 /tmp/swe/edit.py first."),
         (_R(imp={"ok": False, "module": "pkg.m", "line": "NameError", "where": "pkg/m.py:3"}),
          "VERIFY: RED - import error"),
         (_R(valid=[1, 2], fixed=1, classes={1: "FIXED", 2: "STILL FAILS"}, cur={2: {"sig": "AssertionError"}},
@@ -793,7 +793,8 @@ def test_verdict_table_and_wording(scripts, tmp_path, lib):
     edit_file(ws2, "pkg/text.py", "s.ljust(width - 1)", "s.ljust(width)")
     r = verify(scripts, ws2)
     assert r.first == "VERIFY: GREEN" and r.line("TESTS:") == "TESTS: none related", r.out
-    assert r.line("NEXT:") == "NEXT: ready. Fixer: reply with your notes. Verifier: run finalize.py.", r.out
+    assert r.line("NEXT:") == ("NEXT: ready. Fixer: reply with your notes. Verifier: run "
+                               "python3 /tmp/swe/finalize.py."), r.out
     edit_file(ws, "pkg/text.py", "return s.center(width)", "return s.center(width + 2)")
     r = verify(scripts, ws)
     assert r.first == "VERIFY: RED - regressions", r.out
@@ -813,7 +814,7 @@ def test_no_source_change_is_fast(scripts, tmp_path):
     with open(ws / "tests/test_text.py", "a") as f:
         f.write("# a test-only edit is reverted and does not count\n")
     r = verify(scripts, ws)
-    assert r.first == "VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first.", r.out
+    assert r.first == "VERIFY: NO SOURCE CHANGE - make the plan's change with python3 /tmp/swe/edit.py first.", r.out
     assert "HYGIENE: reverted tests/test_text.py" in r.out, r.out
     assert (ws / "tests/test_text.py").read_text() == TEXT_TESTS
     r2 = verify(scripts, ws)

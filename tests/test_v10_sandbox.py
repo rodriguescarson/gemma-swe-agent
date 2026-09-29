@@ -85,7 +85,7 @@ def test_install_real_wrapper_reachable(box, bundle):
     r = box.run_skill("install.py", skill_dir=bundle / "skills" / "swe-tools")
     assert r["status"] == "success" and not r["stderr"], r
     first = r["stdout"].splitlines()[0]
-    assert first.startswith("swe-tools v10.0 ready in /tmp/swe (9 helpers)"), first
+    assert first.startswith("swe-tools v10.1 ready in /tmp/swe (9 helpers)"), first
     assert len(r["stdout"]) <= 400 and "[t=" in r["stdout"]
     assert r["_secs"] < 1.5, r["_secs"]                                                # wrapper + install, not 300 ms
     assert (box.swe / "VERSION").read_text().startswith("v10") and (box.swe / "t0").is_file()
@@ -105,7 +105,7 @@ def test_install_real_wrapper_reachable(box, bundle):
 # R109
 # ---------------------------------------------------------------------------------------------------------------------
 CASES = {   # name: (script, dict args, positional args, expected first-line prefix, extra check)
-    "install": ("install.py", None, None, "swe-tools v10.0 ready in /tmp/swe", None),
+    "install": ("install.py", None, None, "swe-tools v10.1 ready in /tmp/swe", None),
     "locate": ("locate.py", {"query": "add numbers"}, None, "LOCATE:", "calc/ops.py"),
     "locate_positional": ("locate.py", None, ["add numbers"], "LOCATE:", "calc/ops.py"),
     "grep": ("grep.py", {"regex": "def add"}, None, "GREP: 1 hits in 1 files", "calc/ops.py"),
@@ -115,7 +115,7 @@ CASES = {   # name: (script, dict args, positional args, expected first-line pre
     "run": ("run.py", {"cmd": "echo hi-from-skill"}, None, "exit=0", "hi-from-skill"),
     "verify": ("verify.py", {"repro-only": True, "text": CLAIM}, None, "REPRO: fails on original", "claim 1"),
     "finalize": ("finalize.py", None, None, "NOT READY: EMPTY", None),
-    "status": ("status.py", None, None, "STATUS [t=", "helpers v10.0"),
+    "status": ("status.py", None, None, "STATUS [t=", "helpers v10.1"),
 }
 
 
@@ -208,7 +208,7 @@ def test_docker_like_env(tmp_path, bundle):
     td = tmp_path / "wrap"
     shutil.copytree(bundle / "skills" / "swe-tools" / "scripts", td / "scripts")
     r = d.sh(f"cd {td} && python3 scripts/install.py")
-    assert r.stdout.startswith("swe-tools v10.0 ready in /tmp/swe (9 helpers)"), r.stdout + r.stderr
+    assert r.stdout.startswith("swe-tools v10.1 ready in /tmp/swe (9 helpers)"), r.stdout + r.stderr
     assert (d.swe / "VERSION").is_file() and not (d.root / "swe").exists()
     checks = [(("locate", "add numbers"), "LOCATE:"), (("grep", "def add"), "GREP: 1 hits"),
               (("view", "calc/ops.py", "1", "3"), "calc/ops.py lines 1-3 of 7"), (("run", "echo dock"), "exit=0"),

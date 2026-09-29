@@ -17,13 +17,15 @@ from test_v10_bundle import (BUNDLE, CLI_SCRIPTS, GEN, GRAPH_TOOLS, LIB_SCRIPTS,
 PLACEHOLDERS = ("{problem_description}", "{plan?}", "{fix_notes?}")
 STAGE_PLACEHOLDERS = {"setup": set(), "locator": {"{problem_description}"},
                       "fixer": {"{problem_description}"},       # the plan arrives as the handoff (review round 2)
-                      "verifier": {"{problem_description}", "{plan?}"}, "submitter": {"{plan?}"}}
+                      "verifier": {"{problem_description}", "{plan?}"},
+                      "submitter": {"{problem_description}", "{plan?}"}}     # v10.1: the submitter sees the issue
 REGISTRY_FALLBACK = {"run_command", "read_file", "edit_file", "write_file", "get_status", "submit_patch",
                      "get_code_neighbors", "search_similar_code", "get_code_subgraph"}
 HALLUCINATED = {"git_grep", "exit_loop", "bash", "transfer_to_agent", "search_skills"}
 HELPER_OUTPUT_TOOLS = {"run_command", "run_skill_script"}   # SPEC 4.0.10: the only tools helper output may name
 BLOCK_STAGES = {"RECOVER": ("locator", "fixer", "verifier", "submitter"), "AMNESIA": ("locator", "fixer", "verifier"),
-                "TIME": ("locator", "fixer", "verifier"), "EDITFORM": ("fixer", "verifier", "submitter")}
+                "TIME": ("locator", "fixer", "verifier"), "HELPERS": ("locator", "fixer", "verifier", "submitter"),
+                "EDITFORM": ("fixer", "verifier", "submitter")}
 INSTALL_CALL = 'run_skill_script(file_path="install.py", skill_name="swe-tools")'
 SKILL_MD = BUNDLE / "skills" / "swe-tools" / "SKILL.md"
 
@@ -397,7 +399,7 @@ def test_prompt_commands_name_known_scripts():
         for script, toks, heredoc, line in command_examples(text):
             assert script in CLI_SCRIPTS, (name, script, line)
             total += 1
-    assert total >= 30, total
+    assert total >= 25, total      # v10.1: the NAME.py item lists are gone (R89b); every example is a full command
     ex = {(s, tuple(t), h) for s, t, h, _ in command_examples(prompts()["locator"])}
     assert ("view", ("--obj", "package.module.Name"), False) in ex
     assert ("run", ("--timeout", "20", '"command"'), False) in ex
@@ -814,32 +816,36 @@ def test_budget_model_unit():
 # ---------------------------------------------------------------- R96 protocol rules
 # Review round 2: the context meter sees only helper output, so raw read_file (up to 10,000 chars) and raw run_command
 # output (5,000 + 5,000) would fill a stage unseen; the fixer and verifier are told to use the metered helpers.
-RAW_IO = "View files only with view.py and run other code only with run.py."
+# v10.1 (R89b): each helper appears as its full command.
+RAW_IO = ("View files only with python3 /tmp/swe/view.py FILE START END",
+          "run other code only with python3 /tmp/swe/run.py --timeout 20")
 RULES = {
     "setup": ["Your whole job is one tool call", INSTALL_CALL, "reply with the single word READY",
               "Do not call any other tool"],
     "locator": ["If the issue is only a title, turn its words into code names", "Never search issue numbers",
-                "view.py --obj", "Print real objects with run.py instead of guessing library types", "# CLAIM 1:",
+                "python3 /tmp/swe/view.py --obj", "Print real objects; never guess library types", "# CLAIM 1:",
                 "one # CLAIM line per behaviour", "It must say fails on original", "rewrite it once",
                 "FILES: path:start-end", "CAUSE:", "FIX:", "REPRO: fails on original, or none", "TESTS:",
-                "you edit nothing", "under 120 words"],
+                "you edit nothing", "under 120 words", "starting with FILES:", "at most 25 lines and no other comments"],
     "fixer": ["smallest COMPLETE change", "never conclude that nothing needs changing", "python3 /tmp/swe/verify.py",
               "at most 2 rounds", "SIBLINGS", "SPEC GAPS", "REGRESSIONS", "fix the code (not the reproduction)",
               "Never edit tests, conftest.py, pytest.ini, pyproject.toml, setup.cfg or tox.ini", "CHANGED:",
-              "VERIFY:", "under 60 words", "first edit by t=150s", "stop editing by t=210s", RAW_IO],
-    "verifier": ["1. python3 /tmp/swe/status.py", "If no source file is changed", "at most 2 repair rounds",
+              "VERIFY:", "under 60 words", "first edit by t=150s", "stop editing by t=210s", *RAW_IO],
+    "verifier": ["1. Run python3 /tmp/swe/status.py", "If no source file is changed", "at most 2 repair rounds",
                  "none after t=240s", "OLD behaviour the issue asks to change, keep your fix",
-                 "python3 /tmp/swe/finalize.py", "If it says NOT READY", "Call submit_patch",
-                 "submit_patch is your last tool call", "If a helper prints TIME, go straight to step 4", RAW_IO],
-    "submitter": ["1. python3 /tmp/swe/finalize.py", "Only if it says EMPTY", "Call submit_patch",
-                  "The patch has not been submitted yet"],
+                 "python3 /tmp/swe/finalize.py", "If it says NOT READY", "Call submit_patch after READY",
+                 "submit_patch is your last tool call", "If a helper prints TIME, go straight to step 4",
+                 "(no flags)", "a tool call written there as text never ran", *RAW_IO],
+    "submitter": ["1. Run python3 /tmp/swe/finalize.py", "Only if it says EMPTY", "Call submit_patch after READY",
+                  "The patch has not been submitted yet", "{problem_description}"],
 }
-ORDER = {"locator": ["locate.py", "view.py", "verify.py --repro-only", "Stop and reply with the plan"],
-         "fixer": ["view.py the plan's FILES", "smallest COMPLETE change", "Run python3 /tmp/swe/verify.py",
+ORDER = {"locator": ["python3 /tmp/swe/locate.py", "python3 /tmp/swe/view.py", "python3 /tmp/swe/verify.py --repro-only",
+                     "Stop and reply with the plan"],
+         "fixer": ["View the plan's FILES", "smallest COMPLETE change", "Run python3 /tmp/swe/verify.py",
                    "Stop and reply"],
-         "verifier": ["1. python3 /tmp/swe/status.py", "3. python3 /tmp/swe/verify.py",
-                      "4. python3 /tmp/swe/finalize.py", "5. Call submit_patch"],
-         "submitter": ["1. python3 /tmp/swe/finalize.py", "EMPTY", "3. Call submit_patch"]}
+         "verifier": ["1. Run python3 /tmp/swe/status.py", "3. Run python3 /tmp/swe/verify.py",
+                      "4. Run python3 /tmp/swe/finalize.py", "5. Call submit_patch"],
+         "submitter": ["1. Run python3 /tmp/swe/finalize.py", "EMPTY", "3. Call submit_patch"]}
 
 
 def test_prompt_rules_present():
@@ -852,7 +858,7 @@ def test_prompt_rules_present():
         idx = [ps[s].find(x) for x in seq]
         assert all(i >= 0 for i in idx) and idx == sorted(idx), (s, dict(zip(seq, idx)))
     v = ps["verifier"]
-    assert v.rfind("submit_patch") > v.find("4. python3 /tmp/swe/finalize.py")
+    assert v.rfind("submit_patch") > v.find("4. Run python3 /tmp/swe/finalize.py")
     for s in ("locator", "fixer", "verifier"):
         assert "status.py" in ps[s] and "t=300s" in ps[s], s
 
@@ -871,6 +877,8 @@ def test_prompt_times_match_helper_clock():
     assert consts["T_FINISH"] < repair_end < consts["T_TIME"]
     reply_by = int(re.search(r"reply by t=(\d+)s", ps["locator"]).group(1))
     assert consts["T_LOCATOR"] < reply_by < consts["T_EDIT_NOW"]
+    for s in ("verifier", "submitter"):     # v10.1: submit after READY, or once no restore is possible any more
+        assert int(re.search(r"after READY \(or at t>=(\d+)s\)", ps[s]).group(1)) == consts["T_NO_RESTORE"], s
     strings = " ".join(s for s in _string_constants(_parse(str(SCRIPTS / "_swe_common.py")))[1])
     for hint in ("LOCATOR:", "EDIT NOW:", "CONTEXT:", "FINISH:", "TIME:", "FINAL:"):
         assert hint in strings, f"_swe_common has no {hint} footer line although the TIME block names it"

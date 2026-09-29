@@ -158,7 +158,8 @@ def _py(env):
 
 def _int(v):
     try:
-        return int(str(v).strip().rstrip(","))
+        s = str(v).strip().rstrip(",")
+        return int(s[1:] if s[:1] in ("L", "l") and s[1:].isdigit() else s)
     except (TypeError, ValueError):
         return None
 
@@ -208,7 +209,7 @@ def split_spec(ws, f):
     ap = f if os.path.isabs(f) else os.path.join(ws, f)
     if os.path.exists(ap):
         return f, None, None
-    m = re.match(r"^(.*?):(\d+)(?:\s*[-:,]\s*(\d+))?$", f)
+    m = re.match(r"^(.*?):[Ll]?(\d+)(?:\s*[-:,]\s*[Ll]?(\d+))?$", f)
     if m:
         return m.group(1), int(m.group(2)), (int(m.group(3)) if m.group(3) else None)
     return f, None, None
@@ -336,7 +337,7 @@ def obj_mode(ws, dotted, cap):
             mods = [v for k, v in events if k == "import"]
             what = ("importing " + mods[-1]) if mods else ("resolving " + dotted)
             C.emit(NAME, "HANG %s: no result within %ds (the import itself never finishes; read the file with "
-                         "view.py FILE instead)" % (what, int(C.real_budget(C.VIEW_OBJ))), "", cap)
+                         "python3 /tmp/swe/view.py FILE instead)" % (what, int(C.real_budget(C.VIEW_OBJ))), "", cap)
         else:
             tailtxt = " ".join(l for l in (out or "").splitlines() if l.strip() and _MARK not in l)[-200:]
             C.emit(NAME, "VIEW: cannot load %s: %s" % (dotted, err or tailtxt or ("exit %s" % rc)), "", cap)
@@ -410,7 +411,8 @@ def main():
         b = _int(opts.get("end"))
     if pos and a is None and not name:
         p = pos.pop(0).strip()
-        m = re.match(r"^(\d+)\s*[-:,]\s*(\d+)$", p)
+        # v10.1: also the L1191-1433 spans that locate.py and grep.py print (race 2: fastapi_14851, fastapi_5624)
+        m = re.match(r"^[Ll]?(\d+)\s*(?:-|:|,|\.\.)\s*[Ll]?(\d+)$", p)
         if m:
             a, b = int(m.group(1)), int(m.group(2))
         elif _int(p) is not None:

@@ -805,7 +805,7 @@ def test_scripts_contract_static():
         assert isinstance(ast.literal_eval(consts["USAGE"]), str) and isinstance(ast.literal_eval(consts["FLAGS"]), dict)
     usage = {n: re.search(r'^USAGE = (.*)$', (SRC / (n + ".py")).read_text(), re.M).group(1) for n in ("locate", "grep", "view")}
     assert usage["locate"] == "'python3 /tmp/swe/locate.py \"QUERY\"'"
-    assert usage["grep"] == "'python3 /tmp/swe/grep.py \"REGEX\" [--tests] [--path DIR] [--max N]'"
+    assert usage["grep"] == "'python3 /tmp/swe/grep.py \"REGEX\" [PATH ...] [--tests] [--max N]'"
     assert usage["view"] == '"python3 /tmp/swe/view.py FILE [START END | NAME] | --obj DOTTED.NAME"'
     for name in ("locate", "grep", "view", "_swe_index"):
         tree = ast.parse((SRC / (name + ".py")).read_text(), feature_version=(3, 8))

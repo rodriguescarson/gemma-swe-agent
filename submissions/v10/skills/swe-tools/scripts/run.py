@@ -18,7 +18,7 @@ USAGE = 'python3 /tmp/swe/run.py [--timeout N] "COMMAND"'
 FLAGS = {"timeout": "int", "cmd": "str"}
 DISABLED = "pytest is disabled in this environment"
 DISABLED_NOTE = ("Test runners are disabled by the harness here: check behaviour with a reproduction "
-                 "(verify.py --repro-only) instead.")
+                 "(python3 /tmp/swe/verify.py --repro-only) instead.")
 _OPS = {"|", "||", "&&", ";", "&", ">", ">>", "<", "2>&1", "2>", "|&", "1>&2", "&>"}
 
 

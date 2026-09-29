@@ -21,8 +21,10 @@ HARNESS_INI = ("[pytest]\naddopts = -p no:anyio\nnorecursedirs = .* build dist v
                "python_files = test_*.py *_test.py\n")
 HOOK = "# Hermetic test discovery hook for SWE-gemma\n"
 EXCLUDES = "__pycache__/\n*.pyc\n.pytest_cache/\n*.egg-info/\nbuild/\ndist/\n.coverage\n.adk_exec_*.py\n"
-EMPTY_LINE = ("NOT READY: EMPTY - no source change. Make the plan's FIX (smallest plausible version) with edit.py, "
-              "then run finalize.py again.")
+EMPTY_LINE_T = ("NOT READY: EMPTY at t=%ds (%ds left) - no source change. Do not submit an empty patch: it always "
+                "fails. Make the plan's FIX (smallest plausible version) now, then run python3 /tmp/swe/finalize.py "
+                "again.")       # v10.1: time left and what an empty patch costs (race 2, fastapi_14873)
+EMPTY_LINE = EMPTY_LINE_T % (100, 200)
 CORE_PY = "def pad(s, width):\n    return s.ljust(width - 1)\n\n\ndef center(s, width):\n    return s.center(width)\n"
 CORE_TESTS = ("from pkg.core import pad, center\n\n\ndef test_center():\n    assert center('a', 3) == ' a '\n\n\n"
               "def test_pad_zero():\n    assert pad('', 0) == ''\n")
@@ -30,6 +32,7 @@ BASIC = {"pkg/__init__.py": "", "pkg/core.py": CORE_PY, "tests/test_core.py": CO
          "docs/index.md": "docs\n"}
 REPRO = "from pkg.core import pad\n# CLAIM 1: pads\nassert pad('ab', 4) == 'ab  ', repr(pad('ab', 4))\n"
 FIX = ("s.ljust(width - 1)", "s.ljust(width)")
+HYGIENE_WHY = " (graders replace test and config files, so a patch never carries them; do not redo this)"
 WORSE = ("s.ljust(width - 1)", "s.ljust(width - 22)")   # edits change the size: see _RACY_NOTE
 
 
@@ -115,7 +118,7 @@ in the same second (fixed in core by keeping the index's timestamps). Size-chang
 
 def finalize(scripts, ws, t=100):
     r = run(scripts, "finalize", ws, t=t)
-    assert len(r.out.rstrip("\n")) <= 1000, r.out
+    assert len(r.out.rstrip("\n")) <= 1400, r.out      # CAPS["finalize"] (1,000 -> 1,400 in v10.1: EDIT TARGET)
     return r
 
 
@@ -300,8 +303,8 @@ def test_finalize_not_ready_and_notes(scripts, tmp_path):
     assert r.first == EMPTY_LINE and "reverted test/config edits: tests/test_core.py" in r.out, r.out
     write(ws, "pkg/core.py", CORE_PY + "\n\ndef broken(:\n    pass\n")        # a raw sed-style edit
     r = finalize(scripts, ws)
-    assert re.match(r"^NOT READY: SYNTAX ERROR pkg/core\.py:9: SyntaxError: .+\. Fix it with edit\.py, then run "
-                    r"finalize\.py again\.$", r.first), r.out
+    assert re.match(r"^NOT READY: SYNTAX ERROR pkg/core\.py:9: SyntaxError: .+\. Fix it with python3 /tmp/swe/edit\.py, "
+                    r"then run python3 /tmp/swe/finalize\.py again\.$", r.first), r.out
     assert state(ws)["final_done"] is False
     # a large patch (26 new files, about 300 kB) is READY with an advisory NOTE, never NOT READY
     write(ws, "pkg/core.py", CORE_PY)
@@ -495,7 +498,7 @@ def test_restore_tidy_unit(scripts, tmp_path, lib):
     ok, msg = K.restore(K.entry_for_sha(hashlib.sha1(dirty).hexdigest()))
     lines = msg.split("\n")
     assert ok and lines[0] == "restored checkpoint #%d" % id_dirty, msg
-    assert lines[1:] == ["reverted test/config edits: setup.cfg", "CLEANED: removed scratch_check.py"], msg
+    assert lines[1:] == ["reverted test/config edits: setup.cfg" + HYGIENE_WHY, "CLEANED: removed scratch_check.py"], msg
     assert _status_porcelain(ws) == " M pkg/core.py\n?? pkg/new_mod.py\n", _status_porcelain(ws)
     ok, msg = K.restore(K.entry_for_sha(hashlib.sha1(clean).hexdigest()))
     assert ok and msg == "restored checkpoint #%d" % id_clean, msg
@@ -533,7 +536,7 @@ def test_root_scratch_is_not_a_source_change(scripts, tmp_path):
     write(ws, "pkg/core.py", CORE_PY)                                   # the real fix is gone
     write(ws, "check_fix.py", "from pkg.core import pad\nprint(pad('ab', 4))\n")
     r = run(scripts, "verify", ws, t=150)
-    assert r.first == "VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first.", r.out
+    assert r.first == "VERIFY: NO SOURCE CHANGE - make the plan's change with python3 /tmp/swe/edit.py first.", r.out
     assert "NEXT: ready" not in r.out and len(state(ws)["ckpts"]) == 1, r.out
     r = run(scripts, "status", ws, t=260)                               # the late guard sees an empty tree
     assert r.first.startswith("RESTORED checkpoint #1: the tree had no source change"), r.out

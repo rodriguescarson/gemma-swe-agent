@@ -56,7 +56,7 @@ CLOCK_ORDER = ("T_LOCATOR", "T_EDIT_NOW", "T_FINISH", "T_QUICK", "T_TIME", "T_SA
 
 # ---------------------------------------------------------------- SPEC.md extraction (the single source of truth)
 _FENCE = re.compile(r"^```[a-z]*\n(.*?)^```[ \t]*$", re.S | re.M)
-BLOCK_NAMES = ("RECOVER", "AMNESIA", "TIME", "EDITFORM")
+BLOCK_NAMES = ("RECOVER", "AMNESIA", "TIME", "HELPERS", "EDITFORM")
 
 
 def _fence_after(text, pos):

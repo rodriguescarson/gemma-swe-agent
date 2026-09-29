@@ -13,7 +13,7 @@ import _swe_common as C
 # its enclosing def/class from the AST index. Output 1,800 chars or fewer.
 import re
 
-USAGE = 'python3 /tmp/swe/grep.py "REGEX" [--tests] [--path DIR] [--max N]'
+USAGE = 'python3 /tmp/swe/grep.py "REGEX" [PATH ...] [--tests] [--max N]'
 FLAGS = {"regex": "str", "tests": "bool", "path": "str", "max": "int"}
 NAME = "grep"
 MAX_DEFAULT, MAX_LO, MAX_HI = 40, 1, 80
@@ -141,10 +141,53 @@ def _cut(s):
     return s if len(s) <= LINE_CUT else s[:LINE_CUT - 4] + " ..."
 
 
+def _in_ws(ws, w):
+    """The workspace-relative form of w when it names an existing file or directory inside the workspace, else None."""
+    ap = w if os.path.isabs(w) else os.path.join(ws, w)
+    if not os.path.exists(ap):
+        return None
+    rp, rw = os.path.realpath(ap), os.path.realpath(ws)
+    if rp == rw:
+        return "."
+    return os.path.relpath(rp, rw) if rp.startswith(rw + os.sep) else None
+
+
+def _explicit_tests(ws, p):
+    """A path the model named explicitly that is a test file or test directory: search it even without --tests."""
+    p = p.rstrip("/")
+    if is_test_path(p):
+        return True
+    return os.path.isdir(p if os.path.isabs(p) else os.path.join(ws, p)) and is_test_path(p + "/x.py")
+
+
+def split_positionals(ws, regex, words):
+    """-> (regex, paths, notes). v10.1 (race 2: 74 of 206 calls wrote grep.py "X" path/file.py, and the path was
+    folded into the regex, so 65 found nothing or an invalid regex): the first word is the regex (unless --regex gave
+    it); a later word that names an existing file or directory in the workspace is a path to search; a later word that
+    looks like a path but does not exist gets a NOTE; any other later word joins the regex (an unquoted pattern)."""
+    rx = str(regex) if regex else (words[0] if words else "")
+    rest = words if regex else words[1:]
+    paths, notes, joined = [], [], []
+    for w in rest:
+        rel = _in_ws(ws, w)
+        if rel is not None:
+            paths.append(rel)
+        elif os.path.isabs(w) and os.path.exists(w) and not paths and not rest[1:]:
+            paths.append(w)                    # one path outside the workspace: searched like --path
+        elif "/" in w or w.endswith(".py"):
+            notes.append("NOTE: %s is not a path in the workspace; searched everywhere." % w[:120])
+        else:
+            joined.append(w)
+    if joined:
+        rx = " ".join([rx] + joined)
+    return rx, paths, notes
+
+
 def main():
     C.bootstrap()
-    opts = C.parse_args(sys.argv[1:], FLAGS, ["regex*"])
-    rx = str(opts.get("regex") or " ".join(opts.get("_") or []))
+    opts = C.parse_args(sys.argv[1:], FLAGS, [])
+    ws = C.ws()
+    rx, extra_paths, notes = split_positionals(ws, opts.get("regex"), [str(w) for w in opts.get("_") or []])
     cap = C.CAPS["grep"]
     if not rx:
         C.print_usage(NAME, USAGE)
@@ -155,10 +198,17 @@ def main():
         mx = MAX_DEFAULT
     mx = max(MAX_LO, min(MAX_HI, mx))
     tests = bool(opts.get("tests"))
-    ws = C.ws()
     path = (opts.get("path") or "").strip()
     no_index_dir, pathspec = None, ["."]
+    if extra_paths and not path and len(extra_paths) == 1:
+        path = extra_paths.pop()
+    if extra_paths:                            # several paths: all inside the workspace (split_positionals checked)
+        also = _in_ws(ws, path) if path else None
+        pathspec = sorted(set(extra_paths + ([also] if also else [])))
+        tests = tests or any(_explicit_tests(ws, p) for p in pathspec)
+        path = ""
     if path:
+        tests = tests or _explicit_tests(ws, path)
         ap = path if os.path.isabs(path) else os.path.join(ws, path)
         rp, rw = os.path.realpath(ap), os.path.realpath(ws)
         if not os.path.exists(ap):
@@ -247,6 +297,7 @@ def main():
     if total == 0:
         body.append("NOTE: no match%s. Try a shorter regex%s." % (
             "" if tests else " in source files", "" if tests else ", or add --tests to search the tests"))
+    body = notes + body
     if rc is None:
         body.insert(0, "NOTE: git grep hit the %ds deadline; results are partial." % DEADLINE)
     first = "GREP: %d hits in %d files (shown %d)" % (total, nfiles, shown)

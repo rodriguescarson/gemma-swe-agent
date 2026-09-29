@@ -68,7 +68,7 @@ def out(r):
 #   prepare: None, "fixed" (the fix written straight to the workspace), "repro" (a saved repro, tree unchanged) or
 #   "fixed+repro"
 PARITY = {
-    "install": (None, "python3 /tmp/swe/install.py", "install.py", None, None, "swe-tools v10.0 ready in /tmp/swe"),
+    "install": (None, "python3 /tmp/swe/install.py", "install.py", None, None, "swe-tools v10.1 ready in /tmp/swe"),
     "locate": (None, 'python3 /tmp/swe/locate.py "add numbers"', "locate.py", {"query": "add numbers"}, None,
                "LOCATE:"),
     "grep": (None, 'python3 /tmp/swe/grep.py "def add"', "grep.py", {"regex": "def add"}, None, "GREP: 1 hits"),

@@ -370,7 +370,7 @@ def test_loop_breaker(scripts, ws):
     assert first.startswith("NO MATCH")
     again = edit(scripts, ws, ["pkg/m.py"], bad, t=20)
     assert again.startswith("ALREADY TRIED: this exact edit failed at t=10s (NO MATCH). Do something different: "
-                            "python3 /tmp/swe/view.py pkg/m.py 2 9, then edit.py pkg/m.py --lines 5-6."), again
+                            "python3 /tmp/swe/view.py pkg/m.py 2 9, then python3 /tmp/swe/edit.py pkg/m.py --lines 5-6."), again
     # three consecutive failures on one file: the numbered region plus the recipe
     third = edit(scripts, ws, ["pkg/m.py"], sr("    return a +* b", "    return 0"), t=30)
     assert "3 failed edits in a row on pkg/m.py" in third, third

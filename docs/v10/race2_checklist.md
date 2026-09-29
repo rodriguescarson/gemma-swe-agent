@@ -108,3 +108,22 @@ task, gap_4) to judge how faithful the pod was.
    So the blocker is now the cap: no task past cap + 10 s, and the N=130 projection under 12 h. The ratio triggers the
    pre-registered knobs. Row 14, footer obedience, is new and reported only: the projection assumes the footers are
    obeyed, and race 2 measures whether they are. The thresholds were changed before any race-2 data existed.
+2. **2026-09-29, after race 2 round 1, for the v10.1 measurement.** No row above changes: rows 1-14 keep their
+   definitions and thresholds, and round 1 stays scored by them. `scripts/replay_l4.py --race2` now also prints eleven
+   diagnostic rows marked `(v10.1)`, computed by `replay_l4.pipeline_diag` and `patch_mechanism` from the same traces.
+   They are reported with the targets the diagnoses proposed (`docs/v10/v10_1_diag_1.md` to `_4.md`) and never fail a
+   race. Round-1 values, same code (`r2_v10_1`, then `r2_v9_eog_1` where it differs):
+
+   | row | definition | round 1 | proposed target |
+   |---|---|---|---|
+   | invented tool names | parsed: a tool call whose name is no declared or skill tool (the fastapi_13537 crash); unparsed: a reply containing `<\|tool_call>call:NAME` whose NAME is no tool (each ends its stage) | parsed 1, unparsed 29 (v9_eog 0, 0) | parsed 0, unparsed at most 2 per 74 |
+   | stage-ending text calls | every reply containing `<\|tool_call>`, plus how many name a real tool (cut or malformed) and how many tasks have two stage-runs in a row ending on one | 36, real tool 7, cascades 7 (v9_eog 1) | at most 8 per 74 |
+   | verifier first turn is a text call | verifier stage-runs whose first step is such a reply | 9/69 (v9_eog 0/63) | at most 2 per 74 |
+   | helper / tool typed as a shell command | `run_command` whose command starts with `NAME.py` of a helper, or with a tool name | 6, 2 (v9_eog 0, 18) | reported |
+   | locator replies at the output cap | locator text replies with `completion_tokens` at 768 | 11 | at most 2 per 74 |
+   | grep.py trailing-path calls that missed | `grep.py` calls (shlex-split) with a positional word after the regex, and how many printed 0 hits or an invalid regex | 65 of 72 | at most 10% |
+   | empty submit before t=285 | `submit_patch` with `patch_size` 0 while the last helper footer read t < 285 | 3 (t=115, 271, 283) | 0 |
+   | can't open file: real / invented helper | row 5 split by whether the missing `/tmp/swe/X.py` is one of the 9 helpers | 0 / 2 | reported |
+   | KPI 7/8 mechanism | for each row-7/8 patch: a write after the last finalize that printed READY, or no READY finalize | fastapi_14077: write after READY finalize (step 44); fastapi_14258: no READY finalize (end state) | reported |
+   | tasks past cap + 10 s, all ids | row 12's re-timing over every task, not only the 51 shared with r_v4 | fastapi_14306, rich_3061, rich_4079 | reported |
+   | verify ran, NO SOURCE CHANGE only | tasks whose only verify output was `VERIFY: NO SOURCE CHANGE` (row 13 counts them as no verdict) | 4 | reported |

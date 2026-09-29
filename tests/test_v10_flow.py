@@ -78,6 +78,10 @@ FINALIZE = cmd("python3 /tmp/swe/finalize.py")
 NOTES = text("CHANGED: calc/ops.py add (3)\nVERIFY: VERIFY: GREEN")
 SETUP_OK = [skill("install.py"), text("READY")]
 FINAL = last_result_has("FINAL: the patch was finalized")
+# v10.1 (diag 3): writes through the harness's own tools, which run no bundle code
+EDIT_TEST = {"tool": "edit_file", "args": {"filepath": "tests/test_ops.py", "old_string": "assert mul(2, 3) == 6",
+                                           "new_string": "assert mul(2, 3) == 7"}}
+WRITE_REPRO = {"tool": "write_file", "args": {"filepath": "repro.py", "content": "from calc.ops import add\nprint(add(2, 3))\n"}}
 
 SCENARIOS = {
     # (a) the happy path ends at the verifier's submit + text; the submitter never runs
@@ -104,6 +108,16 @@ SCENARIOS = {
           "fixer": [EDIT, VERIFY, NOTES, STATUS, when(FINAL, text("done"), EDIT), text("done")],
           "verifier": [STATUS, VERIFY, FINALIZE, text("done"), STATUS, when(FINAL, submit(), VERIFY), text("Submitted.")],
           "submitter": [FINALIZE, text("submitted")]},
+    # (g) v10.1, fastapi_14077: after finalize printed READY the verifier edits a test file with the harness's edit_file
+    #     and submits; the submit guard (armed by setup's install) keeps it out of the patch, so the hidden test_patch
+    #     applies and the task resolves
+    "g": {"setup": SETUP_OK, "locator": [LOCATE, REPRO, PLAN], "fixer": [EDIT, VERIFY, NOTES],
+          "verifier": [STATUS, VERIFY, FINALIZE, EDIT_TEST, submit(), text("Submitted.")]},
+    # (h) v10.1, fastapi_14258: the fixer fixes the code, writes a root repro.py with write_file and then only replies;
+    #     no helper runs again, the harness nudges until it gives up and takes the fallback diff, which must carry the
+    #     fix and not repro.py
+    "h": {"setup": SETUP_OK, "locator": [LOCATE, REPRO, PLAN], "fixer": [EDIT, WRITE_REPRO, text("done")],
+          "verifier": [text("done")], "submitter": [text("done")]},
 }
 
 
@@ -176,7 +190,7 @@ def check_a(flows):
     assert requests(log, "submitter") == []                                   # the submitter never runs
     assert [e["agent"] for e in log if e["kind"] == "agent"][-1] == "verifier"
     obs = " ".join(o for _, _, o in observations(run))
-    for want in ("swe-tools v10.0 ready", "LOCATE:", "REPRO: fails on original", "OK (exact)", "VERIFY: GREEN", "READY:"):
+    for want in ("swe-tools v10.1 ready", "LOCATE:", "REPRO: fails on original", "OK (exact)", "VERIFY: GREEN", "READY:"):
         assert want in obs, want
     assert "can't open file" not in obs
     assert run.secs < 240
@@ -196,7 +210,7 @@ def check_c(flows):
     common_checks(run, log)
     loc = observations(run, "locator")
     assert "can't open file" in loc[0][2], loc[0]
-    assert loc[1][1] == "run_skill_script" and "swe-tools v10.0 ready" in loc[1][2], loc[1]
+    assert loc[1][1] == "run_skill_script" and "swe-tools v10.1 ready" in loc[1][2], loc[1]
     assert "LOCATE:" in loc[2][2]
     assert requests(log, "setup")[0]["step"] == {"text": "READY"}
 
@@ -238,10 +252,33 @@ def check_f(flows):
         assert requests(log, agent)[4]["step"] == {"text": "done"}               # the banner made them stop at once
 
 
-@pytest.mark.parametrize("scenario", list("abcdef"))
+def check_g(flows):
+    run, log, summ = flows["g"]
+    common_checks(run, log)                                   # resolved, and no tests/ path in the submitted patch
+    ver = [o for a, t, o in observations(run, "verifier")]
+    assert any("READY:" in o for o in ver)
+    edit = [o for a, t, o in observations(run, "verifier") if t == "edit_file"]
+    assert edit and "error" not in edit[0].lower()[:40], edit   # the edit itself succeeded on disk
+
+
+def check_h(flows):
+    run, log, summ = flows["h"]
+    row = run.row(TID)
+    assert run.rc == 0 and "Traceback" not in run.stderr, run.stderr[-3000:]
+    patch = run.patch(TID)
+    assert "+    return a + b" in patch and "repro.py" not in patch, patch
+    assert not [e for e in log if e["kind"] == "agent" and e["agent"] == "submitter"
+                and e["step"].get("tool") == "submit_patch"]     # nothing was submitted: this is the fallback diff
+    assert any(t == "write_file" for a, t, o in observations(run, "fixer"))
+    assert row["resolved"] is True, (row, patch)
+
+
+@pytest.mark.parametrize("scenario", list("abcdefgh"))
 def test_flow(flows, scenario):
-    """R113 (a)-(f); (e) checks every scenario's prompts against the 14,336 compaction line."""
-    {"a": check_a, "b": check_b, "c": check_c, "d": check_d, "e": check_e, "f": check_f}[scenario](flows)
+    """R113 (a)-(f); (e) checks every scenario's prompts against the 14,336 compaction line; (g) and (h) are the v10.1
+    submit-guard ends (diag 3)."""
+    {"a": check_a, "b": check_b, "c": check_c, "d": check_d, "e": check_e, "f": check_f, "g": check_g,
+     "h": check_h}[scenario](flows)
 
 
 def _user_texts(entry):

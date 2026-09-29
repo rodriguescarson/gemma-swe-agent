@@ -24,6 +24,10 @@ def main():
         C.state_load()                       # resets a stale state left by another task in the same dir
     except Exception:
         pass
+    try:
+        C.arm_submit_guard()                 # v10.1: the first tool call, before any agent write (SPEC 4.2)
+    except Exception:
+        pass
     helpers = sorted(f[:-3] for f in os.listdir(_HERE) if f.endswith(".py") and not f.startswith(("_", ".")))
     ok = [r for r in res if r[3] is None]
     if not ok or res[0][3] is not None:

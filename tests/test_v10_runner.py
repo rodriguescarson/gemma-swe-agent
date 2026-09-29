@@ -208,7 +208,7 @@ def test_clock_scale_lands_in_real_sandbox_tmp(tmp_path, harness_restored, monke
             shutil.copytree(scripts, wrap / "scripts", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             r = m.exec(sid, "git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m b && "
                             f"git tag _swegemma_baseline && cd {wrap} && python3 scripts/install.py")
-            assert r.stdout.startswith("swe-tools v10.0 ready in /tmp/swe"), r.stdout + r.stderr
+            assert r.stdout.startswith("swe-tools v10.1 ready in /tmp/swe"), r.stdout + r.stderr
             assert f.read_text() == "1.7\n"
             code = ("import sys,time; sys.path.insert(0, '/tmp/swe'); import _swe_common as C; a = C.clock(); "
                     "time.sleep(1.0); print(C.clock() - a)")
@@ -293,7 +293,7 @@ def _write_run(d, tasks):
 
 def _good_task(resolved=True, secs_scale=1.0, **kw):
     steps = [_step("setup", 5000, 30, 0.0, "run_skill_script", {"file_path": "install.py"},
-                   '{"status": "success", "stdout": "swe-tools v10.0 ready"}', 0.1),
+                   '{"status": "success", "stdout": "swe-tools v10.1 ready"}', 0.1),
              _step("locator", 4000, 40 * secs_scale, 2.0, "run_command", {"command": 'python3 /tmp/swe/locate.py "x"'},
                    '{"status": "ok", "stdout": "LOCATE: 3 symbols [t=5s]"}', 0.3),
              _step("verifier", 6000, 40, 9.0, "run_command", {"command": "python3 /tmp/swe/verify.py"},
@@ -409,8 +409,10 @@ def test_race2_kpis_pass_on_a_clean_synthetic_race(tmp_path):
     d, base = _race(tmp_path, v10_resolved=(60, 60), ctl_resolved=(40, 40))
     ok, rows, per = RP.race2(str(d), against=str(base))
     assert ok, [r for r in rows if not r["pass"]]
-    assert len(rows) == 15 and {r["kpi"] for r in rows} >= {"resolved sum", "crashes", "time (R117 replay)",
-                                                             "footer obedience"}
+    assert len(rows) == 26 and {r["kpi"] for r in rows} >= {"resolved sum", "crashes", "time (R117 replay)",
+                                                             "footer obedience", "invented tool names (v10.1)"}
+    # the 11 v10.1 diagnostic rows are reported with their targets and never fail a race (Addenda 2)
+    assert all(r["pass"] for r in rows if "(v10.1)" in r["kpi"]) and sum("(v10.1)" in r["kpi"] for r in rows) == 11
 
 
 @pytest.mark.parametrize("case,kpi", [

@@ -191,7 +191,12 @@ def reset_to_baseline():
     """Path-scoped reset of every changed path: tracked ones by `git checkout <baseline> -- <path>` (one path per call),
     files the baseline lacks and untracked files by removal. -> (ok, why)."""
     bl = C.baseline()
-    rc, out, err = _git(["diff", "--name-status", "-z", "--no-renames", bl])
+    env = C._unguarded_index_env()          # v10.1: protected files the submit guard hides are reset too
+    try:
+        rc, out, err = C.git_run(["diff", "--name-status", "-z", "--no-renames", bl], timeout=C.real_budget(10), env=env)
+    finally:
+        if env is not None:
+            C._drop_index(env)
     if rc != 0:
         return False, "git diff failed: " + err.decode("utf-8", "replace").strip()[:120]
     items = [x for x in out.decode("utf-8", "surrogateescape").split("\0") if x]
@@ -204,7 +209,7 @@ def reset_to_baseline():
         rc, _, err = _git(["--literal-pathspecs", "checkout", bl, "--", p])
         if rc != 0:
             bad.append(p)
-    rc, out, _ = _git(["ls-files", "--others", "--exclude-standard", "-z"])
+    rc, out, _ = _git(C.NO_GUARD + ["ls-files", "--others", "--exclude-standard", "-z"])
     if rc == 0:
         for p in [x for x in out.decode("utf-8", "surrogateescape").split("\0") if x]:
             _remove(p)
@@ -223,6 +228,21 @@ def _apply(data):
     if rc != 0:
         return False, "git apply failed: " + (err or out).decode("utf-8", "replace").strip().split("\n")[0][:160]
     return True, ""
+
+
+def _landed(data):
+    """True when the worktree holds exactly the post-image of every file in `data` (git apply --reverse --check). The
+    fallback check of restore(): a checkpoint saved before the submit guard was armed (v10.1) can hold a protected or
+    scratch file that diff_bytes() no longer shows, so its sha cannot match even though the restore is exact
+    (reset_to_baseline cleared every other change first)."""
+    p = os.path.join(C.swe_dir(), "ckpt_check.patch")
+    try:
+        with open(p, "wb") as f:
+            f.write(data)
+    except OSError:
+        return False
+    rc, _, _ = _git(["apply", "--reverse", "--check", "--binary", "--whitespace=nowarn", p], 20)
+    return rc == 0
 
 
 def _set_tree(data):
@@ -289,12 +309,33 @@ def shadowed(stems):
     return got
 
 
+def _root_match(name, patterns):
+    """Root scratch names match in any letter case (v10.1: KPI 8 is case-insensitive, so a root Repro.txt that
+    finalize kept still counted as a scratch patch)."""
+    low = name.lower()
+    return any(fnmatch.fnmatchcase(low, x) for x in patterns)
+
+
+def save_edited(diff=None):
+    """v10.1 (race 2, fastapi_15280): an unscored checkpoint of every tree with a source change that edit.py wrote or
+    status.py saw, so a landed edit the model later undid can still be restored by finalize's EMPTY branch and the
+    late guard. rank() puts an unscored entry below every scored one, so best_against() is unchanged. -> id | None."""
+    try:
+        if diff is None:
+            if not C.source_changed():
+                return None
+            diff = C.diff_bytes()
+        return save(diff, None, None, "EDITED", False) if diff else None
+    except Exception:
+        return None
+
+
 def clean_scratch():
     """Delete untracked scratch and vendored trees. Untracked .py files inside directories with tracked files stay (new
     modules); a root-level one stays only when C.root_module_kept says it is a module. Any untracked root file or
     directory whose name shadows an installed or stdlib module is deleted. -> [removed paths]."""
     ws = C.ws()
-    rc, out, _ = _git(["ls-files", "--others", "--exclude-standard", "-z"])
+    rc, out, _ = _git(C.NO_GUARD + ["ls-files", "--others", "--exclude-standard", "-z"])
     if rc != 0:
         return []
     untracked = _z(out)
@@ -322,10 +363,10 @@ def clean_scratch():
     for p in untracked:
         parts = p.split("/")
         base = parts[-1]
-        if len(parts) > 1 and parts[0] not in tracked_dirs and any(fnmatch.fnmatchcase(parts[0], x) for x in ROOT_DIRS):
+        if len(parts) > 1 and parts[0] not in tracked_dirs and _root_match(parts[0], ROOT_DIRS):
             kill_dirs.add(parts[0])
             continue
-        if len(parts) == 1 and any(fnmatch.fnmatchcase(base, x) for x in ROOT_FILES):
+        if len(parts) == 1 and _root_match(base, ROOT_FILES):
             kill_files.add(p)
             continue
         if any(fnmatch.fnmatchcase(base, x) for x in ANY_FILES):
@@ -446,7 +487,7 @@ def restore(rec):
     ok, why = _set_tree(data)
     if ok:
         now = _sha(C.diff_bytes())
-        if now != rec.get("sha"):
+        if now != rec.get("sha") and not _landed(data):
             ok, why = False, "the tree does not match the checkpoint after applying it"
     if not ok:
         ok2, why2 = _set_tree(cur)

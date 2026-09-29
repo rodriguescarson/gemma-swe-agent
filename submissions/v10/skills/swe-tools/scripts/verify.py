@@ -17,7 +17,7 @@ NAME = "verify"
 REPRO_CAP = 1200
 BODY_BUDGET = 1450
 NONE_SAVED = "REPRO: none saved. Pipe one in: python3 /tmp/swe/verify.py --repro-only <<'EOF' ... EOF"
-READY = "NEXT: ready. Fixer: reply with your notes. Verifier: run finalize.py."
+READY = "NEXT: ready. Fixer: reply with your notes. Verifier: run python3 /tmp/swe/finalize.py."
 
 
 def get_args(argv):
@@ -376,9 +376,9 @@ def _regression_lines(R, note):
 def full(opts):
     t_start = time.time()
     ch, hyg = _changes()
-    hline = ("HYGIENE: reverted %s" % _cut(", ".join(hyg), 200)) if hyg else None
+    hline = ("HYGIENE: reverted %s%s" % (_cut(", ".join(hyg), 200), C.HYGIENE_WHY)) if hyg else None
     if not (ch["source"] or ch["deleted"]):
-        first = "VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first."
+        first = "VERIFY: NO SOURCE CHANGE - make the plan's change with python3 /tmp/swe/edit.py first."
         _journal({"first": first, "msg": "no source change"})
         _emit(first, [hline], src=False)
         return
@@ -526,7 +526,8 @@ def main():
     except Exception as e:
         first = "VERIFY: UNKNOWN - internal error (%s: %s)" % (type(e).__name__, _cut(e, 120))
         _journal({"first": first, "msg": "unknown"})
-        _emit(first, ["NEXT: run verify.py once more; if it repeats, continue without it (verifier: run finalize.py)."])
+        _emit(first, ["NEXT: run python3 /tmp/swe/verify.py once more; if it repeats, continue without it (verifier: "
+                      "run python3 /tmp/swe/finalize.py)."])
 
 
 if __name__ == "__main__":

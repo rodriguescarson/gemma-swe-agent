@@ -150,6 +150,10 @@ def load(run, runs_dir=RUNS_DIR, keep_obs=False):
             step = dict(author=author, ct=ct, pt=pt, unc=unc, tool_s=min(tool_s, 180.0), fn=fn, args=args, kind=kind)
             if keep_obs:
                 step["obs"] = _obs_text(s)[:20000]
+                step["msg"] = str(s.get("message") or "")[:4000]
+                step["sid"] = s.get("step_id")
+                step["cmd"] = str((tcs[0].get("arguments") or {}).get("command") or "") \
+                    if tcs and isinstance(tcs[0].get("arguments"), dict) else ""
             steps.append(step)
         rr = res.get(iid) or {}
         out[iid] = dict(steps=steps, resolved=bool(rr.get("resolved")), patch=int(rr.get("agent_patch_size") or 0),
@@ -369,6 +373,145 @@ def footer_obedience(steps):
     return out
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# v10.1 diagnostic KPIs (docs/v10/v10_1_diag_1.md to _4.md; race2_checklist.md Addenda 2). Reported next to the
+# pre-registered rows, never gating them: the race-2 rows stay exactly as registered before the race.
+# ---------------------------------------------------------------------------------------------------------------------
+TOOLS = frozenset(("run_command", "read_file", "edit_file", "write_file", "get_status", "get_code_neighbors",
+                   "search_similar_code", "get_code_subgraph", "submit_patch", "list_skills", "load_skill",
+                   "load_skill_resource", "run_skill_script"))
+HELPER_NAMES = ("install", "locate", "grep", "view", "edit", "run", "verify", "finalize", "status")
+TOOLCALL_TEXT = re.compile(r"<\|tool_call>\s*call:([^{<\n]*)")
+HELPER_SHELL = re.compile(r"^\s*(?:%s)\.py(?![\w.])" % "|".join(HELPER_NAMES))
+HELPER_PATH = re.compile(r"/tmp/swe/(\w+)\.py")
+FOOT_T = re.compile(r"\[t=(\d+)s\]")
+LOCATOR_CAP = MEASURED_REPLY_CAP["locator"]
+T_SUBMIT_OK = 285               # T_NO_RESTORE: the prompts allow an unfinished submit from here on (v10.1)
+# Proposed targets for the next measurement (diagnoses 1-4); reported, not gating.
+DIAG_TARGETS = {"parsed_invented": 0, "unparsed_invented": 2, "stage_text_calls": 8, "verifier_first_text": 2,
+                "locator_capped": 2, "grep_trailing_bad_share": 0.10, "empty_submit_early": 0}
+
+
+def _call_name(msg):
+    """The function name of a tool call the model wrote as text (<|tool_call>call:NAME...), or None."""
+    m = TOOLCALL_TEXT.search(msg or "")
+    return m.group(1).strip() if m else None
+
+
+def _grep_trailing(cmd):
+    """(has a positional word after the regex, argv) for a python3 /tmp/swe/grep.py command, shlex-split; None when the
+    command is no grep.py call or cannot be split."""
+    import shlex
+    i = cmd.find("/tmp/swe/grep.py")
+    if i < 0:
+        return None
+    try:
+        words = shlex.split(cmd[i + len("/tmp/swe/grep.py"):].split("\n")[0])
+    except ValueError:
+        return None
+    pos, skip = [], False
+    for w in words:
+        if skip:
+            skip = False
+            continue
+        if w in ("--path", "--max", "--regex"):
+            skip = True
+            continue
+        if w.startswith("--") or w in ("|", "&&", ";", "2>&1"):
+            if w in ("|", "&&", ";"):
+                break
+            continue
+        pos.append(w)
+    return len(pos) > 1, pos
+
+
+def pipeline_diag(task, loc_cap=LOCATOR_CAP):
+    """Per-task counts of the v10.1 failure classes (race 2 round 1). Tool-call confusion: a parsed call to a name that
+    is no declared or skill tool (the fastapi_13537 crash), and calls written as text (<|tool_call>call:NAME in a reply,
+    which ends the stage) split by whether NAME is a real tool (cut or malformed) or invented (a helper or a shell
+    command); helpers or tool names typed into the shell; the verifier's first turn as such a text; cascades (two or
+    more stage-runs in a row ending on one). Plus: locator replies at max_output_tokens, grep.py calls with a trailing
+    path and whether they missed, submit_patch of an empty patch before t=285, can't-open-file calls split into real
+    and invented helper names, and verify runs that printed only NO SOURCE CHANGE."""
+    steps = task["steps"]
+    out = collections.Counter()
+    ex = collections.defaultdict(list)
+    runs, cur = [], None
+    for s in steps:
+        if cur is None or s["author"] != cur[0]:
+            cur = [s["author"], []]
+            runs.append(cur)
+        cur[1].append(s)
+    ends_on_call = []
+    for author, run in runs:
+        text_call = [s for s in run if s["kind"] == "text" and "<|tool_call>" in s.get("msg", "")]
+        ends_on_call.append(bool(run) and run[-1]["kind"] == "text" and "<|tool_call>" in run[-1].get("msg", ""))
+        if author == "verifier":
+            out["verifier_runs"] += 1
+            first = run[0]
+            if first["kind"] == "text" and "<|tool_call>" in first.get("msg", ""):
+                out["verifier_first_text"] += 1
+        out["stage_text_calls"] += len(text_call)
+    out["cascades"] += int(any(a and b for a, b in zip(ends_on_call, ends_on_call[1:])))
+    last_t, verdict, nosrc = None, False, False
+    for s in steps:
+        obs, msg, cmd = s.get("obs", ""), s.get("msg", ""), s.get("cmd", "")
+        if s["fn"] and s["fn"] not in TOOLS:
+            out["parsed_invented"] += 1
+            ex["parsed_invented"].append("%s:%s" % (s.get("sid"), s["fn"]))
+        if s["kind"] == "text" and "<|tool_call>" in msg:
+            name = _call_name(msg) or ""
+            real = name.split(" ")[0].split("(")[0] in TOOLS
+            key = "unparsed_real" if real else "unparsed_invented"
+            out[key] += 1
+            ex[key].append("%s:%s:%s" % (s.get("sid"), s["author"], name[:60]))
+        if s["author"] == "locator" and s["kind"] == "text" and s["ct"] >= loc_cap:
+            out["locator_capped"] += 1
+        if s["fn"] == "run_command" and cmd:
+            first = cmd.strip().split("\n")[0]
+            if HELPER_SHELL.match(first):
+                out["helper_shell"] += 1
+            elif first.split(" ")[0] in TOOLS:
+                out["tool_shell"] += 1
+            g = _grep_trailing(cmd)
+            if g and g[0]:
+                out["grep_trailing"] += 1
+                if re.search(r"GREP: 0 hits|GREP: invalid regex", obs):
+                    out["grep_trailing_bad"] += 1
+            m = HELPER_PATH.search(cmd)
+            if m and "can't open file" in obs:
+                out["cant_open_helper" if m.group(1) in HELPER_NAMES else "cant_open_invented"] += 1
+        if s["fn"] == "submit_patch" and re.search(r"""patch_size\\?["']?:\s*0\b""", obs):
+            if last_t is None or last_t < T_SUBMIT_OK:
+                out["empty_submit_early"] += 1
+                ex["empty_submit_early"].append("%s:t=%s" % (s.get("sid"), last_t))
+        if VERDICT.search(obs):
+            verdict = True
+        if "VERIFY: NO SOURCE CHANGE" in obs:
+            nosrc = True
+        ts = FOOT_T.findall(obs)
+        if ts:
+            last_t = int(ts[-1])
+    out["no_source_change_only"] += int(nosrc and not verdict)
+    return out, ex
+
+
+def patch_mechanism(task):
+    """Why a KPI 7/8 patch shipped (diagnosis 3): 'write after READY finalize (step N)' when a write followed the last
+    finalize that printed READY (the pyproject.toml re-edit of fastapi_14077), else 'no READY finalize (end state)'
+    (the timeout fallback diff of fastapi_14258)."""
+    steps = task["steps"]
+    ready = max((i for i, s in enumerate(steps) if "finalize.py" in s.get("cmd", "") and "READY:" in s.get("obs", "")
+                 and "NOT READY" not in s.get("obs", "")), default=None)
+    if ready is None:
+        return "no READY finalize (end state)"
+    for s in steps[ready + 1:]:
+        cmd = s.get("cmd", "")
+        if s["fn"] in ("edit_file", "write_file") or "edit.py" in cmd or re.search(r"(^|[^2&])>\s*\S", cmd):
+            return "write after READY finalize (step %s)" % s.get("sid")
+    return "READY finalize, no later write"
+
+
 def run_kpis(d, name):
     data = load(d, keep_obs=True)
     n = len(data)
@@ -376,6 +519,7 @@ def run_kpis(d, name):
     helper_ok = cant_open = malformed = verdicts = restores = 0
     stage_max, empty, protected, scratch = [], [], [], []
     obey = {}
+    diag, diag_tasks, diag_ex = collections.Counter(), collections.Counter(), collections.defaultdict(list)
     for iid, t in data.items():
         for h, (o, n_) in footer_obedience(t["steps"]).items():
             c = obey.setdefault(h, [0, 0])
@@ -416,7 +560,16 @@ def run_kpis(d, name):
             protected.append(iid)
         if scratch_files(files):
             scratch.append(iid)
-    return {"run": name, "n": n, "resolved": sum(t["resolved"] for t in data.values()),
+        c, ex = pipeline_diag(t)
+        diag.update(c)
+        diag_tasks.update(k for k, v in c.items() if v and k not in ("verifier_runs",))
+        for k, v in ex.items():
+            diag_ex[k] += ["%s %s" % (iid, x) for x in v]
+    diag["tasks"] = dict(diag_tasks)
+    diag["examples"] = {k: v[:12] for k, v in diag_ex.items()}
+    diag["patch_mechanism"] = {i: patch_mechanism(data[i]) for i in sorted(set(protected) | set(scratch))}
+    diag["over_cap_all"] = sorted(i for i, t in data.items() if t["steps"] and retime(t) > CAP + GATE_OVER_S)
+    return {"run": name, "n": n, "resolved": sum(t["resolved"] for t in data.values()), "diag": diag,
             "resolved_ids": sorted(i for i, t in data.items() if t["resolved"]),
             "crashes": {k: len(v) for k, v in crashes.items()}, "crash_ids": crashes,
             "helper_ok": helper_ok / n if n else 0.0, "cant_open_per_task": cant_open / n if n else 0.0,
@@ -489,7 +642,46 @@ def race2(d, control="r2_v9_eog", treatment="r2_v10", runs=2, against="r_v4"):
     row("footer obedience", {h: f"{o}/{n_}" for h, (o, n_) in sorted(fo.items())}, True, "reported only (SPEC 9.2)")
     vs = min(r["verdict_share"] for r in tr)
     row("verify verdict line", round(vs, 3), vs >= KPI["verdict_share_min"], f"restores: {sum(r['restores'] for r in tr)}")
+    diag_rows(row, tr)
     return all(r["pass"] for r in rows), rows, per
+
+
+def diag_rows(row, tr):
+    """The v10.1 diagnostic rows (race2_checklist.md Addenda 2): reported with their proposed target, never failing."""
+    dg = [r.get("diag") or {} for r in tr]
+    n = sum(r["n"] for r in tr)
+
+    def tot(k):
+        return sum(int(x.get(k) or 0) for x in dg)
+
+    def met(k, v):
+        return f"target {DIAG_TARGETS[k]} ({'met' if v <= DIAG_TARGETS[k] else 'missed'}), reported only"
+    row("invented tool names (v10.1)", {"parsed": tot("parsed_invented"), "unparsed": tot("unparsed_invented"), "n": n},
+        True, "parsed " + met("parsed_invented", tot("parsed_invented")) + "; unparsed "
+        + met("unparsed_invented", tot("unparsed_invented") * 74 / max(1, n)))
+    row("stage-ending text calls (v10.1)", {"all": tot("stage_text_calls"), "real tool": tot("unparsed_real"),
+                                            "cascades": tot("cascades")},
+        True, met("stage_text_calls", tot("stage_text_calls") * 74 / max(1, n)))
+    row("verifier first turn is a text call (v10.1)", f"{tot('verifier_first_text')}/{tot('verifier_runs')}", True,
+        met("verifier_first_text", tot("verifier_first_text") * 74 / max(1, n)))
+    row("helper / tool typed as a shell command (v10.1)", {"helper": tot("helper_shell"), "tool": tot("tool_shell")},
+        True, "reported only")
+    row("locator replies at the output cap (v10.1)", tot("locator_capped"), True,
+        met("locator_capped", tot("locator_capped") * 74 / max(1, n)))
+    g, gb = tot("grep_trailing"), tot("grep_trailing_bad")
+    row("grep.py trailing-path calls that missed (v10.1)", f"{gb} of {g}", True,
+        met("grep_trailing_bad_share", gb / g if g else 0.0))
+    row("empty submit before t=285 (v10.1)", tot("empty_submit_early"), True,
+        met("empty_submit_early", tot("empty_submit_early")))
+    row("can't open file: real / invented helper (v10.1)", {"helper": tot("cant_open_helper"),
+                                                           "invented": tot("cant_open_invented")},
+        True, "row 5 counts both; only a real helper name means a missing install")
+    row("KPI 7/8 mechanism (v10.1)", {r["run"]: (r.get("diag") or {}).get("patch_mechanism") for r in tr}, True,
+        "reported only")
+    row("tasks past cap + 10 s, all ids (v10.1)", {r["run"]: (r.get("diag") or {}).get("over_cap_all") for r in tr},
+        True, "row 12 checks only the ids shared with r_v4")
+    row("verify ran, NO SOURCE CHANGE only (v10.1)", tot("no_source_change_only"), True,
+        "row 13 counts these as no verdict")
 
 
 def kill_check(d, control="r2_v9_eog", treatment="r2_v10"):

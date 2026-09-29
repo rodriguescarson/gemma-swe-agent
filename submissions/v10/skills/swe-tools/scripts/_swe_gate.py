@@ -270,7 +270,9 @@ def _make_base(ws, bl, d):
 
 
 def _copy_ignored(ws, d):
-    rc, out, _ = _git(["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], 10, cwd=ws)
+    # the submit guard's exclude file (v10.1) must not make scratch or new tests look like build artefacts here
+    rc, out, _ = _git(C.NO_GUARD + ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"], 10,
+                      cwd=ws)
     if rc != 0:
         return 0
     cands = [p for p in _z(out) if not p.endswith("/")]
@@ -1741,6 +1743,12 @@ def evaluate(quick=False, extra_tests=(), deadline=None, run_tests=True, advice=
     return R
 
 
+# v10.1 (R89b): next-step lines name a helper only as its full command.
+EDIT_CMD = "python3 /tmp/swe/edit.py"
+VERIFY_CMD = "python3 /tmp/swe/verify.py"
+READY_NEXT = "NEXT: ready. Fixer: reply with your notes. Verifier: run python3 /tmp/swe/finalize.py."
+
+
 def verdict(R):
     """-> (line1, next_line, word). The table of SPEC 4.11, first matching row."""
     imp = R.get("import") or {"ok": True}
@@ -1748,12 +1756,12 @@ def verdict(R):
     summ = rp.get("summary") or {"valid": [], "fixed": 0, "broke": 0, "classes": {}, "text": "0/0 claims fixed"}
     t = R.get("tests") or {"status": "skipped" if R.get("quick") else "none", "why": "quick evaluation"}
     if not R.get("nonempty"):
-        return ("VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first.",
-                "NEXT: make the plan's change with edit.py, then run verify.py again.", "EMPTY")
+        return ("VERIFY: NO SOURCE CHANGE - make the plan's change with %s first." % EDIT_CMD,
+                "NEXT: make the plan's change with %s, then run %s again." % (EDIT_CMD, VERIFY_CMD), "EMPTY")
     if imp.get("ok") is False:
         where = imp.get("where") or imp.get("module") or "the changed module"
-        return ("VERIFY: RED - import error", "NEXT: fix the error at %s with edit.py, then run verify.py again." % where,
-                "RED")
+        return ("VERIFY: RED - import error",
+                "NEXT: fix the error at %s with %s, then run %s again." % (where, EDIT_CMD, VERIFY_CMD), "RED")
     bad = [i for i in summ["valid"] if summ["classes"].get(i) in ("STILL FAILS", "STILL HANGS")]
     bad += [i for i, k in sorted(summ["classes"].items()) if k == "BROKE"]
     if bad:
@@ -1761,20 +1769,20 @@ def verdict(R):
         r = (rp.get("cur") or {}).get(i) or {}
         sig = r.get("sig") or ("hangs" if r.get("status") == "HANG" else "fails")
         return ("VERIFY: RED - %s" % summ["text"],
-                "NEXT: claim %d still fails (%s). Fix the code, then run verify.py again." % (i, sig[:110]), "RED")
+                "NEXT: claim %d still fails (%s). Fix the code, then run %s again." % (i, sig[:110], VERIFY_CMD), "RED")
     if t.get("status") == "ok" and (t.get("regressions") or t.get("collects") == 0) or t.get("hang_now"):
         if t.get("hang_now"):
             nxt = ("NEXT: the tests finished on original but time out now: look for an endless loop in your change, "
-                   "then run verify.py again.")
+                   "then run %s again." % VERIFY_CMD)
         elif t.get("collects") == 0 and not t.get("regressions"):
             f, msg = sorted(t["coll_now"].items())[0]
-            nxt = "NEXT: %s no longer collects (%s). Fix the code, then run verify.py again." % (f, msg[:100])
+            nxt = "NEXT: %s no longer collects (%s). Fix the code, then run %s again." % (f, msg[:100], VERIFY_CMD)
         else:
             nxt = REGRESSION_NOTE
         return ("VERIFY: RED - regressions", nxt, "RED")
     tests_ok = t.get("status") in ("ok", "none")
     outside = (imp.get("outside") or {})
-    ready = "NEXT: ready. Fixer: reply with your notes. Verifier: run finalize.py."
+    ready = READY_NEXT
     if summ["valid"] and summ["fixed"] == len(summ["valid"]) and tests_ok and not outside and not imp.get("pre"):
         return ("VERIFY: GREEN", ready, "GREEN")
     if outside:

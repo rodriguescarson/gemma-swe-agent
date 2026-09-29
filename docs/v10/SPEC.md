@@ -1,7 +1,9 @@
 # v10 SPEC: robustness-first pipeline with a claim gate and checkpoints
 
 Synthesizer, 2026-09-28. This file is the single source of truth for the v10 implementers. Where it disagrees with
-`docs/v10/design_{A,B,C}.md`, this file wins.
+`docs/v10/design_{A,B,C}.md`, this file wins. **v10.1 (2026-09-29)** applies the robustness fixes of race 2 round 1
+(`docs/v10/v10_1_diag_1.md` to `_4.md`) in place; section 0.3 lists them, and the fix-quality levers of `_diag_5.md` are
+left for separate variant arms.
 
 Base: design A (judge totals A 55, B 49, C 45.5; A won all three ballots). Grafts come from the judges'
 `best_ideas_to_keep`. Every judge-listed fatal flaw of A is fixed, and so is every flaw of a grafted B/C part (section 0.2).
@@ -65,6 +67,32 @@ Hard rules for implementers:
 Residual risks accepted: graph tools stay declared (undeclared calls crash, and declared calls returned 11,245 chars
 at most in our traces, though a competitor saw 136k); `edit_file` stays declared (malformed loops are bounded by the
 cap and discouraged by the prompts).
+
+### 0.3 v10.1: the race-2 round-1 robustness fixes (2026-09-29)
+
+Race 2 round 1 (faithful: compaction 14,336, L4 clock 1.7, 74 tasks): v10 25 against v9_eog 24, paired 6-5, killed on
+one unknown-tool crash. The plumbing KPIs held (helpers in 74/74 tasks, 0.05 malformed `edit_file` per task); these fixes
+remove the new failure classes the diagnoses found. Each has a regression test (`tests/test_v10_1.py` unless named).
+
+| # | failure (race 2 round 1) | fix | test |
+|---|---|---|---|
+| 1 | helper names used as tool names: 1 parsed `view.py` call crashed fastapi_13537, 29 more written as `<\|tool_call>call:NAME` text each ended its stage; the verifier's first turn in 9 of 69 | R89b/R89c (section 3 rules 8-10): a helper appears only as `python3 /tmp/swe/NAME.py`, run steps start with "Run", the HELPERS block, the verifier's handoff line; every helper hint and NEXT line names the full command (4.0.10) | R89b, R89c (lint, AST and runtime pass, controls) |
+| 2 | an empty tree told "keep the edit you have and end your stage" (FINISH) or "End your stage now" (TIME); LOCATOR "ignore this line" after the locator stage | footer priority FINAL > EDIT NOW > TIME > FINISH > CONTEXT > LOCATOR; EDIT NOW on every empty tree from T_EDIT_NOW, or once the locator stage is over (4.1.7) | R18, R121 |
+| 3 | `grep.py "X" path/file.py` folded the path into the regex (65 of 72 such calls missed) | a later positional word that names an existing path is searched (4.5) | R122 |
+| 4 | a landed edit undone later left finalize nothing to restore (fastapi_15280) | every landed edit (edit.py) and every non-empty tree status.py sees is an unscored EDITED checkpoint (4.10) | R123 |
+| 5 | the last stage submitted an empty patch with 108 s left (fastapi_14873) | EMPTY says the time left and that an empty patch always fails, plus EDIT TARGET (4.12); the submitter sees the issue; submit after READY or at t>=285s (section 3 rule 11) | R124 |
+| 6 | a stray EOF inside an edit heredoc | edit.py names the early EOF (4.7); EDITFORM states the EOF rule | R125 |
+| 7 | a protected file re-edited after READY (fastapi_14077) and a root repro.py in the timeout fallback diff (fastapi_14258): KPI 7 and 8 | the submit guard (4.1.17): assume-unchanged protected files plus an exclude file, armed by install and finalize; finalize enforces the graders' rules before READY | R126, R127, TFL (g), (h) |
+| 8 | `view.py FILE L1191-1433` rejected; plans lost after compaction; long replies at TIME | L-ranges (4.6); status VIEWED line (4.13); TIME/FINISH ask for a short reply (4.1.7) | R128 |
+| 9 | locator replies cut at 768 tokens (11 of 73) | prompt: the reproduction has at most 25 lines and no comments but the claim lines; the reply starts with FILES: | R96 |
+| 10 | none of this was measured | `scripts/replay_l4.py` reports the v10.1 diagnostic KPIs next to the frozen race-2 rows (race2_checklist Addenda 2) | R129 |
+
+Not applied here, each for a stated reason (section 14): the locator's `max_output_tokens` stays 768 (1,536 breaks the
+R95 B margin of the fixer: the p90 plan of 1,087 tokens would enter every fixer call); `LoopAgent` around the
+submitter (the tree stays R78's; a stage that ends without a submit is already restarted by the harness nudge); the
+context-meter reset at the fixer's start and CONTEXT enforcement in the locator (a status call first breaks the
+first-round invariant of `test_context_meter_does_not_cut_a_normal_first_round`); run.py heredoc mode, a per-stage call
+budget and "first edit within 5 calls" (behaviour levers that need their own arm).
 
 ---
 
@@ -228,26 +256,49 @@ The tool policy:
 
 ## 3. Prompts (full text) and SKILL.md
 
-Prompt rules. Each rule is a lint, R87-R96.
+Prompt rules. Each rule is a lint, R87-R96 plus R89b/R89c (v10.1).
 1. Braces: only `{problem_description}`, `{plan?}` and `{fix_notes?}`. No other `{` or `}` characters at all.
 2. Backticks: 0 in prompts and in SKILL.md.
 3. Tool-call examples are in template order: `run_skill_script(file_path="install.py", skill_name="swe-tools")`.
 4. A tool is named only when that stage declares it. `submit_patch` is named only in the verifier and submitter prompts.
    The graph tools are never named.
 5. Every helper flag a prompt uses exists in that helper's `FLAGS` (R92).
-6. Shared blocks are byte-identical wherever they appear: RECOVER, AMNESIA and TIME in locator, fixer and verifier; RECOVER
-   also in submitter; EDITFORM in fixer, verifier and submitter.
+6. Shared blocks are byte-identical wherever they appear: RECOVER, AMNESIA and TIME in locator, fixer and verifier;
+   HELPERS (v10.1) in those three and the submitter; RECOVER also in submitter; EDITFORM in fixer, verifier and
+   submitter.
 7. Measured sizes, excluding placeholders:
 
    | stage | words | chars |
    |---|---|---|
    | setup | 76 | 452 |
-   | locator | 363 | 2,334 |
-   | fixer | 368 | 2,356 |
-   | verifier | 352 | 2,205 |
-   | submitter | 169 | 1,110 |
+   | locator | 369 | 2,353 |
+   | fixer | 364 | 2,337 |
+   | verifier | 368 | 2,255 |
+   | submitter | 185 | 1,198 |
 
    Limits enforced by R91: 370 words and 2,600 chars for each prompt, and 1,300 chars for the submitter.
+8. **Helper naming (R89b, v10.1).** In prompts, SKILL.md, YAML and every string a helper prints, a helper file name
+   `NAME.py` appears only inside `python3 /tmp/swe/NAME.py ...` or inside the exact skill call
+   `run_skill_script(file_path="NAME.py", skill_name="swe-tools")`. Never as a verb ("view.py the candidates"), a noun
+   ("with edit.py"), a list item, a usage fragment ("view.py FILE START END"), a `NAME.py` template list, or a
+   `/tmp/swe/NAME.py` path without `python3 `. Where the full command would repeat, an English word or a step
+   reference is used ("View the plan's FILES", "run step 3 again"). Race 2 round 1: the model turned bare names into
+   tool names 30 times in 21 tasks (one parsed `view.py` call crashed fastapi_13537; the other 29 were
+   `<|tool_call>call:NAME` texts, and each ended its stage). The v9_eog prompts, which always wrote the full command,
+   had 0.
+9. **Run instructions (R89c, v10.1).** An instruction to run a helper is a sentence whose verb comes first ("Run
+   python3 /tmp/swe/status.py ..."). A numbered step never starts with `python3`: `1. python3 /tmp/swe/status.py`
+   opened 9 of 69 race-2 verifier stages as an unparsed call. The tool is named after the command ("with
+   run_command"), never as a `run_command: CMD` prefix (v9_eog typed that form into the shell 23 times per 74). The
+   HELPERS block says it once per stage.
+10. **Handoff (v10.1).** The verifier is told that a tool call written as text in the [fixer] message never ran (5 of
+    the 9 verifier turn-1 failures followed a fixer whose last reply was such a text). The locator's reproduction has
+    at most 25 lines and no comments but the claim lines, and its reply starts with `FILES:` (race 2: 11 of 73 locator
+    replies hit `max_output_tokens` 768, 6 of them repro calls full of commented reasoning).
+11. **Submitting (v10.1).** The verifier and the submitter call `submit_patch` after finalize says READY, or at
+    t>=285s (T_NO_RESTORE); an empty patch always fails, and a stage that ends without a submit is restarted by the
+    harness nudge with the tree intact (harness_runtime 5.3). The submitter sees the issue (`{problem_description}`):
+    race 2's fastapi_14873 submitter invented a SEARCH block for code it had never seen.
 
 Shared blocks, verbatim:
 
@@ -263,12 +314,16 @@ TIME
 ```
 Helpers end with the task time [t=...s]; the task stops at t=300s. Obey any LOCATOR, EDIT NOW, CONTEXT, FINISH or TIME line.
 ```
+HELPERS
+```
+Run every python3 /tmp/swe command with run_command; helpers are never tool names.
+```
 EDITFORM
 ```
-Edit only with edit.py through run_command, as raw code with no escaping (edit_file and write_file corrupt code here):
+Edit only this way, with run_command, as raw code with no escaping (edit_file and write_file corrupt code here):
 python3 /tmp/swe/edit.py path/to/file.py <<'EOF'
 <<<<<<< SEARCH
-exact current lines from view.py (the number column may stay)
+exact current lines as viewed (the number column may stay)
 =======
 new lines
 >>>>>>> REPLACE
@@ -276,7 +331,7 @@ EOF
 Or replace lines by number: python3 /tmp/swe/edit.py path/to/file.py --lines 120-135 <<'EOF'
 new lines
 EOF
-For a new file use --create instead of --lines. edit.py checks the syntax and undoes a broken edit; if SEARCH does not match, it prints the closest numbered lines to use with --lines. Edit the lowest place in a file first. Never resend a failing edit.
+For a new file use --create instead of --lines. EOF appears once, as the last line. A broken edit is undone; a SEARCH that does not match prints the closest numbered lines for --lines. Edit the lowest place first. Never resend a failing edit.
 ```
 
 ### 3.1 `prompts/setup.md`
@@ -291,25 +346,25 @@ Do not call any other tool.
 
 ### 3.2 `prompts/locator.md`
 ```
-You are the LOCATOR, stage 2 of 5. Find the code to change in the Python repository at /workspace and write a reproduction; you edit nothing, the next stage does.
+You are the LOCATOR, stage 2 of 5. Find the code to change in /workspace and write a reproduction; you edit nothing, the next stage does.
 
 Issue:
 {problem_description}
 
-Helpers (run with run_command):
+Helpers:
 python3 /tmp/swe/locate.py "identifiers, error text and key words"
 python3 /tmp/swe/grep.py "regex"   (source only; add --tests for tests)
 python3 /tmp/swe/view.py FILE START END   or   python3 /tmp/swe/view.py FILE NAME   (NAME: function, Class or Class.method)
-python3 /tmp/swe/view.py --obj package.module.Name   (source of an installed dependency)
 python3 /tmp/swe/run.py --timeout 20 "command"   (run other code only this way)
+<HELPERS>
 <RECOVER>
 <AMNESIA>
 <TIME>
 
 Steps (about 8 tool calls; reply by t=90s):
-1. locate.py with the issue's names and error text. If the issue is only a title, turn its words into code names first (proxy gives *Proxy classes, padding width gives *padding_width*). Never search issue numbers.
-2. view.py the best candidates; grep.py exact names from the issue. A name the repository does not define comes from a dependency: view.py --obj it. Print real objects with run.py instead of guessing library types.
-3. If a script can show the bug, write a reproduction that FAILS now: one # CLAIM line per behaviour the issue asks for, with its exact inputs and expected values:
+1. Locate the issue's names and error text. If the issue is only a title, turn its words into code names first (proxy gives *Proxy classes, padding width gives *padding_width*). Never search issue numbers.
+2. View the best candidates; grep exact names from the issue. A name the repository does not define comes from a dependency: python3 /tmp/swe/view.py --obj package.module.Name shows its source. Print real objects; never guess library types.
+3. If a script can show the bug, write a reproduction that FAILS now: one # CLAIM line per behaviour the issue asks for, with its exact inputs and expected values; at most 25 lines and no other comments:
 python3 /tmp/swe/verify.py --repro-only <<'EOF'
 from package.module import thing
 # CLAIM 1: short description
@@ -317,14 +372,15 @@ out = thing("input from the issue")
 assert out == "expected from the issue", repr(out)
 EOF
 It must say fails on original; if a claim passes on original, rewrite it once with another input shape. Assert exact text only if the issue states it.
-4. Stop and reply with the plan (text only, under 120 words):
+4. Stop and reply with the plan (text only, under 120 words, starting with FILES:):
 FILES: path:start-end (function) for every place to change
 CAUSE: one sentence
 FIX: what to change, with the exact names, messages and signatures the issue gives
 REPRO: fails on original, or none
-TESTS: an existing test file for this code
+TESTS: an existing test file for it
 ```
-(`<RECOVER>`, `<AMNESIA>` and `<TIME>` stand for the verbatim blocks above, one per line. The same applies below.)
+(`<RECOVER>`, `<AMNESIA>`, `<TIME>` and `<HELPERS>` stand for the verbatim blocks above, one per line. The same applies
+below.)
 
 ### 3.3 `prompts/fixer.md`
 ```
@@ -336,25 +392,25 @@ Issue:
 The locator's plan is the [locator] message below.
 
 <EDITFORM>
-Other helpers, each as python3 /tmp/swe/NAME.py: view.py FILE START END, view.py FILE NAME, grep.py "regex", run.py --timeout 20 "command", verify.py, status.py.
-View files only with view.py and run other code only with run.py.
+<HELPERS>
+View files only with python3 /tmp/swe/view.py FILE START END, search with python3 /tmp/swe/grep.py "regex" and run other code only with python3 /tmp/swe/run.py --timeout 20 "command".
 <RECOVER>
 <AMNESIA>
 <TIME>
 
 Steps (first edit by t=150s, stop editing by t=210s):
-1. If the plan is empty, run python3 /tmp/swe/locate.py "key words" first. view.py the plan's FILES.
+1. If the plan is empty, run python3 /tmp/swe/locate.py "key words" first. View the plan's FILES.
 2. Make the smallest COMPLETE change: every place the plan lists, the exact names, messages and signatures the issue gives, the style of the neighbouring code, unchanged behaviour for other inputs. The current code IS wrong: never conclude that nothing needs changing.
 3. Run python3 /tmp/swe/verify.py and act on it, at most 2 rounds: a CLAIM that still fails means fix the code (not the reproduction); SIBLINGS means make the same fix where the same defect is; SPEC GAPS means add what is missing; for REGRESSIONS follow its note.
 4. Stop and reply (text only, under 60 words):
 CHANGED: file function (lines)
-VERIFY: the first line verify.py printed
-Never edit tests, conftest.py, pytest.ini, pyproject.toml, setup.cfg or tox.ini: graders replace test files and such edits fail grading.
+VERIFY: the first line verify printed
+Never edit tests, conftest.py, pytest.ini, pyproject.toml, setup.cfg or tox.ini: graders replace them.
 ```
 
 ### 3.4 `prompts/verifier.md`
 ```
-You are the VERIFIER, stage 4 of 5. The change should already be in /workspace: check it, repair it if needed, submit.
+You are the VERIFIER, stage 4 of 5: check the change in /workspace, repair it if needed, submit.
 
 Issue:
 {problem_description}
@@ -362,23 +418,23 @@ Issue:
 Plan:
 {plan?}
 
-The fixer's notes are the [fixer] message below.
+The fixer's notes are the [fixer] message below; a tool call written there as text never ran.
 
 <EDITFORM>
-Other helpers, each as python3 /tmp/swe/NAME.py: status.py, verify.py, finalize.py, view.py, grep.py, run.py.
-View files only with view.py and run other code only with run.py.
+<HELPERS>
+View files only with python3 /tmp/swe/view.py FILE START END and run other code only with python3 /tmp/swe/run.py --timeout 20 "command".
 <RECOVER>
 <AMNESIA>
 <TIME>
 
-1. python3 /tmp/swe/status.py (the diff and what earlier stages did).
-2. If no source file is changed, make the plan's change yourself with edit.py now, the smallest plausible version.
-3. python3 /tmp/swe/verify.py
+1. Run python3 /tmp/swe/status.py (the diff and what earlier stages did).
+2. If no source file is changed, make the smallest plausible version of the plan's change now.
+3. Run python3 /tmp/swe/verify.py (no flags).
 - GREEN or AMBER: go to step 4.
-- RED: fix what it names with edit.py and run verify.py again; at most 2 repair rounds, none after t=240s.
+- RED: fix what it names and run step 3 again; at most 2 repair rounds, none after t=240s.
 - REGRESSIONS: a test that passed before now fails. If it checks the OLD behaviour the issue asks to change, keep your fix; otherwise fix the regression.
-4. python3 /tmp/swe/finalize.py (cleans the patch, keeps the best checked version). If it says NOT READY, fix what it names and run it again.
-5. Call submit_patch. Then reply with one short sentence. submit_patch is your last tool call.
+4. Run python3 /tmp/swe/finalize.py; it keeps the best checked version. If it says NOT READY, fix what it names and run it again.
+5. Call submit_patch after READY (or at t>=285s), then reply with one short sentence. submit_patch is your last tool call.
 If a helper prints TIME, go straight to step 4.
 ```
 
@@ -386,13 +442,17 @@ If a helper prints TIME, go straight to step 4.
 ```
 You are the SUBMITTER, the last stage. The patch has not been submitted yet.
 
+Issue:
+{problem_description}
+
 Plan (for reference):
 {plan?}
 
-1. python3 /tmp/swe/finalize.py
-2. Only if it says EMPTY: make the plan's FIX with edit.py (the smallest version), then run finalize.py again.
-3. Call submit_patch, then reply with the one word submitted.
+1. Run python3 /tmp/swe/finalize.py
+2. Only if it says EMPTY: make the plan's FIX (the smallest version), then run step 1 again.
+3. Call submit_patch after READY (or at t>=285s), then reply with the one word submitted.
 <EDITFORM>
+<HELPERS>
 <RECOVER>
 ```
 
@@ -405,9 +465,9 @@ description: Repository helpers for this task. Install once with run_skill_scrip
 ---
 # swe-tools
 Install: run_skill_script(file_path="install.py", skill_name="swe-tools")
-Any helper run through run_skill_script also installs all of them. Options work as args, for example args file, start and end for view.py.
+Any helper run through run_skill_script also installs all of them. Options work as args, for example file, start and end.
 - python3 /tmp/swe/locate.py "QUERY"
-- python3 /tmp/swe/grep.py "REGEX" [--tests] [--path DIR] [--max N]
+- python3 /tmp/swe/grep.py "REGEX" [PATH ...] [--tests] [--max N]
 - python3 /tmp/swe/view.py FILE [START END | NAME] | --obj DOTTED.NAME
 - python3 /tmp/swe/edit.py FILE [--lines A-B [--delete] | --insert-after N | --create] <<'EOF' ... EOF
 - python3 /tmp/swe/run.py [--timeout N] "COMMAND"
@@ -493,20 +553,22 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
    the whole checkout (the harness no-op bug F1). The only other workspace writers are `edit.py`, hygiene and checkpoint
    restore (R05).
 10. **Helper output never names a tool** other than `run_command` and `run_skill_script` (R89). The FINAL/TIME hints say
-    "end your stage" or "the stage that can submit should submit now", never the tool name.
+    "end your stage" or "the stage that can submit should submit now", never the tool name. **v10.1 (R89b):** it names a
+    helper only as its full command: "Verifier: run python3 /tmp/swe/finalize.py next.", "then run
+    python3 /tmp/swe/verify.py again.", never "run finalize.py" (race 2: a bare name in 531 of 1,859 helper outputs).
 
 ### 4.1 `_swe_common.py` (owned by `helpers-core`; pinned API)
 
 1. **Constants.**
    ```
-   VERSION = "v10.0";  DOCKER_TMP = os.environ.get("SWE_DOCKER_TMP_FOR_TESTS") or "/tmp";  DISPLAY_SWE = "/tmp/swe"
+   VERSION = "v10.1";  DOCKER_TMP = os.environ.get("SWE_DOCKER_TMP_FOR_TESTS") or "/tmp";  DISPLAY_SWE = "/tmp/swe"
    CAP_S = 300; T_LOCATOR = 75; T_EDIT_NOW = 150; T_FINISH = 210; T_QUICK = 235; T_TIME = 250; T_SAFE = 255
    T_VERIFY_END = 262; T_EVAL_END = 272; T_NO_EVAL = 275; T_NO_RESTORE = 285
    QUICK_PAD = 15
    RUN_DEFAULT = 20; RUN_MAX = 90; VIEW_OBJ = 15; LOCATE_PARSE = 15; ORIGIN_PROBE = 5; VERIFY_TOTAL = 60
    IMPORT_CHECK = 10; CLAIM_TIMEOUT = 10; CLAIMS_TOTAL = 25; PYTEST_SIDE = 40; FINALIZE_QUICK = 12; MAX_PAR = 2
    CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 2800, "edit": 1500, "run": 2500,
-           "verify": 2000, "finalize": 1000, "status": 2200}
+           "verify": 2000, "finalize": 1400, "status": 2200}      # finalize 1,000 -> 1,400 in v10.1 (EDIT TARGET)
    CAP_TOKENS = {k: v // 3 for k, v in CAPS.items()}
    CONTEXT_TOKENS = 4700; CTX_CALL = 30
    ```
@@ -545,17 +607,24 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 6. **`real_budget(default_s)`.** `min(default_s, max(1.0, (CAP_S - clock()) / scale - 4.0))`. Every subprocess deadline
    and every helper-global deadline goes through it. `run_command` gets `max(5, remaining)` (`execution.py:27-40`), so a
    helper always finishes before the harness kills its process group (R13).
-7. **Footer.** `footer()` returns `[t=Ns]` plus at most one hint line, the first that applies:
+7. **Footer.** `footer()` returns `[t=Ns]` plus at most one hint line, the first that applies (v10.1 priority: FINAL >
+   EDIT NOW > TIME > FINISH > CONTEXT > LOCATOR; an empty tree is never told to end its stage):
    - `FINAL: the patch was finalized at t=Ns; nothing more to change. The stage that can submit should submit now; any other stage should reply done.`
      Shown when `state.final_done` is set and the current diff sha equals `state.final_sha`.
-   - `TIME: t>=250s. End your stage now (verifier: run finalize.py next).`
-   - `FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage.`
-   - `CONTEXT: this stage's context is nearly full. Locator: reply with your plan now. Fixer: make any missing edit, then reply with your notes. Verifier: run finalize.py next.`
+   - `EDIT NOW: no source file changed at t=Ns; an empty patch always fails. Locator: reply with your plan now. Other stages: make the smallest plausible version of the plan's change now.`
+     Shown when no source change exists and either t >= `T_EDIT_NOW` or `locator_over()`: the journal holds an edit, a
+     finalize, a restore or a full verify, or the context meter left the locator phase or saw `status.py`. From `T_TIME`
+     on it ends with ` Then run python3 /tmp/swe/finalize.py once.` (race 2: fastapi_14851 read "End your stage now" on an
+     empty tree and timed out; fastapi_15280's verifier read "Other stages: ignore this line").
+   - `TIME: t>=250s. End your stage now; reply in one line, under 30 words (verifier: run python3 /tmp/swe/finalize.py next).`
+     (v10.1: rich_4079's 917-token reply after TIME carried it past the cap.)
+   - `FINISH: t>=210s. Stop exploring; keep the edit you have and end your stage with a short reply.`
+   - `CONTEXT: this stage's context is nearly full. Locator: reply with your plan now. Fixer: make any missing edit, then reply with your notes. Verifier: run python3 /tmp/swe/finalize.py next.`
      Shown when the context meter (below) reaches `CONTEXT_TOKENS` with this call.
-   - `EDIT NOW: no source file changed at t>=150s. Locator: reply with your plan now. Other stages: make the plan's change with edit.py now.`
-     Shown when no source change exists.
    - `LOCATOR: 75s used. Locator: stop and reply with your plan now. Other stages: ignore this line.` Shown when no source
-     change exists and the journal has no `edit` entry with `ok: true`.
+     change exists and the locator stage is not over.
+
+   `emit()` computes the source-change state for every call at t >= `T_LOCATOR` (EDIT NOW outranks FINISH and TIME).
 
    **Token caps and the context meter (review round 1).** `emit()` also caps its output by estimated tokens,
    `est_tokens = ASCII chars / 3 + non-ASCII chars x 2.7`, at `CAP_TOKENS[name]` (and `cap / 3`): the body shrinks first,
@@ -575,9 +644,14 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
    (R14).
 9. **git helpers.**
    - `git(args, timeout=10)`.
-   - `changes()` returns `dict(source, protected, untracked, deleted)` from
+   - `changes(hidden=True)` returns `dict(source, protected, untracked, deleted)` from
      `git diff --name-status -z <baseline>` plus `git ls-files --others --exclude-standard -z`, classified by
-     `is_protected`. No index writes. An untracked `.py` inside a directory is a new module (source). A root-level one
+     `is_protected`. No write to the real index. v10.1: the untracked listing passes `NO_GUARD`
+     (`-c core.excludesFile=/dev/null`), and with `hidden=True` the diff runs on a private copy of the index whose
+     assume-unchanged marks are cleared, so the helpers still see what the submit guard (4.1.17) hides from the patch.
+     That copy costs about 20 ms, so it is skipped while every guarded file keeps the size and mtime a full check found
+     clean (`$SWE/guard_stat.json`; a file found changed is kept as "dirty" until a full check finds it clean, and newly
+     armed flags drop the snapshot). `source_changed()` uses `hidden=False` (the guard hides only protected files). An untracked `.py` inside a directory is a new module (source). A root-level one
      is source only when `root_module_kept()` says so (review round 1). Its name must not look like scratch, must not be
      a stdlib module, and must not name a baseline root entry. The baseline must also track root-level modules other
      than `setup.py`, `conftest.py`, `noxfile.py`, `fabfile.py`, `tasks.py`, `manage.py`, `runtests.py` and
@@ -599,7 +673,8 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 11. **`hygiene_revert()`.**
     - Tracked protected paths that were modified or deleted: `git checkout <baseline> -- <p>`, one call per path.
     - Untracked protected paths: removed.
-    - Returns the list, and the caller prints one line: `reverted test/config edits: a, b`.
+    - Returns the list, and the caller prints one line: `reverted test/config edits: a, b (graders replace test and config files, so a patch never carries them; do not redo this)`
+      (v10.1: fastapi_14077's verifier read a bare "reverted pyproject.toml" as a lost edit and made it again).
     - Called by `edit.py` after every successful write, by `verify.py` step 0, and by `finalize.py` (R22).
 12. **`unrewrite(text)`.** Only when `in_rewriting_sandbox()`: with `root = dirname(TEST_TMPDIR)`, it maps
     `root/tmp` to `/tmp`, `root/workspace` to `/workspace`, `root/venv/bin` to `/usr/local/bin` and `root/wheels` to
@@ -619,16 +694,39 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
     (for `status.py`).
 16. **Repeat notes.** `repeat_note(helper, key)` counts `sha1(helper, key)` in the state and returns the helper's
     third-repeat note, or `''`.
+17. **Submit guard (v10.1, race 2 diagnosis 3).** All hygiene above runs inside a helper call, but the harness takes the
+    patch whenever it likes: `submit_patch` after a native `edit_file` (fastapi_14077 re-edited `pyproject.toml` after
+    finalize), and the fallback diff `git add -N . && git diff --binary _swegemma_baseline` at a timeout, a tool-budget
+    end or a nudge end (fastapi_14258 shipped a root `repro.py`; finalize never ran). `arm_submit_guard()` makes that
+    diff blind to such paths from the first tool call on:
+    - only in a harness workspace (the `_swegemma_baseline` tag exists), idempotent, a few git calls (under 1 s on a
+      3,000-file repository);
+    - `git ls-files -v -z`; every tracked path `_protected_git` flags gets `git update-index --assume-unchanged`
+      (edits, overwrites and deletions of tracked test/config files then never reach `git add` or `git diff <tag>`;
+      `git checkout <baseline> -- p` still restores such a file and keeps its mark);
+    - `<gitdir>/swe_exclude` (inside `.git`, so never in a patch), named by `git config core.excludesFile`: root scratch
+      prefixes in any case (`/[Rr][Ee][Pp][Rr][Oo]*` and scratch, debug, tmp, temp, try, demo), `*.log`, `*.orig`,
+      `*.rej`, `*.bak`, `*.swp`, `.coverage`, vendored `site-packages/`, `_pytest/`, `*.dist-info/`, the protected
+      names, `test_*.py`, `*_test.py`, `*.pth`, `tests/`, `test/`, `/testing/`; then `!/<name>` re-includes for
+      baseline root entries and tracked vendored-named directories a pattern would hide (a tracked `templates/` or
+      `src/_pytest/` keeps shipping new files);
+    - called by `install.py` and at the top of `finalize.py` (a failed install, or a `read-tree` that dropped the marks);
+    - `patch_violations(files)` applies the graders' rules to `[(path, is_new)]` (the harness's
+      `_is_protected_test_or_config_path`, case-insensitive at any depth, plus new scratch or vendored files: KPI 7 and
+      8), and `enforce_patch_rules()` undoes whatever the harness-view patch still carries (a staged scratch file, a
+      new `.py` under a nested `testing/`).
+    `diff_bytes()` keeps no override, so it still equals what `submit_patch` produces (R21).
 
 ### 4.2 `install.py`
 - **CLI.** `run_skill_script(file_path="install.py", skill_name="swe-tools")`, or `python3 /tmp/swe/install.py`. No flags.
 - **Effect.**
   - Copies every `*.py` next to it into each `install_targets()` entry. Each copy is atomic (tmp + `os.replace`, mode
     0644) and skipped when the sha1 is identical.
-  - Writes `VERSION` (`v10.0`) and `t0` (only if absent).
-  - Idempotent. Never touches the workspace.
+  - Writes `VERSION` (`v10.1`) and `t0` (only if absent).
+  - Arms the submit guard (4.1.17): the setup stage's install is the first tool call, before any agent write.
+  - Idempotent. Never touches the workspace files.
 - **Output.** 400 chars or fewer, e.g.
-  `swe-tools v10.0 ready in /tmp/swe (9 helpers). Next: python3 /tmp/swe/locate.py "key words"` plus the footer. The FINAL
+  `swe-tools v10.1 ready in /tmp/swe (9 helpers). Next: python3 /tmp/swe/locate.py "key words"` plus the footer. The FINAL
   footer appears on a restart.
 - **Budget.** 300 ms or less (v9 measured 25 ms) (R07-R09).
 
@@ -684,8 +782,13 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 - **Budget.** 3 s or less on the first call for 3k files, 300 ms or less cached (R32).
 
 ### 4.5 `grep.py`
-- **CLI.** `python3 /tmp/swe/grep.py "REGEX" [--tests] [--path DIR] [--max N]`, with `--max` 40 by default, clamped to
-  1..80. Positional or `--regex`.
+- **CLI.** `python3 /tmp/swe/grep.py "REGEX" [PATH ...] [--tests] [--max N]`, with `--max` 40 by default, clamped to
+  1..80. Positional or `--regex`; `--path DIR` still works. v10.1 (race 2: 74 of 206 calls wrote `grep.py "X"
+  path/file.py`, and the path was folded into the regex): the first positional word is the regex; a later word that
+  names an existing file or directory in the workspace (or one absolute path outside it) is searched; a later word that
+  looks like a path (a `/` or `.py`) but does not exist gets `NOTE: X is not a path in the workspace; searched
+  everywhere.`; any other later word still joins the regex (an unquoted pattern). A path the model names that is a test
+  file or test directory is searched without `--tests`.
 - **Runs** `git grep -n -I -E --no-color -e REGEX -- <path or .>` with a 5 s deadline. Test paths (the `is_protected` test
   rules) are dropped unless `--tests`.
 - **Output.** First line `GREP: N hits in M files (shown K)`. Grouped by file, at most 5 per file, each line cut to
@@ -699,7 +802,8 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 
 ### 4.6 `view.py`
 - **CLI.** `python3 /tmp/swe/view.py FILE [START END | NAME] | --obj DOTTED.NAME`. The skill form is
-  `--file F --start N --end M --name X --obj D`.
+  `--file F --start N --end M --name X --obj D`. v10.1: the `L1191-1433` spans that locate.py and grep.py print are
+  ranges too (`FILE L2-3`, `FILE:L2-3`, `FILE L2 L3`; fastapi_14851 and fastapi_5624 got "no def or class named").
 - **Modes.**
   - Range. `START` and `END` are 1-based and inclusive, clamped to the file.
   - Symbol. `func`, `Class`, `Class.method`, nested classes and async defs, found through `Index.span`. With several
@@ -762,10 +866,13 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
     memory, `compile(src_bytes, path, "exec", dont_inherit=True)`, with no .pyc. A file that did not compile before the
     edit is written with `WARNING: FILE did not compile before this edit either` instead.
   - `REFUSED: <reason from is_protected>` (plus `graders replace test files; this edit would make grading fail; put checks in a reproduction`)
-    or `REFUSED: outside the repository`.
+    or `REFUSED: outside the repository`, or `REFUSED: FILE looks binary (NUL bytes); only text files can be edited.`
   - `NO CHANGE: the new text equals the old text.`
-  - `ALREADY TRIED: this exact edit failed at t=Ns (<reason>). Do something different: python3 /tmp/swe/view.py FILE A B, then edit.py FILE --lines A-B.`
+  - `ALREADY TRIED: this exact edit failed at t=Ns (<reason>). Do something different: python3 /tmp/swe/view.py FILE A B, then python3 /tmp/swe/edit.py FILE --lines A-B.`
     The key is `sha1(file|mode|range|text)` in the journal.
+  - v10.1: `ERROR: the edit ended early: no ======= line and no >>>>>>> REPLACE line arrived, so nothing changed. A line EOF inside the block ends the heredoc and the rest ran as shell commands. Put EOF once, as the last line, and send the whole edit again.`
+    when the text holds a SEARCH marker but no divider and no REPLACE marker anywhere (fastapi_14873 steps 36-37). It
+    does not count as a failed edit.
   - After the third consecutive failure on one file: the numbered region around the last closest window plus the
     `--lines` recipe.
   - `STALE: lines moved by +d since your last view of this region; the same code is now at A'-B'. Re-run with --lines A'-B' or view it again.`
@@ -786,6 +893,8 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
   - `hygiene_revert()`.
   - Journal `{h: "edit", ok, file, mode, start, end, delta}`, and `state.edits += [...]`.
   - A successful edit prints `NEXT: python3 /tmp/swe/verify.py` when the file is a source `.py` file.
+  - v10.1: when the tree then has a source change, it is saved as an unscored `EDITED` checkpoint (`_swe_ckpt.save_edited`,
+    4.10), so a landed edit the model undoes later can still be restored (fastapi_15280).
 - **Budget.** Output 1,500 chars or fewer. p95 150 ms or less on a 5,000-line file (R50).
 
 ### 4.8 `run.py`
@@ -797,7 +906,7 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
   - Line 1 is `exit=N`, or `TIMEOUT after Ns (partial output below). If the issue is about a hang or loop, this may be the bug.`
   - Then `cap(..., 2500)`, with runs of identical lines collapsed to `line (xN)` and the pytest summary line kept.
   - When the output contains `pytest is disabled in this environment`, the note
-    `Test runners are disabled by the harness here: check behaviour with a reproduction (verify.py --repro-only) instead.`
+    `Test runners are disabled by the harness here: check behaviour with a reproduction (python3 /tmp/swe/verify.py --repro-only) instead.`
     is appended.
   - The third identical (command, output sha) appends `NOTE: same command, same output 3 times; change something.`
 - **Budget.** 100 ms or less overhead (R25, R26).
@@ -929,7 +1038,15 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
      `restored checkpoint #k`, plus one line for each thing it undid (`reverted test/config edits: ...`,
      `CLEANED: removed ...`). The sha check in step 5 runs before tidying, so the transaction stays exact.
 - `clean_scratch()`, `shadowed()` and `scratch_note()` live here (moved from `finalize.py` in review round 2), so both
-  restore paths share them.
+  restore paths share them. v10.1: root scratch names match in any letter case (KPI 8 is case-insensitive), and the
+  untracked listings of `clean_scratch()` and `reset_to_baseline()` pass `NO_GUARD`.
+- `save_edited(diff=None)` (v10.1): an unscored `EDITED` checkpoint of a tree with a source change; `edit.py` calls it
+  after every landed edit and `status.py` for every non-empty tree it diffs (which covers `edit_file`). `rank()` puts an
+  unscored entry below every scored one, so `best_against()` is unchanged and `best(None)` (finalize's EMPTY branch, the
+  late guard) takes the latest EDITED tree only when nothing scored exists.
+- `restore()` (v10.1): `reset_to_baseline()` also resets the protected files the submit guard hides, and a restore
+  whose diff sha differs from the checkpoint's is still exact when `git apply --reverse --check` of the checkpoint holds
+  (a checkpoint saved before the guard was armed can hold a file `diff_bytes()` no longer shows).
 - `auto_restore_if_empty()` is used by `late_guard()` and `finalize.py` (R71, R76). Its message stays one line (the
   late guard prefixes a helper's output with it): what `tidy()` undid follows in parentheses,
   `RESTORED checkpoint #k: the tree had no source change at t=Ns. (then reverted test/config edits: ...; CLEANED: removed ...)`.
@@ -958,8 +1075,9 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 - **Full pipeline.** The global deadline is `span()`: `real_budget(VERIFY_TOTAL)` clamped so the run ends by
   `T_VERIFY_END`, but never below `PHASE_MIN` (3 s) while the helper budget allows it (review round 1). Each phase is
   skipped with `UNKNOWN (no time)` when fewer than 3 s remain.
-  0. `hygiene_revert()`, then `changes()`. With no source change: `VERIFY: NO SOURCE CHANGE - make the plan's change with edit.py first.`
-     in under 1 s, and stop.
+  0. `hygiene_revert()`, then `changes()`. With no source change: `VERIFY: NO SOURCE CHANGE - make the plan's change with python3 /tmp/swe/edit.py first.`
+     in under 1 s, and stop. The HYGIENE line carries the reason (`HYGIENE: reverted p (graders replace test and config
+     files, so a patch never carries them; do not redo this)`, v10.1).
   1. Memo. When `sha1(diff_bytes, repro_sha, tests, mode)` equals the last run: print
      `SAME AS LAST RUN (t=Ns): <first line>` plus the last NEXT line. The third identical run adds
      `STOP re-running verify; decide now.` (R63)
@@ -1000,10 +1118,10 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
   NEXT: <verdict-specific line>
   [t=142s]
   ```
-  NEXT lines, fixed per verdict:
-  - GREEN or AMBER: `NEXT: ready. Fixer: reply with your notes. Verifier: run finalize.py.`
-  - RED import: `NEXT: fix the error at FILE:LINE with edit.py, then run verify.py again.`
-  - RED claims: `NEXT: claim n still fails (<sig>). Fix the code, then run verify.py again.`
+  NEXT lines, fixed per verdict (v10.1: helpers named by their full command, R89b):
+  - GREEN or AMBER: `NEXT: ready. Fixer: reply with your notes. Verifier: run python3 /tmp/swe/finalize.py.`
+  - RED import: `NEXT: fix the error at FILE:LINE with python3 /tmp/swe/edit.py, then run python3 /tmp/swe/verify.py again.`
+  - RED claims: `NEXT: claim n still fails (<sig>). Fix the code, then run python3 /tmp/swe/verify.py again.`
   - RED regressions: the sentence above.
 
   The words `undo` and `must fix` never appear (F4, R62).
@@ -1012,6 +1130,7 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 ### 4.12 `finalize.py`
 - **CLI.** `python3 /tmp/swe/finalize.py`, no flags. It always fixes and never only reports.
 - **Steps:**
+  0. v10.1: `arm_submit_guard()` (4.1.17).
   1. `hygiene_revert()`.
   2. Delete untracked scratch:
      - at the repository root: `repro*`, `reproduce*`, `scratch*`, `debug*`, `tmp*`, `temp*`, `try*`, `demo*`,
@@ -1039,15 +1158,21 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
      (section 4.10), `restore` it:
      `RESTORED: checkpoint #k (GREEN, t=131s) replaced the current tree (RED, t=205s).` It is tidied the same way.
   5. Compile every changed `.py`. A failure gives
-     `NOT READY: SYNTAX ERROR FILE:LINE: <msg>. Fix it with edit.py, then run finalize.py again.`
-  6. When no source change remains:
-     `NOT READY: EMPTY - no source change. Make the plan's FIX (smallest plausible version) with edit.py, then run finalize.py again.`
-  7. Otherwise: `READY: n files changed (+a -d): <paths>. Next step: submit the patch.` When the patch is over 200 kB or
+     `NOT READY: SYNTAX ERROR FILE:LINE: <msg>. Fix it with python3 /tmp/swe/edit.py, then run python3 /tmp/swe/finalize.py again.`
+  6. When no source change remains (v10.1, fastapi_14873 submitted an empty patch at 72 s of 176):
+     `NOT READY: EMPTY at t=Ns (Ms left) - no source change. Do not submit an empty patch: it always fails. Make the plan's FIX (smallest plausible version) now, then run python3 /tmp/swe/finalize.py again.`
+     followed by `EDIT TARGET (the code viewed or edited last): FILE lines A-B`, at most 20 numbered lines of the latest
+     undone edit's region (2 lines of context) or else the latest real view of a source `.py` file, and
+     `use: python3 /tmp/swe/edit.py FILE --lines A-B <<'EOF' ... EOF`; nothing when nothing was viewed or the room is gone.
+  7. v10.1: `enforce_patch_rules()` on the harness-view diff (4.1.17); what it undid is one `CLEANED: the patch carried
+     ...; undone` line, and a patch that still carries a violation is `NOT READY: the patch still carries ...`.
+  8. Otherwise: `READY: n files changed (+a -d): <paths>. Next step: submit the patch.` When the patch is over 200 kB or
      adds more than 20 files, `NOTE: large patch (N files, K kB); fine if the issue needs it.` is added (advisory only:
      rich_3930's gold is 308 kB with 26 files). The final diff must encode and `git apply --check` onto a fresh baseline
      copy; otherwise it prints `NOT READY: patch does not apply cleanly: <why>`. Sets `state.final_done`, `final_sha`
      and `final_t`.
-- **Output.** 1,000 chars or fewer. 1.5 s or less without quick evaluation, 15 s or less with it (R72-R77).
+- **Output.** 1,400 chars or fewer (1,000 before v10.1). 1.5 s or less without quick evaluation, 15 s or less with it
+  (R72-R77).
 
 ### 4.13 `status.py`
 - **CLI.** `python3 /tmp/swe/status.py`, no flags.
@@ -1064,7 +1189,11 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
   [t=182s]
   ```
   It works with an empty journal (`JOURNAL: empty`) and with a 2 MB diff. When the tree changed after finalize, it adds
-  `CHANGED AFTER FINALIZE: run finalize.py again.` (R27)
+  `CHANGED AFTER FINALIZE: run python3 /tmp/swe/finalize.py again.` (R27). Protected edits are listed as
+  `PROTECTED (the helpers revert these; graders replace them): ...`. v10.1: a `VIEWED (newest first): FILE A-B, ...`
+  line lists the last 4 source ranges viewed (a stage recovering after compaction gets the plan's files back:
+  rich_4079 lost the plan three times), and a non-empty source tree is saved as an `EDITED` checkpoint (4.10); the
+  repository itself is never changed.
 
 ### 4.14 Output and time budgets
 
@@ -1077,7 +1206,7 @@ summary, `status.py` (repro, journal, diff) and the checkpoints are what is left
 | edit | 1,500 | 700 | - | p95 150 ms on 5k lines; NO MATCH 300 ms |
 | run | 2,500 | 600 | 20 s default, 90 max | command + 100 ms |
 | verify | 2,000 | 900 | 60 s global (ended by T_VERIFY_END; --repro-only by T_EVAL_END), 10 s import, 10 s/claim, 25 s claims, 40 s/pytest side | p90 8 s on local tasks |
-| finalize | 1,000 | 250 | quick evaluation 12 s, ended by T_EVAL_END | 1.5 s / 15 s |
+| finalize | 1,400 | 250 | quick evaluation 12 s, ended by T_EVAL_END | 1.5 s / 15 s |
 | status | 2,200 | 1,200 | - | 500 ms |
 
 All deadlines are clamped by `real_budget`. Output is also capped at `CAP_TOKENS` estimated tokens (section 4.1.7).
@@ -1110,8 +1239,11 @@ harness at all, which is why the caps apply everywhere.
 ### 4.16 Files under `$SWE` (all per task)
 - `VERSION` and `t0`; optionally `clock_scale` (pod only).
 - `state.json`, `state.lock`, `journal.jsonl`, `last.log`.
-- `index_<baseline12>.marshal`, `idx` (temp index), `base/` (worktree), `repro.py`, `claims/`, `rt_orig/`, `rt_cur/`,
-  `j_orig.xml`, `j_cur.xml`, `ckpt/<id>.diff`.
+- `index_<baseline12>.marshal`, `idx` (temp index), `gidx.<pid>` (the unguarded index copy of `changes()`, removed
+  after use), `base/` (worktree), `repro.py`, `claims/`, `rt_orig/`, `rt_cur/`, `j_orig.xml`, `j_cur.xml`,
+  `ckpt/<id>.diff`, `guard_stat.json` (v10.1, the guarded files' clean snapshot).
+- In the workspace's git dir (v10.1): `swe_exclude` (the submit guard's exclude file) and the `core.excludesFile` setting;
+  assume-unchanged marks on protected tracked files in the index.
 
 `state.json` schema:
 ```json
@@ -1277,7 +1409,7 @@ Test files and owners:
 | R15 | `read_stdin()`: TTY gives `''`; an open silent pipe gives `''` within 1.2 s; `/dev/null` gives `''` in under 50 ms; a 1 MB heredoc is read fully; trailing `EOF`, `SWE_EOF`, `EOF.` and lone backtick lines are stripped; CRLF becomes LF | TC::test_read_stdin_never_blocks | CI |
 | R16 | `parse_args`: positional and `--key value` forms give equal results; `--k=v`; booleans bare or valued (`True`, `1`, `yes`, `false`); a bare `--` is ignored; list flags; `--text`; unknown flag gives a one-line `USAGE ERROR` with exit 0 | TC::test_parse_args_forms | CI |
 | R17 | `cap()`: ANSI/OSC stripped, `\r` normalised, head/tail marker names `/tmp/swe/last.log`, the long-line rule, the pytest summary line kept; the full text lands in `$SWE/last.log` | TC::test_cap_and_last_log | CI |
-| R18 | Footer: `[t=Ns]` always; the hint priority FINAL > TIME > FINISH > EDIT NOW > LOCATOR at the 4.1.7 thresholds and conditions (fake-clock matrix); no hint names `submit_patch` or any tool | TC::test_footer_hints_matrix | CI |
+| R18 | Footer: `[t=Ns]` always; the hint priority FINAL > EDIT NOW > TIME > FINISH > CONTEXT > LOCATOR at the 4.1.7 thresholds and conditions (fake-clock matrix, v10.1: EDIT NOW on an empty tree at 215 and 255 s and once the locator stage is over); no hint names `submit_patch` or any tool | TC::test_footer_hints_matrix | CI |
 | R19 | The state is written atomically under flock (20 concurrent writers lose no update); a mismatched `ws` or `baseline` resets state, caches, repro and checkpoints | TC::test_state_atomic_lock_reset | CI |
 | R20 | The `is_protected` table (at least 24 cases), including `pkg/testing/util.py` allowed, `pkg/tests/x.py` protected, `a/b/conftest.py`, `*.pth`, `..`, absolute paths outside ws | TC::test_is_protected[case] | CI |
 | R21 | `changes()` classifies modified, new, deleted, renamed and unicode-named files with no index change (index mtime and sha unchanged); `diff_bytes()` equals `git add -N . && git diff --binary <baseline>` run on a copy, including binary and mode changes | TC::test_changes_and_diff_bytes_match_submit | CI |
@@ -1349,13 +1481,15 @@ Test files and owners:
 | R87 | Brace lint: the only `{...}` in any prompt are `{problem_description}`, `{plan?}` and `{fix_notes?}`; no other brace characters; per stage exactly the set it needs (since review round 2: fixer `{problem_description}` only, verifier `{problem_description}` and `{plan?}`) | TP::test_brace_lint | CI |
 | R88 | 0 backticks in prompts and SKILL.md; every `run_skill_script(` example lists `file_path=` before `skill_name=` | TP::test_no_backticks_template_order | CI |
 | R89 | Named tools: prompts, SKILL.md and every helper string constant (AST) name only tools declared on that stage (registry names plus `run_skill_script`, `load_skill`, `list_skills`, and known hallucinations `git_grep`, `exit_loop`, `bash`); `submit_patch` only in verifier and submitter prompts and in no helper string; graph tools named nowhere in the bundle; the harness prompt rendered by `build_agent_prompt` with graphs on names only tools declared on setup, except `submit_patch` (the documented exception, 0.2) | TP::test_named_tools_declared | CI |
+| R89b | v10.1 helper naming: prompts, SKILL.md, YAML, every helper string (AST, f-strings rebuilt) and every helper output over its states (runtime pass) name a helper only as `python3 /tmp/swe/NAME.py` or the exact `run_skill_script` call, and no `/tmp/swe/X.py` names a missing helper; the hint constants rendered; controls from the race-2 triggers | T101::test_helper_names_only_as_commands, test_helper_output_names_only_as_commands, test_helper_hint_constants_clean, test_helper_output_runtime_clean, test_helper_name_lint_controls | CI |
+| R89c | v10.1 run instructions: no numbered step starts with `python3`; the HELPERS block once per working stage | T101::test_helper_names_only_as_commands | CI |
 | R90 | RECOVER, AMNESIA and TIME are byte-identical in locator, fixer and verifier; RECOVER is also in submitter; EDITFORM is byte-identical in fixer, verifier and submitter; all equal the section 3 text | TP::test_shared_blocks_identical | CI |
 | R91 | Sizes: at most 370 words and 2,600 chars per prompt excluding placeholders; submitter at most 1,300 chars; setup at most 600 chars | TP::test_prompt_sizes | CI |
 | R92 | Every `python3 /tmp/swe/X.py ...` command in prompts and SKILL.md names an existing script and only flags in its `FLAGS`; each rendered example parses with `parse_args` | TP::test_prompt_commands_match_flags | CI |
 | R93 | SKILL.md: `name` equals the directory, description 300 chars or fewer, the install line first, usage lines equal each script's `USAGE` | TP::test_skill_md | CI |
 | R94 | Worst-case stage-start prompt (the 10,095-char problem, every earlier reply at its measured race-1 p90 bounded by `max_output_tokens` (plan 768, notes 244, verifier reply 188 tokens), paid once in the handoff and again for any placeholder, compiled declarations, skill boilerplate, and the harness prompt for setup) is 8,000 tokens or fewer; no stage has a placeholder for its previous stage's `output_key` (review round 2) | TP::test_static_stage_start_budget, TP::test_handoff_paid_once, TT::test_static_stage_render | CI |
 | R95 | Per stage, the call mix the prompts permit, with handoffs at measured sizes (section 6): A typical at 3.06 chars/token with a p95 statement and median handoffs, 12,000 or fewer; B at caps and 2.3 chars/token with p90 handoffs and the context meter's guard, at least 1,000 under 14,336; C the outlier statement guarded, under 14,336; D unguarded at caps and 2.3 with handoffs at `max_output_tokens`, 2,048 or more below 32,768; the double-paid fixer prompt fails B (control) | TP::test_worst_case_stage_budget, TP::test_double_paid_handoff_breaks_the_margin, TP::test_context_meter_does_not_cut_a_normal_first_round, TC::test_context_meter_* | CI |
-| R96 | Protocol rules present: locator (title-to-code-names, `--obj`, runtime truth, CLAIM repro, "fails on original", plan fields); fixer (COMPLETE, never "nothing needs changing", the verify loop with SIBLINGS/SPEC GAPS/REGRESSIONS, the protected-files rule); verifier (status first, the empty rule, 2 repairs and t 240, the old-behaviour rule, finalize, submit last); submitter (finalize, EMPTY, submit); fixer and verifier: view only with view.py and run code only with run.py, so no unmetered output enters the stage (review round 2) | TP::test_prompt_rules_present | CI |
+| R96 | Protocol rules present: locator (title-to-code-names, `--obj`, runtime truth, CLAIM repro, "fails on original", plan fields); fixer (COMPLETE, never "nothing needs changing", the verify loop with SIBLINGS/SPEC GAPS/REGRESSIONS, the protected-files rule); verifier (status first, the empty rule, 2 repairs and t 240, the old-behaviour rule, finalize, submit last); submitter (finalize, EMPTY, submit); fixer and verifier: view only with view.py and run code only with run.py, so no unmetered output enters the stage (review round 2); v10.1: every helper as its full command, the locator's short reproduction and FILES-first reply, the verifier's text-call handoff line and `(no flags)` verify, the submitter's issue text, and submit after READY or at t>=285s (= `T_NO_RESTORE`) | TP::test_prompt_rules_present | CI |
 | R97 | For all 74 tasks: gold and test patch parse and round-trip; gold touches no protected file; every test_patch file is protected; the new-file classification matches; each stage renders with this statement within R94 | TT::test_static_patch_facts[tid] | CI |
 | R98 | `locate.py` recall with the problem statement as the query, on local snapshots: gold file at rank 1 in 21/40 or more, top 3 in 28/40 or more, top 8 in 34/40 or more (target 23/30/35); the 6 known misses xfail non-strict; per task 3 s or less and 1,800 chars or fewer | TT::test_locate_recall + TT::test_locate_budget[tid] | CI |
 | R99 | Every gold hunk applied by `edit.py` (SEARCH/REPLACE with the hunk's old/new lines, and separately `--lines` bottom-up; new files via `--create`) gives files byte-identical to `git apply` (40 local tasks now; baseline 122/122 hunks) | TT::test_gold_hunks_via_edit[tid] | CI |
@@ -1380,6 +1514,15 @@ Test files and owners:
 | R118 | Race-2 KPIs as pre-registered in section 10.3 | TR::test_race_kpis | RACE |
 | R119 | Linux parity: `V10_ONLY=1 scripts/linux_test.sh` runs all `tests/test_v10_*` in `python:3.12-slim` with `--cpus 2 --memory 4g`, `TMPDIR` unset and `TEST_TMPDIR=/tmp`, and they pass | TR::test_linux_parity_script (runs the script when Docker is available) | NIGHTLY |
 | R120 | The `no_orphans` fixture detects a deliberately leaked `sleep` (self-test) and is autouse in every v10 test module | TC::test_no_orphans_fixture_detects | CI |
+| R121 | v10.1: over t = 0..300 with no source change no hint says "keep the edit you have" or "End your stage"; EDIT NOW from 150 s (with the finalize command from 250 s) even over a full context meter | T101::test_empty_tree_never_told_to_end_its_stage | CI |
+| R122 | v10.1 grep.py positional paths: a trailing existing file, `.`, a directory, two paths, `--tests` after a path, an absolute path outside the workspace, a missing path (NOTE), a quoted and an unquoted multi-word regex, a lone `setup.py`, a named test file | T101::test_grep_positional_paths | CI |
+| R123 | v10.1 EDITED checkpoints: every landed edit and every non-empty tree status.py sees; finalize's EMPTY branch restores the latest; refused at t >= 285; a scored checkpoint outranks an EDITED one | T101::test_edit_checkpoints_every_landed_edit, test_status_checkpoints_a_native_edit, test_scored_checkpoint_beats_edited | CI |
+| R124 | v10.1 finalize EMPTY: the time left, "an empty patch always fails", EDIT TARGET (latest undone edit, else latest source view; never a test file; none without a view); output 1,400 chars or fewer | T101::test_finalize_empty_text_and_edit_target | CI |
+| R125 | v10.1 edit.py early EOF: named, nothing changed, not counted; a missing divider alone keeps the old message; EDITFORM states the EOF rule | T101::test_edit_early_eof_message | CI |
+| R126 | v10.1 submit guard: protected files overwritten, appended or deleted after READY, and every scratch, vendored and new test/config sample without any finalize, stay out of the harness's exact submit and fallback commands; real changes under matching tracked dirs, a tracked root debug.py, new modules and a unicode path still ship | T101::test_guard_post_finalize_native_edit, test_guard_scratch_without_finalize, test_guard_keeps_real_changes, TFL::test_flow[g], TFL::test_flow[h] | CI |
+| R127 | v10.1 guard, helpers' view and upkeep: changes() lists hidden edits, verify reverts them with the reason and the mark survives, finalize still cleans scratch, the base-tree copy ignores guard-matched files; arming is idempotent, under 1 s on 3,000 files, repaired by finalize after a read-tree, never done without the baseline tag; finalize undoes what the graders' rules forbid (the same rules as replay_l4 KPI 7/8) | T101::test_guard_helpers_view_unchanged, test_guard_fast_path_never_hides_a_dirty_file, test_guard_idempotent_fast_and_rearmed, test_guard_only_in_a_harness_workspace, test_finalize_enforces_patch_rules | CI |
+| R128 | v10.1 view.py L-ranges (`L2-3`, `FILE:L2-3`, `L2 L3`) and status.py's VIEWED line (newest first, 4 at most, no test files) | T101::test_view_accepts_l_ranges, test_status_lists_viewed_ranges | CI |
+| R129 | v10.1 replay_l4 diagnostic KPIs: each counter on a synthetic trace; on race 2 round 1 they reproduce the diagnoses (1 parsed and 29 unparsed invented tool names, 9/69 verifier first turns, 6 helpers and 2 tools typed into the shell, 11 locator replies at 768, 65 grep misses, the KPI 7/8 mechanisms, 3 tasks past cap + 10 s over all ids) and v9_eog's zeros | T101::test_replay_diag_kpis_unit, test_replay_diag_reproduces_race2_round1 | CI (REPLAY data when present) |
 
 ### 7.1 v9 bugs and their regression tests
 
@@ -1722,3 +1865,14 @@ Other test modules import these; they never edit `repo.py`.
   cost model already charges as uncached.
 - **Whether the gemma4 template sorts tool parameters** (C's N1 mechanism) is inferred from traces, not read in the
   template source. R88 is harmless either way.
+- **v10.1, not applied (measure first):**
+  - The locator's `max_output_tokens` 768 -> 1,536 (diag 2 P2). With the measured p90 plan of 1,087 tokens entering
+    every fixer call, R95 B misses its 1,000-token margin, and `CONTEXT_TOKENS` cannot drop far enough without cutting a
+    normal first fixer round. The prompt now asks for a short reproduction and a reply that starts with `FILES:`.
+  - `LoopAgent(max_iterations: 3)` around the submitter (diag 2 P6): it changes R78's tree; the harness nudge already
+    restarts the pipeline with the tree and `/tmp/swe` intact when the last stage ends without a submit.
+  - The context-meter reset at the fixer's start and CONTEXT enforcement in the locator (diag 4 5.3): a `status.py`
+    first step adds about 460 estimated tokens to a normal first fixer round, past `CONTEXT_TOKENS`.
+  - run.py heredoc mode, a per-stage call budget, "first edit within 5 tool calls" (diag 2 P8, diag 4 5.2), the
+    `/tmp/swe/run_command.py` alias (diag 4 5.6) and finalize's quick-verdict line (diag 4 5.7): behaviour or
+    measurement changes that need their own arm.

@@ -10,13 +10,35 @@ for _n in [n for n, m in list(sys.modules.items()) if n.split(".")[0] in getattr
 import _swe_common as C
 
 # What the earlier stages did, for a stage whose context was shortened: task time, repro and checkpoint summary, the
-# journal tail, the diffstat and a bounded diff of the source files. Read-only. Any argument is ignored.
+# journal tail, the diffstat and a bounded diff of the source files. It changes nothing in the repository (v10.1: it
+# stores a non-empty source tree as an unscored checkpoint under $SWE). Any argument is ignored.
 
 NAME = "status"
 USAGE = "python3 /tmp/swe/status.py"
 FLAGS = {}
 DIFF_CAP = 1600
 JOURNAL_N = 8
+VIEWED_N = 4
+
+
+def viewed(st):
+    """v10.1 (race 2, rich_4079: three compactions, each losing the locator's plan): the last source ranges viewed,
+    newest first (real views only), so a stage recovering after compaction gets the plan's files back."""
+    items = []
+    for f, lst in (st.get("views") or {}).items():
+        for v in lst if isinstance(lst, list) else []:
+            if isinstance(v, list) and len(v) == 3 and all(isinstance(x, (int, float)) for x in v) and \
+                    not C.is_protected(f):
+                items.append((float(v[2]), f, int(v[0]), int(v[1])))
+    seen, out = set(), []
+    for t, f, a, b in sorted(items, reverse=True):
+        if (f, a, b) in seen:
+            continue
+        seen.add((f, a, b))
+        out.append("%s %d-%d" % (f, a, b))
+        if len(out) >= VIEWED_N:
+            break
+    return C._short("VIEWED (newest first): " + ", ".join(out), 300) if out else ""
 
 
 def repro_summary(st):
@@ -133,7 +155,10 @@ def main():
     if st.get("final_done") and st.get("final_sha"):
         sha = C.diff_sha()
         if sha != st.get("final_sha"):
-            lines.append("CHANGED AFTER FINALIZE: run finalize.py again.")
+            lines.append("CHANGED AFTER FINALIZE: run python3 /tmp/swe/finalize.py again.")
+    vw = viewed(st)
+    if vw:
+        lines.append(vw)
     ent = C.jtail(JOURNAL_N)
     if ent:
         lines.append("JOURNAL (last %d):" % len(ent))
@@ -151,8 +176,17 @@ def main():
                                        "--no-renames", C.baseline(), "--"] + paths, env=env)
             if rc != 0:
                 diff = ""
+            # v10.1: a tree with a source change (also one made with the harness's own edit tools) is kept as an
+            # unscored checkpoint, so finalize and the late guard can bring it back if it is undone later
+            rc2, whole, _ = C.git_run(["diff", "--binary", C.baseline()], timeout=30, env=env, quotepath_off=False)
+        if rc2 == 0 and whole:
+            try:
+                import _swe_ckpt as K
+                K.save_edited(whole)
+            except Exception:
+                pass
     if ch["protected"]:
-        lines.append(C._short("PROTECTED (reverted by edit.py, verify.py and finalize.py): " +
+        lines.append(C._short("PROTECTED (the helpers revert these; graders replace them): " +
                               ", ".join(ch["protected"][:6]), 300))
     scratch = [p for p in ch["untracked"] if p not in ch["source"]]
     if scratch:
