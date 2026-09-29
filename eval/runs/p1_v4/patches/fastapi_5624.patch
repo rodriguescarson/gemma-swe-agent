@@ -1,0 +1,76 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 1e92c1ba..02576b32 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -275,7 +275,7 @@ def get_dependant(
+                     f'The dependency "{dependant.call.__name__}" has a scope of '
+                     '"request", it cannot depend on dependencies with scope "function".'
+                 )
+-            use_security_scopes = security_scopes or []
++            use_security_scopes = list(security_scopes) if security_scopes else []
+             if isinstance(param_details.depends, params.Security):
+                 if param_details.depends.scopes:
+                     use_security_scopes.extend(param_details.depends.scopes)
+diff --git a/test_scope_propagation.py b/test_scope_propagation.py
+new file mode 100644
+index 00000000..e2d6dc6f
+--- /dev/null
++++ b/test_scope_propagation.py
+@@ -0,0 +1,57 @@
++import pytest
++from fastapi import FastAPI, Depends, Security
++from fastapi.dependencies.utils import get_dependant
++
++# Mocking a security dependency
++async def security_dep():
++    return True
++
++# These are the dependencies that use Security
++async def sub_dep_1(sec=Security(security_dep, scopes=["scope1"])):
++    return sec
++
++async def sub_dep_2(sec=Security(security_dep, scopes=["scope2"])):
++    return sec
++
++# root_dep depends on sub_dep_1 and sub_dep_2
++async def root_dep(d1=Depends(sub_dep_1), d2=Depends(sub_dep_2)):
++    return d1, d2
++
++def test_hierarchical_security_scope_propagation():
++    # Root should not have security scopes, but its children should
++    root_dependant = get_dependant(
++        path="/", 
++        call=root_dep, 
++        name="root", 
++        security_scopes=[]
++    )
++    
++    # Find the dependants for sub_dep_1 and sub_dep_2
++    # get_dependant returns a Dependant object. Its .dependencies list contains the sub-dependants.
++    d1_dependant = next(d for d in root_dependant.dependencies if d.call == sub_dep_1)
++    d2_dependant = next(d for d in root_dependant.dependencies if d.call == sub_dep_2)
++    
++    # The sub_dep_1 should have its own scope "scope1"
++    assert d1_dependant.security_scopes == ["scope1"]
++    # The sub_dep_2 should have its own scope "scope2"
++    assert d2_dependant.security_scopes == ["scope2"]
++    
++    # Now test with a parent that has scopes
++    # This mimics a route that is protected by a Security scope
++    root_dependant_with_scopes = get_dependant(
++        path="/", 
++        call=root_dep, 
++        name="root_with_scopes", 
++        security_scopes=["parent_scope"]
++    )
++    
++    d1_with_scopes = next(d for d in root_dependant_with_scopes.dependencies if d.call == sub_dep_1)
++    d2_with_scopes = next(d for d in root_dependant_with_scopes.dependencies if d.call == sub_dep_2)
++    
++    # sub_dep_1 should have combined scopes
++    assert d1_with_scopes.security_scopes == ["parent_scope", "scope1"]
++    # sub_dep_2 should have combined scopes
++    assert d2_with_scopes.security_scopes == ["parent_scope", "scope2"]
++
++if __name__ == "__main__":
++    pytest.main([__file__])

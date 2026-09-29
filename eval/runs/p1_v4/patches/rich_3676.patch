@@ -1,0 +1,127 @@
+diff --git a/rich/traceback.py b/rich/traceback.py
+index 3bf5baa7..b3c6e3c8 100644
+--- a/rich/traceback.py
++++ b/rich/traceback.py
+@@ -200,6 +200,7 @@ class Stack:
+     syntax_error: Optional[_SyntaxError] = None
+     is_cause: bool = False
+     frames: List[Frame] = field(default_factory=list)
++    notes: Optional[str] = None
+ 
+ 
+ @dataclass
+@@ -415,6 +416,7 @@ class Traceback:
+                 exc_type=safe_str(exc_type.__name__),
+                 exc_value=safe_str(exc_value),
+                 is_cause=is_cause,
++                notes=getattr(exc_value, "__notes__", None),
+             )
+ 
+             if isinstance(exc_value, SyntaxError):
+@@ -591,6 +593,14 @@ class Traceback:
+                     (f"{stack.exc_type}: ", "traceback.exc_type"),
+                     highlighter(stack.exc_value),
+                 )
++                if stack.notes:
++                    notes = stack.notes
++                    if isinstance(notes, list):
++                        notes = "\\n".join(notes)
++                    yield Text.assemble(
++                        ("\nNote: ", "traceback.exc_type"),
++                        highlighter(notes),
++                    )
+             else:
+                 yield Text.assemble((f"{stack.exc_type}", "traceback.exc_type"))
+ 
+diff --git a/test_notes.py b/test_notes.py
+new file mode 100644
+index 00000000..66da273e
+--- /dev/null
++++ b/test_notes.py
+@@ -0,0 +1,43 @@
++import pytest
++from rich.traceback import Traceback
++from rich.console import Console
++from io import StringIO
++
++def test_exception_notes():
++    console = Console(file=StringIO(), force_terminal=True)
++    try:
++        try:
++            raise ValueError("Original Error")
++        except ValueError as e:
++            e.add_note("Note 1: This is a note")
++            raise e
++    except ValueError:
++        import sys
++        exc_type, exc_value, tb = sys.exc_info()
++        tb_rich = Traceback.from_exception(exc_type, exc_value, tb)
++        console.print(tb_rich)
++    
++    output = console.file.getvalue()
++    assert "Note 1: This is a note" in output
++
++def test_exception_notes_chaining():
++    console = Console(file=StringIO(), force_terminal=True)
++    try:
++        try:
++            raise TypeError("First Error")
++        except TypeError as e1:
++                e1.add_note("Note 1")
++                try:
++                    raise ValueError("Second Error")
++                except ValueError as e2:
++                    e2.add_note("Note 2")
++                    raise e2 from e1
++    except ValueError:
++        import sys
++        exc_type, exc_value, tb = sys.exc_info()
++        tb_rich = Traceback.from_exception(exc_type, exc_value, tb)
++        console.print(tb_rich)
++    
++    output = console.file.getvalue()
++    assert "Note 1" in output
++    assert "Note 2" in output
+diff --git a/test_notes_verify.py b/test_notes_verify.py
+new file mode 100644
+index 00000000..1294fde5
+--- /dev/null
++++ b/test_notes_verify.py
+@@ -0,0 +1,37 @@
++import sys
++from rich.console import Console
++from rich.traceback import Traceback
++
++def test_exception_notes():
++    console = Console(record=True)
++    try:
++        try:
++            raise ValueError("Main error")
++        except ValueError as e:
++            # Python 3.11+ feature: Exception.__notes__
++            if hasattr(e, "__notes__"):
++                e.__notes__ = "This is a note"
++            else:
++                # For older versions, we can't easily test this
++                # but the code uses getattr(..., None)
++                pass
++            raise e
++    except ValueError:
++        console.print(Traceback())
++
++    output = console.export_text()
++    print(f"Output:\n{output}")
++    if sys.version_info >= (3, 11):
++        assert "Note: This is a note" in output
++    print("Test passed!")
++
++if __name__ == "__main__":
++    try:
++        test_exception_notes()
++        print("Verification successful!")
++    except AssertionError as e:
++        print(f"Verification failed: {e}")
++        sys.exit(1)
++    except Exception as e:
++        print(f"An unexpected error occurred: {e}")
++        sys.exit(1)

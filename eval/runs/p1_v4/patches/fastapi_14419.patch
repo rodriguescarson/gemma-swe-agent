@@ -1,0 +1,114 @@
+diff --git a/fastapi/dependencies/utils.py b/fastapi/dependencies/utils.py
+index 45353835..25c2aece 100644
+--- a/fastapi/dependencies/utils.py
++++ b/fastapi/dependencies/utils.py
+@@ -275,7 +275,7 @@ def get_dependant(
+                     f'The dependency "{dependant.call.__name__}" has a scope of '
+                     '"request", it cannot depend on dependencies with scope "function".'
+                 )
+-            use_security_scopes = security_scopes or []
++            use_security_scopes = list(security_scopes or [])
+             if isinstance(param_details.depends, params.Security):
+                 if param_details.depends.scopes:
+                     use_security_scopes = use_security_scopes + list(
+diff --git a/tests/test_cache_scopes_propagation.py b/tests/test_cache_scopes_propagation.py
+new file mode 100644
+index 00000000..2d94ccac
+--- /dev/null
++++ b/tests/test_cache_scopes_propagation.py
+@@ -0,0 +1,95 @@
++
++import pytest
++from fastapi import FastAPI, Depends, Security
++from fastapi.security import OAuth2PasswordBearer
++from fastapi.testclient import TestClient
++from unittest.mock import Mock
++
++# Global mock for the dependency
++dep_no_scopes_mock = Mock(return_value="result")
++
++async def dep_no_scopes():
++    return dep_no_scopes_mock()
++
++async def dep_parent(child=Depends(dep_no_scopes)):
++    return child
++
++app = FastAPI()
++oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
++
++@app.get("/test1")
++async def test1(dep=Security(dep_parent, scopes=["scope1"])):
++    return {"dep": dep}
++
++@app.get("/test2")
++async def test2(dep=Security(dep_parent, scopes=["scope2"])):
++    return {"dep": dep}
++
++@app.get("/test3")
++async def test3(dep=Depends(dep_parent)):
++    return {"dep": dep}
++
++def test_cache_scopes_propagation():
++    client = TestClient(app)
++    dep_no_scopes_mock.reset_mock()
++
++    # Request 1: scope1
++    client.get("/test1", headers={"Authorization": "Bearer token"})
++    # Request 2: scope1 (should be cached)
++    client.get("/test1", headers={"Authorization": "Bearer token"})
++    
++    # Request 3: scope2
++    client.get("/test2", headers={"Authorization": "Bearer token"})
++    # Request 4: scope2 (should be cached)
++    client.get("/test2", headers={"Authorization": "Bearer token"})
++    
++    # Request 5: no scope
++    client.get("/test3", headers={"Authorization": "Bearer token"})
++    # Request 6: no scope (should be cached)
++    client.get("/test3", headers={"Authorization": "Bearer token"})
++
++    # If caching is working and scopes are propagated:
++    # scope1 call: 1
++    # scope2 call: 1
++    # no scope call: 1
++    # Total: 3 calls
++    
++    # If scopes are NOT propagated to dep_no_scopes, it might only be called once total
++    # (if it's cached by function only), or it might be called every time if NOT cached.
++    
++    assert dep_no_scopes_mock.call_count == 3
++
++def test_cache_scopes_propagation_nested():
++    # More nested case
++    # dep_a (Security scope1) -> dep_b (Depends) -> dep_c (Depends)
++    # dep_a (Security scope2) -> dep_b (Depends) -> dep_c (Depends)
++    
++    app_nested = FastAPI()
++    counter = Mock(return_value="res")
++    
++    async def dep_c():
++        return counter()
++    
++    async def dep_b(c=Depends(dep_c)):
++        return c
++    
++    async def dep_a(b=Depends(dep_b)):
++        return b
++    
++    @app_nested.get("/n1")
++    async def n1(d=Security(dep_a, scopes=["s1"])):
++        return {"d": d}
++    
++    @app_nested.get("/n2")
++    async def n2(d=Security(dep_a, scopes=["s2"])):
++        return {"d": d}
++    
++    client = TestClient(app_nested)
++    counter.reset_mock()
++    
++    client.get("/n1", headers={"Authorization": "Bearer t"})
++    client.get("/n1", headers={"Authorization": "Bearer t"})
++    client.get("/n2", headers={"Authorization": "Bearer t"})
++    client.get("/n2", headers={"Authorization": "Bearer t"})
++    
++    assert counter.call_count == 2

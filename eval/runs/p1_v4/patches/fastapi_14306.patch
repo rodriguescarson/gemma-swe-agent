@@ -1,0 +1,280 @@
+diff --git a/fastapi/exceptions.py b/fastapi/exceptions.py
+index 0620428b..e100d474 100644
+--- a/fastapi/exceptions.py
++++ b/fastapi/exceptions.py
+@@ -155,30 +155,52 @@ class DependencyScopeError(FastAPIError):
+ 
+ 
+ class ValidationException(Exception):
+-    def __init__(self, errors: Sequence[Any]) -> None:
++    def __init__(self, errors: Sequence[Any], *, endpoint_context: Optional[str] = None) -> None:
+         self._errors = errors
++        self.endpoint_context = endpoint_context
+ 
+     def errors(self) -> Sequence[Any]:
+         return self._errors
+ 
++    def __str__(self) -> str:
++        message = f"{len(self._errors)} validation error(s):\n"
++        for err in self._errors:
++            message += f"  {err}\n"
++        if self.endpoint_context:
++            message += f"\n{self.endpoint_context}\n"
++        return message
++
+ 
+ class RequestValidationError(ValidationException):
+-    def __init__(self, errors: Sequence[Any], *, body: Any = None) -> None:
+-        super().__init__(errors)
++    def __init__(
++        self,
++        errors: Sequence[Any],
++        *,
++        body: Any = None,
++        endpoint_context: Optional[str] = None,
++    ) -> None:
++        super().__init__(errors, endpoint_context=endpoint_context)
+         self.body = body
+ 
+ 
+ class WebSocketRequestValidationError(ValidationException):
+-    pass
++    def __init__(
++        self,
++        errors: Sequence[Any],
++        *,
++        endpoint_context: Optional[str] = None,
++    ) -> None:
++        super().__init__(errors, endpoint_context=endpoint_context)
+ 
+ 
+ class ResponseValidationError(ValidationException):
+-    def __init__(self, errors: Sequence[Any], *, body: Any = None) -> None:
+-        super().__init__(errors)
++    def __init__(
++        self,
++        errors: Sequence[Any],
++        *,
++        body: Any = None,
++        endpoint_context: Optional[str] = None,
++    ) -> None:
++        super().__init__(errors, endpoint_context=endpoint_context)
+         self.body = body
+ 
+-    def __str__(self) -> str:
+-        message = f"{len(self._errors)} validation errors:\n"
+-        for err in self._errors:
+-            message += f"  {err}\n"
+-        return message
+diff --git a/fastapi/routing.py b/fastapi/routing.py
+index c10175b1..7b1f97b2 100644
+--- a/fastapi/routing.py
++++ b/fastapi/routing.py
+@@ -23,6 +23,45 @@ from typing import (
+     Union,
+ )
+ 
++_ENDPOINT_CONTEXT_CACHE: Dict[Any, str] = {}
++
++
++def get_endpoint_context(dependant: Dependant, scope: Scope) -> str:
++    endpoint = dependant.call
++    if endpoint in _ENDPOINT_CONTEXT_CACHE:
++        return _ENDPOINT_CONTEXT_CACHE[endpoint]
++
++    try:
++        frame = inspect.getframeinfo(endpoint)
++        filepath = frame.filename
++        line_number = frame.lineno
++        function_name = endpoint.__name__
++        
++        # Try to get the route and method
++        method = \"UNKNOWN\"
++        path = \"UNKNOWN\"
++        
++        # In Starlette, scope['path'] is the request path. 
++        # But we want the route pattern (e.g. /users/{user_id})
++        # The route is usually available in scope['route'] if matched
++        route = scope.get(\"route\")
++        if route:
++            path = route.path
++            # The method is in scope['method']
++            method = scope.get(\"method\", \"UNKNOWN\")
++        
++        # Special case for WebSockets
++        if scope.get(\"type\") == \"websocket\":
++            method = \"WS\"
++            
++        context = f'File \"{filepath}\", line {line_number}, in {function_name}\\n    {method} {path}'
++    except Exception:
++        context = \"Unknown endpoint context\"
++
++    _ENDPOINT_CONTEXT_CACHE[endpoint] = context
++    return context
++
++
+ from annotated_doc import Doc
+ from fastapi import params, temp_pydantic_v1_params
+ from fastapi._compat import (
+@@ -223,7 +262,9 @@ async def serialize_response(
+     exclude_defaults: bool = False,
+     exclude_none: bool = False,
+     is_coroutine: bool = True,
++    endpoint_context: Optional[str] = None,
+ ) -> Any:
++
+     if field:
+         errors = []
+         if not hasattr(field, "serialize"):
+@@ -246,9 +287,13 @@ async def serialize_response(
+             errors.append(errors_)
+         if errors:
+             raise ResponseValidationError(
+-                errors=_normalize_errors(errors), body=response_content
++                errors=_normalize_errors(errors), 
++                body=response_content, 
++                endpoint_context=endpoint_context
+             )
+ 
++
++
+         if hasattr(field, "serialize"):
+             return field.serialize(
+                 value,
+@@ -355,8 +400,10 @@ def get_request_handler(
+                     }
+                 ],
+                 body=e.doc,
++                endpoint_context=get_endpoint_context(dependant, request.scope),
+             )
+             raise validation_error from e
++
+         except HTTPException:
+             # If a middleware raises an HTTPException, it should be raised again
+             raise
+@@ -414,17 +461,20 @@ def get_request_handler(
+                     exclude_defaults=response_model_exclude_defaults,
+                     exclude_none=response_model_exclude_none,
+                     is_coroutine=is_coroutine,
++                    endpoint_context=get_endpoint_context(dependant, request.scope),
+                 )
++
+                 response = actual_response_class(content, **response_args)
+                 if not is_body_allowed_for_status_code(response.status_code):
+                     response.body = b""
+                 response.headers.raw.extend(solved_result.response.headers.raw)
+         if errors:
+             validation_error = RequestValidationError(
+-                _normalize_errors(errors), body=body
++                _normalize_errors(errors), body=body, endpoint_context=get_endpoint_context(dependant, request.scope)
+             )
+             raise validation_error
+ 
++
+         # Return response
+         assert response
+         return response
+@@ -451,8 +501,10 @@ def get_websocket_app(
+         )
+         if solved_result.errors:
+             raise WebSocketRequestValidationError(
+-                _normalize_errors(solved_result.errors)
++                _normalize_errors(solved_result.errors),
++                endpoint_context=get_endpoint_context(dependant, websocket.scope),
+             )
++
+         assert dependant.call is not None, "dependant.call must be a function"
+         await dependant.call(**solved_result.values)
+ 
+diff --git a/tests/test_validation_error_context.py b/tests/test_validation_error_context.py
+new file mode 100644
+index 00000000..a1db2030
+--- /dev/null
++++ b/tests/test_validation_error_context.py
+@@ -0,0 +1,86 @@
++import pytest
++from fastapi import FastAPI
++from fastapi.testclient import TestClient
++from fastapi.exceptions import RequestValidationError, ResponseValidationError, WebSocketRequestValidationError
++from pydantic import BaseModel
++from fastapi import WebSocket
++
++app = FastAPI()
++
++class Item(BaseModel):
++    name: str
++    price: float
++
++@app.get("/items/{item_id}")
++async def read_item(item_id: int):
++    return {"item_id": item_id}
++
++@app.post("/items_response/", response_model=Item)
++async def create_item_response(item: Item):
++    return {"name": "Widget"} # Missing 'price'
++
++@app.websocket("/ws/{item_id}")
++async def websocket_endpoint(websocket: WebSocket, item_id: int):
++    await websocket.accept()
++    await websocket.send_text(f"Hello {item_id}")
++
++client = TestClient(app)
++
++def test_validation_exception_str():
++    errors = [{"type": "missing", "loc": ("body", "name"), "msg": "Field required", "input": None}]
++    context = 'File "test.py", line 10, in my_func\nGET /test'
++    
++    rv = RequestValidationError(errors=errors, endpoint_context=context)
++    assert "1 validation error(s):" in str(rv)
++    assert context in str(rv)
++    
++    ov = ResponseValidationError(errors=errors, endpoint_context=context)
++    assert "1 validation error(s):" in str(ov)
++    assert context in str(ov)
++    
++    wv = WebSocketRequestValidationError(errors=errors, endpoint_context=context)
++    assert "1 validation error(s):" in str(wv)
++    assert context in str(wv)
++
++def test_routing_context_extraction():
++    from fastapi.routing import get_endpoint_context
++    
++    # Mock a dependant and scope
++    class MockDependant:
++        def __init__(self, call):
++            self.call = call
++    
++    def my_endpoint():
++        pass
++        
++    dependant = MockDependant(my_endpoint)
++    scope = {
++        "type": "http",
++        "method": "GET",
++        "route": type('Route', (), {'path': '/test-route'})(),
++    }
++    
++    context = get_endpoint_context(dependant, scope)
++    assert 'File' in context
++    assert 'line' in context
++    assert 'my_endpoint' in context
++    assert 'GET /test-route' in context
++
++def test_websocket_context_extraction():
++    from fastapi.routing import get_endpoint_context
++    
++    class MockDependant:
++        def __init__(self, call):
++            self.call = call
++    
++    def my_websocket():
++        pass
++        
++    dependant = MockDependant(my_websocket)
++    scope = {
++        "type": "websocket",
++        "route": type('Route', (), {'path': '/ws-route'})(),
++    }
++    
++    context = get_endpoint_context(dependant, scope)
++    assert 'WS /ws-route' in context
