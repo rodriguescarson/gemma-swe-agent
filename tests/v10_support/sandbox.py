@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-BUNDLE = ROOT / "submissions" / "v10"
+BUNDLE = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10")   # G4_BUNDLE: run the v10 suite on a variant arm
 SKILL_DIR = BUNDLE / "skills" / "swe-tools"
 SCRIPTS = SKILL_DIR / "scripts"
 HELPERS = ("install", "locate", "grep", "view", "edit", "run", "verify", "finalize", "status")

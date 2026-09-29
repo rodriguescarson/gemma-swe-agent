@@ -7,7 +7,7 @@ import hashlib, json, os, pathlib, re, shutil, subprocess, sys, time
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = ROOT / "submissions/v10/skills/swe-tools/scripts"
+SRC = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10") / "skills/swe-tools/scripts"
 PY = sys.executable
 VBIN = str(pathlib.Path(sys.executable).parent)
 MODS = ("_swe_common", "_swe_gate", "_swe_ckpt", "_swe_index")

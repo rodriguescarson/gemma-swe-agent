@@ -6,6 +6,8 @@
 # Docker-backend path layout for real. The harness wheels (harness/wheels) are installed so the real-sandbox and
 # mock-LLM flow tests run too (needs network once for their PyPI deps; V10_HARNESS=0 skips it and those tests skip).
 # Big read-only inputs (data/, eval/race1, eval/kaggle) are symlinked, not copied. G4_NIGHTLY is forwarded.
+# G4_BUNDLE (2026-09-29) is forwarded too, so a make_variant arm runs the v10 suite on Linux
+# (G4_BUNDLE=submissions/v10_1_sweep V10_ONLY=1 scripts/linux_test.sh); tests/test_make_variant_v10.py always runs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -26,14 +28,14 @@ if [ "${V10_HARNESS:-1}" = 1 ]; then
   pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo "WARN harness wheels not installed: sandbox/flow tests will skip"
 fi
 git config --global user.email a@b; git config --global user.name a
-echo "LINUX_V10 TMPDIR=${TMPDIR-unset} TEST_TMPDIR=${TEST_TMPDIR-unset} nproc=$(nproc) G4_NIGHTLY=${G4_NIGHTLY-}"
-PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests/test_v10_*.py -rfE > /tmp/v10_pytest.log 2>&1
+echo "LINUX_V10 TMPDIR=${TMPDIR-unset} TEST_TMPDIR=${TEST_TMPDIR-unset} nproc=$(nproc) G4_NIGHTLY=${G4_NIGHTLY-} G4_BUNDLE=${G4_BUNDLE-}"
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests/test_v10_*.py tests/test_make_variant_v10.py -rfE > /tmp/v10_pytest.log 2>&1
 rc=$?
 grep -E "^(FAILED|ERROR) " /tmp/v10_pytest.log | cut -c1-300 | head -60
 tail -1 /tmp/v10_pytest.log
 exit $rc
 SH
-  exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" \
+  exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
     -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp \
     python:3.12-slim bash -c "$V10_SCRIPT"
 fi

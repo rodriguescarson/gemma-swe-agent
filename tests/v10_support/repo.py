@@ -23,7 +23,7 @@ import uuid
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-BUNDLE = ROOT / "submissions" / "v10"
+BUNDLE = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10")   # G4_BUNDLE: run the v10 suite on a variant arm
 SCRIPTS_SRC = BUNDLE / "skills" / "swe-tools" / "scripts"
 PY = sys.executable
 TAG = "_swegemma_baseline"

@@ -7,7 +7,7 @@ import hashlib, json, os, pathlib, re, shutil, statistics, subprocess, sys, time
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = ROOT / "submissions/v10/skills/swe-tools/scripts"
+SRC = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10") / "skills/swe-tools/scripts"
 PY = sys.executable
 
 from v10_support.repo import no_orphans  # noqa: F401,E402  (R120: the orphan-process guard, autouse)

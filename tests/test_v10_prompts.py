@@ -672,10 +672,15 @@ def helper_caps():
     return caps
 
 
-def meter_consts():
-    """CONTEXT_TOKENS and CTX_CALL of _swe_common (the context meter; review round 1)."""
+def meter_consts(stage=None):
+    """CONTEXT_TOKENS and CTX_CALL of _swe_common (the context meter; review round 1). For the locator stage, a
+    bundle's CONTEXT_TOKENS_LOCATOR when it defines one (lever A arms, make_variant --flip: it applies while t < 75 s;
+    this time-free model takes it for the whole stage, the conservative reading)."""
     consts = common_constants() or {}
-    return int(consts.get("CONTEXT_TOKENS") or 5500), int(consts.get("CTX_CALL") or 30)
+    thr = int(consts.get("CONTEXT_TOKENS") or 5500)
+    if stage == "locator" and consts.get("CONTEXT_TOKENS_LOCATOR"):
+        thr = max(thr, int(consts["CONTEXT_TOKENS_LOCATOR"]))
+    return thr, int(consts.get("CTX_CALL") or 30)
 
 
 def calls_tokens(calls, cap, density):
@@ -694,7 +699,7 @@ def guarded_peak(stage, start_tokens, density):
     """start + what the stage can hold once the context meter works: the meter reaches CONTEXT_TOKENS (estimated at
     3 chars/token, so real tokens are est x 3 / density) at most one call past the threshold, then the stage makes the
     calls AFTER_HINT allows and replies. Never more than the unguarded mix at caps."""
-    thr, per_call = meter_consts()
+    thr, per_call = meter_consts(stage)
     calls, reply = permitted_mix()[stage]
     caps = helper_caps()
     if not calls:

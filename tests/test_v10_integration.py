@@ -26,7 +26,7 @@ from v10_support.repo import no_orphans  # noqa: F401,E402  (autouse, R120)
 
 ROOT = Path(__file__).resolve().parents[1]
 NIGHTLY = os.environ.get("G4_NIGHTLY") == "1"
-SCRIPTS = ROOT / "submissions" / "v10" / "skills" / "swe-tools" / "scripts"
+SCRIPTS = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10") / "skills" / "swe-tools" / "scripts"
 CAPS = {"install": 400, "locate": 1800, "grep": 1800, "view": 4000, "edit": 1500, "run": 2500, "verify": 2000,
         "finalize": 1000, "status": 2200}                       # SPEC 4.14 (stdout cap, footer included)
 

@@ -14,7 +14,7 @@ except Exception:  # built in parallel by the core component; absent until it la
     pass
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / "submissions" / "v10"
+BUNDLE = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10")   # G4_BUNDLE: run the v10 suite on a variant arm
 SPEC = ROOT / "docs" / "v10" / "SPEC.md"
 SCRIPTS = BUNDLE / "skills" / "swe-tools" / "scripts"
 PACK = ROOT / "scripts" / "pack_bundle.py"

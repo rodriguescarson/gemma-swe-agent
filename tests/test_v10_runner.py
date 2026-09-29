@@ -200,7 +200,7 @@ def test_clock_scale_lands_in_real_sandbox_tmp(tmp_path, harness_restored, monke
         f = Path(m.sandboxes[sid]["tmp"]) / "swe" / "clock_scale"
         assert f.read_text() == "1.7\n"
         assert not Path("/tmp/swe/clock_scale").exists() or Path("/tmp/swe/clock_scale").stat().st_mtime < time.time() - 60
-        scripts = ROOT / "submissions" / "v10" / "skills" / "swe-tools" / "scripts"
+        scripts = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10") / "skills" / "swe-tools" / "scripts"
         if (scripts / "install.py").is_file():   # install.py keeps it, and installed helpers scale their clock by it
             # under the sandbox root: the harness shields its own root from the /tmp rewrite, while a tmp_path under
             # /tmp (Linux) would be rewritten in the command text (found by the Linux parity run)

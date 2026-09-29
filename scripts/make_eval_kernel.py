@@ -1,27 +1,125 @@
-"""Generate a Kaggle notebook that evaluates a bundle exactly like the scorer (official Getting Started recipe):
-wheelhouse install, vLLM on 4x L4 (TP=4, gemma4 parsers, thinking default on), subprocess sandbox, sequential tasks.
-Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> --ids ids.txt [--oracle | --patches labels.json] [--min 6] [--calls 60] [--turns 80] [--timeout 180]"""
-import argparse, base64, json, os
-ap = argparse.ArgumentParser(); ap.add_argument("bundle"); ap.add_argument("slug"); ap.add_argument("--ids")
-ap.add_argument("--oracle", action="store_true"); ap.add_argument("--min", type=float, default=6); ap.add_argument("--calls", type=int, default=60)
-ap.add_argument("--patches", help="rescore agent patches: json list of {task,cfg,patch} (CPU, Kaggle env)")
-ap.add_argument("--helper-check", help="skill scripts dir to test for sandbox reachability on the Kaggle image (CPU)")
-ap.add_argument("--turns", type=int, default=80); ap.add_argument("--timeout", type=int, default=180)
-a = ap.parse_args()
-PATCHES = {}
-if a.patches:
-    a.oracle = True
-    for r in json.load(open(a.patches)):
-        if r["patch"].strip(): PATCHES.setdefault(r["cfg"], {})[r["task"]] = r["patch"]
-files = {}
-for root, _, fs in os.walk(a.bundle):
-    for f in fs:
-        rel = os.path.relpath(os.path.join(root, f), a.bundle)
-        if rel.startswith(".") or "__pycache__" in rel or f.endswith(".pyc") or f.startswith("._"): continue
-        files[rel] = base64.b64encode(open(os.path.join(root, f), "rb").read()).decode()
-ids = [l.strip() for l in open(a.ids) if l.strip()] if a.ids else []
-cells = []
-cells.append(r'''
+"""Generate a Kaggle notebook that evaluates a bundle exactly like the host's Getting Started notebook
+(ryanholbrook/getting-started-gemma-4-developer-agent, run of 2026-09-27 19:50 UTC, copy in ref/getting_started_20260927):
+wheelhouse install, vLLM on 4x L4 (TP=4, gemma4 parsers, NO default_chat_template_kwargs, so the chat template's own
+thinking default applies unless a stage sets it), subprocess sandbox, compaction 15/2/14,336/5, sequential tasks.
+
+Budget (2026-09-29): the four keys come from the bundle's eval_config.yaml, read the way the host notebook reads them
+(`evaluation:` section or top level; defaults timeout_seconds 300, max_tool_calls 100, max_time_minutes 60.0, max_turns
+None, max_llm_calls as the turns fallback). CLI flags only override single keys. The kernel reads the bundle's file
+itself with the host's code and stops before vLLM starts if the result differs from the budget printed here.
+
+Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> --ids ids.txt [--oracle | --patches labels.json]
+       [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir]"""
+import argparse, base64, json, os, re, sys
+
+BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_seconds")
+# The host notebook's defaults when a key is absent (cell 10 of the 2026-09-27 run; HARNESS_README 7.1 agrees).
+HOST_DEFAULTS = {"timeout_seconds": 300, "max_tool_calls": 100, "max_time_minutes": 60.0, "max_turns": None}
+# Settings the host notebook passes (ref/getting_started_20260927, cells 8 and 10); tests/test_make_eval_kernel.py
+# checks the generated notebook against that copy.
+COMPACTION = dict(compaction_interval=15, overlap_size=2, token_threshold=14336, event_retention_size=5)
+CONTEXT_CACHE = dict(min_tokens=2048, ttl_seconds=1800, cache_intervals=10)
+
+
+def _scalar(v):
+    """A YAML 1.1 scalar as PyYAML's safe_load reads the forms eval_config.yaml uses (ints, floats, null, strings)."""
+    v = v.strip()
+    if " #" in v:
+        v = v.split(" #", 1)[0].rstrip()
+    if v in ("", "~", "null", "Null", "NULL"):
+        return None
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in "'\"":
+        return v[1:-1]
+    if v[0] in "{[&*!|>":
+        raise ValueError("eval_config.yaml value %r needs a full YAML parser" % v)
+    if re.fullmatch(r"[-+]?\d+", v):
+        return int(v)
+    if re.fullmatch(r"[-+]?(\d+\.\d*|\.\d+|\d+)([eE][-+]?\d+)?", v) and ("." in v or "e" in v.lower()):
+        return float(v)
+    return v
+
+
+def mini_yaml(text):
+    """Stdlib reader for the two-level mappings eval_config.yaml uses ('key: value' and one nested block). Raises
+    ValueError on anything else, so an unusual file is never guessed at."""
+    root, cur = {}, None
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.split("#", 1)[0].rstrip() if not raw.lstrip().startswith(("'", '"')) else raw.rstrip()
+        if not line.strip() or line.strip() == "---":
+            continue
+        m = re.fullmatch(r"(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)", line)
+        if not m:
+            raise ValueError("eval_config.yaml line %d is not 'key: value': %r" % (n, raw))
+        ind, key, val = m.groups()
+        if not ind:
+            if val.strip():
+                root[key], cur = _scalar(val), None
+            else:
+                root[key] = cur = {}
+        elif cur is not None:
+            cur[key] = _scalar(val)
+        else:
+            raise ValueError("eval_config.yaml line %d is indented under a scalar: %r" % (n, raw))
+    return root
+
+
+def load_eval_config(text, use_yaml=True):
+    """The parsed file, with PyYAML when importable (what the host notebook uses), else mini_yaml."""
+    if use_yaml:
+        try:
+            import yaml
+        except ImportError:
+            use_yaml = False
+    raw = yaml.safe_load(text) if use_yaml else mini_yaml(text)
+    return raw if isinstance(raw, dict) else {}
+
+
+def host_budget(raw):
+    """The host notebook's budget logic (cell 10), on an already-parsed eval_config mapping."""
+    eval_section = raw.get("evaluation", raw)
+    timeout_seconds = int(eval_section.get("timeout_seconds", 300))
+    max_tool_calls = int(eval_section.get("max_tool_calls", 100))
+    max_time_minutes = float(eval_section.get("max_time_minutes", 60.0))
+    turns_raw = eval_section.get("max_turns", eval_section.get("max_llm_calls"))
+    max_turns = int(turns_raw) if turns_raw is not None else None
+    return dict(max_time_minutes=max_time_minutes, max_tool_calls=max_tool_calls, max_turns=max_turns,
+                timeout_seconds=timeout_seconds)
+
+
+def read_budget(bundle, overrides=None, use_yaml=True):
+    """-> (budget, source): the bundle's eval_config.yaml read like the host notebook, then `overrides` (only keys whose
+    value is not None). A bundle without the file would crash the host notebook, so it needs all four overrides."""
+    overrides = {k: v for k, v in (overrides or {}).items() if v is not None}
+    path = os.path.join(bundle, "eval_config.yaml")
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            budget = host_budget(load_eval_config(f.read(), use_yaml))
+        src = "eval_config.yaml"
+    elif set(overrides) >= set(BUDGET_KEYS):
+        budget, src = dict(HOST_DEFAULTS), "flags"
+    else:
+        raise SystemExit("make_eval_kernel: %s has no eval_config.yaml (the host notebook would fail reading it); pass "
+                         "all of --min --calls --turns --timeout" % bundle)
+    for k, v in overrides.items():
+        budget[k] = float(v) if k == "max_time_minutes" else int(v)
+    if overrides and src == "eval_config.yaml":
+        src += " + flags " + ",".join(sorted(overrides))
+    return budget, src
+
+
+def bundle_files(bundle):
+    files = {}
+    for root, _, fs in os.walk(bundle):
+        for f in fs:
+            rel = os.path.relpath(os.path.join(root, f), bundle)
+            if rel.startswith(".") or "__pycache__" in rel or f.endswith(".pyc") or f.startswith("._") or f == ".DS_Store":
+                continue
+            with open(os.path.join(root, f), "rb") as fh:
+                files[rel] = base64.b64encode(fh.read()).decode()
+    return files
+
+
+CELL_INSTALL = r'''
 import glob, importlib, os, shutil, subprocess, sys, json, time, base64
 from pathlib import Path
 os.environ.update({'LITELLM_LOCAL_MODEL_COST_MAP': 'True', 'TRANSFORMERS_NO_TF': '1', 'VLLM_WORKER_MULTIPROC_METHOD': 'spawn',
@@ -40,20 +138,42 @@ for w in WHEELHOUSE_DIR.glob('*.whl'):
     if not (tmp / n).exists(): os.symlink(w, tmp / n)
 subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--no-deps', '--force-reinstall', *sorted(str(w) for w in tmp.glob('*.whl'))], check=True)
 importlib.invalidate_caches(); print('wheelhouse ok')
-''')
-cells.append("FILES = " + json.dumps(files) + "\nIDS = " + json.dumps(ids) + "\nPATCHES = " + json.dumps(PATCHES) + f"\nORACLE = {a.oracle}\nBUDGET = dict(max_time_minutes={a.min}, max_tool_calls={a.calls}, max_turns={a.turns}, timeout_seconds={a.timeout})\n" + r'''
-DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')
-if not DATA_DIR.exists(): DATA_DIR = Path('/kaggle/input/gemma-4-developer-agent')
-W = Path('/kaggle/working'); AGENT_DIR = W / 'bundle'
-shutil.rmtree(AGENT_DIR, ignore_errors=True)
-for rel, b in FILES.items():
-    p = AGENT_DIR / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(b))
+# The wheel set this run used, by content: the host rebuilt vllm and adk_submission in place under the same version
+# strings (org_update_0928 1.1), so A/B arms are paired only when these files are identical (scripts/ab_l4_decide.py).
+import hashlib
+with open('/kaggle/working/wheelhouse_sha256.txt', 'w') as _f:
+    for w in sorted(WHEELHOUSE_DIR.glob('*.whl')):
+        _h = hashlib.sha256()
+        with open(w, 'rb') as _fh:
+            for _b in iter(lambda: _fh.read(1 << 22), b''): _h.update(_b)
+        _f.write(_h.hexdigest() + '  ' + w.name + '\n')
+'''
+
+# Budget cell body: the host notebook's own reading of the bundle's eval_config.yaml (cell 10), then the CLI overrides,
+# then a stop before any GPU time is spent when the kernel's reading differs from the one the builder printed.
+CELL_BUDGET = r'''
+import yaml
+eval_config_file = AGENT_DIR / 'eval_config.yaml'
+raw_eval_cfg = (yaml.safe_load(eval_config_file.read_text(encoding='utf-8')) if eval_config_file.exists() else None) or {}
+eval_section = raw_eval_cfg.get('evaluation', raw_eval_cfg)
+timeout_seconds = int(eval_section.get('timeout_seconds', 300))
+max_tool_calls = int(eval_section.get('max_tool_calls', 100))
+max_time_minutes = float(eval_section.get('max_time_minutes', 60.0))
+turns_raw = eval_section.get('max_turns', eval_section.get('max_llm_calls'))
+max_turns = int(turns_raw) if turns_raw is not None else None
+BUDGET = dict(max_time_minutes=max_time_minutes, max_tool_calls=max_tool_calls, max_turns=max_turns, timeout_seconds=timeout_seconds)
+BUDGET.update(BUDGET_OVERRIDE)
+assert BUDGET == EXPECTED_BUDGET, ('budget differs from the builder', BUDGET, EXPECTED_BUDGET)
+'''
+
+CELL_DATA_TAIL = r'''
 from swegemma.models import load_tasks
 tasks = load_tasks(DATA_DIR / 'tasks.jsonl')
 if IDS: tasks = [t for t in tasks if t.instance_id in set(IDS)]
 print(len(tasks), 'tasks', 'ORACLE' if ORACLE else 'AGENT', BUDGET)
-''')
-cells.append(r'''
+'''
+
+CELL_VLLM = r'''
 import litellm, torch
 from adk_submission import VllmConfig, VllmServer, discover_adapters
 from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS
@@ -66,14 +186,15 @@ if not ORACLE:
     MODEL_PATH = Path('/kaggle/input/models/google/gemma-4/other/gemma-4-31b-it-qat-w4a16-ct/2')
     n = torch.cuda.device_count(); tp = 4 if n >= 4 else (2 if n >= 2 else 1)
     cfg = VllmConfig(model=str(MODEL_PATH), port=8000, host='127.0.0.1', tool_call_parser='gemma4', reasoning_parser='gemma4',
-        default_chat_template_kwargs={'enable_thinking': True}, max_model_len=32768,
-        dtype='bfloat16' if torch.cuda.is_bf16_supported() else 'auto', gpu_memory_utilization=0.90, enable_auto_tool_choice=True,
-        enable_lora=True, max_loras=8, max_lora_rank=128, tensor_parallel_size=tp, startup_timeout=60 * 20)
+        max_model_len=32768, dtype='bfloat16' if torch.cuda.is_bf16_supported() else 'auto', gpu_memory_utilization=0.90,
+        enable_auto_tool_choice=True, enable_lora=True, max_loras=8, max_lora_rank=128, tensor_parallel_size=tp,
+        startup_timeout=60 * 20)
     t0 = time.time(); server = VllmServer(cfg, adapter_manifest=adapters); server.start()
     print('vLLM up in', round(time.time() - t0), 's, tp', tp, 'gpus', n)
     models = server.create_model_registry(aliases=[declared, 'gemma-4-31b-it-qat-w4a16-ct'], model_prefix='openai/', api_key='EMPTY')
-''')
-cells.append(r'''
+'''
+
+CELL_RUN = r'''
 import asyncio, concurrent.futures
 from google.adk.agents.context_cache_config import ContextCacheConfig
 from google.adk.apps._configs import EventsCompactionConfig
@@ -91,8 +212,8 @@ limits, gen = build_submission_limits()
 ec = EvalConfig(tasks_path=DATA_DIR / 'tasks.jsonl', snapshots_dir=DATA_DIR / 'snapshots', results_dir=W / 'results',
     submission_dir=AGENT_DIR, models=models or setup_gemma_model_registry(), sandbox='subprocess', limits=limits,
     generation_constraints=gen, adapter_manifest=adapters,
-    context_cache_config=ContextCacheConfig(min_tokens=2048, ttl_seconds=1800, cache_intervals=10),
-    events_compaction_config=EventsCompactionConfig(compaction_interval=15, overlap_size=2, token_threshold=14336, event_retention_size=5),
+    context_cache_config=ContextCacheConfig(min_tokens=@MIN_TOKENS@, ttl_seconds=@TTL@, cache_intervals=@CACHE_INTERVALS@),
+    events_compaction_config=EventsCompactionConfig(compaction_interval=@INTERVAL@, overlap_size=@OVERLAP@, token_threshold=@THRESHOLD@, event_retention_size=@RETENTION@),
     graph_dir=str(DATA_DIR / 'graphs'), embeddings_dir=str(DATA_DIR / 'embeddings'), wheels_dir=DATA_DIR / 'wheels', verbose=False, **BUDGET)
 ev = Evaluator(ec)
 subprocess.run(f'{sys.executable} -m pip freeze > {W}/pip_freeze.txt', shell=True)
@@ -117,7 +238,8 @@ for cfg, pmap in RUNS:
 out.close()
 print('TOTAL', sum(json.loads(l)['resolved'] for l in open(W / 'results.jsonl')), 'rows', sum(1 for _ in open(W / 'results.jsonl')), 'in', round(time.time() - T0), 's')
 shutil.make_archive(str(W / 'traces'), 'gztar', root_dir=W / 'results')
-''')
+'''
+
 HELPER_BODY = r'''
 # Kaggle-image check (2026-09-27): helpers must be reachable from sandbox commands (v4 installed them to the host /tmp).
 import base64, os, sys, tempfile
@@ -136,19 +258,84 @@ for c in ('python3 /tmp/swe/locate.py "parse_header"', "python3 /tmp/swe/test.py
     lines.append(("FAIL " if bad else "ok   ") + c + " -> " + o.strip().replace("\n", " | ")[:200])
 lines.append("HELPER_CHECK " + ("PASS" if ok else "FAIL")); print("\n".join(lines)); open("/kaggle/working/helper_check.txt", "w").write("\n".join(lines) + "\n")
 '''
-if a.helper_check:
-    hb = {f: base64.b64encode(open(os.path.join(a.helper_check, f), "rb").read()).decode() for f in os.listdir(a.helper_check) if f.endswith(".py")}
-    cells.insert(1, "HELPERS_B64 = " + json.dumps(hb) + "\ndef _helper_check():" + HELPER_BODY.replace("\n", "\n    ") +
-                 "\ntry: _helper_check()\nexcept Exception as e: print('HELPER_CHECK ERROR', repr(e)[:300])\n")
 
-nb = {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": c} for c in cells],
-      "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
-kd = os.path.join("kernels", a.slug); os.makedirs(kd, exist_ok=True)
-json.dump(nb, open(os.path.join(kd, a.slug + ".ipynb"), "w"))
-meta = {"id": "carsonrodrigues/" + a.slug, "title": a.slug, "code_file": a.slug + ".ipynb", "language": "python", "kernel_type": "notebook",
-        "is_private": True, "enable_gpu": not a.oracle, "enable_tpu": False, "enable_internet": False,
-        "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"], "competition_sources": ["gemma-4-developer-agent"],
-        "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]}
-if not a.oracle: meta["machine_shape"] = "NvidiaL4"
-json.dump(meta, open(os.path.join(kd, "kernel-metadata.json"), "w"), indent=2)
-print(kd, len(files), "files", len(ids) or "all", "tasks")
+
+def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None):
+    run = CELL_RUN
+    for k, v in (("@MIN_TOKENS@", CONTEXT_CACHE["min_tokens"]), ("@TTL@", CONTEXT_CACHE["ttl_seconds"]),
+                 ("@CACHE_INTERVALS@", CONTEXT_CACHE["cache_intervals"]), ("@INTERVAL@", COMPACTION["compaction_interval"]),
+                 ("@OVERLAP@", COMPACTION["overlap_size"]), ("@THRESHOLD@", COMPACTION["token_threshold"]),
+                 ("@RETENTION@", COMPACTION["event_retention_size"])):
+        run = run.replace(k, repr(v))
+    data = ("FILES = " + json.dumps(files) + "\nIDS = " + json.dumps(ids) + "\nPATCHES = " + json.dumps(patches) +
+            "\nORACLE = %s\nBUDGET_OVERRIDE = %s\nEXPECTED_BUDGET = %s\n" % (oracle, repr(override), repr(budget)) + r'''
+DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')
+if not DATA_DIR.exists(): DATA_DIR = Path('/kaggle/input/gemma-4-developer-agent')
+W = Path('/kaggle/working'); AGENT_DIR = W / 'bundle'
+shutil.rmtree(AGENT_DIR, ignore_errors=True)
+for rel, b in FILES.items():
+    p = AGENT_DIR / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(b))
+''' + CELL_BUDGET + CELL_DATA_TAIL)
+    cells = [CELL_INSTALL, data, CELL_VLLM, run]
+    if helper_b64 is not None:
+        cells.insert(1, "HELPERS_B64 = " + json.dumps(helper_b64) + "\ndef _helper_check():" + HELPER_BODY.replace("\n", "\n    ") +
+                     "\ntry: _helper_check()\nexcept Exception as e: print('HELPER_CHECK ERROR', repr(e)[:300])\n")
+    return cells
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    ap.add_argument("bundle"); ap.add_argument("slug"); ap.add_argument("--ids")
+    ap.add_argument("--oracle", action="store_true")
+    ap.add_argument("--patches", help="rescore agent patches: json list of {task,cfg,patch} (CPU, Kaggle env)")
+    ap.add_argument("--helper-check", help="skill scripts dir to test for sandbox reachability on the Kaggle image (CPU)")
+    ap.add_argument("--min", type=float, default=None, help="override max_time_minutes (default: eval_config.yaml)")
+    ap.add_argument("--calls", type=int, default=None, help="override max_tool_calls (default: eval_config.yaml)")
+    ap.add_argument("--turns", type=int, default=None, help="override max_turns (default: eval_config.yaml)")
+    ap.add_argument("--timeout", type=int, default=None, help="override timeout_seconds (default: eval_config.yaml)")
+    a = ap.parse_args(argv)
+    override = {k: v for k, v in (("max_time_minutes", a.min), ("max_tool_calls", a.calls), ("max_turns", a.turns),
+                                   ("timeout_seconds", a.timeout)) if v is not None}
+    if "max_time_minutes" in override:
+        override["max_time_minutes"] = float(override["max_time_minutes"])
+    budget, src = read_budget(a.bundle, override)
+    patches = {}
+    if a.patches:
+        a.oracle = True
+        with open(a.patches) as f:
+            for r in json.load(f):
+                if r["patch"].strip():
+                    patches.setdefault(r["cfg"], {})[r["task"]] = r["patch"]
+    files = bundle_files(a.bundle)
+    ids = []
+    if a.ids:
+        with open(a.ids) as f:
+            ids = [l.strip() for l in f if l.strip()]
+    hb = None
+    if a.helper_check:
+        hb = {}
+        for f in sorted(os.listdir(a.helper_check)):
+            if f.endswith(".py"):
+                with open(os.path.join(a.helper_check, f), "rb") as fh:
+                    hb[f] = base64.b64encode(fh.read()).decode()
+    cells = build_cells(files, ids, patches, a.oracle, budget, override, hb)
+    nb = {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": c} for c in cells],
+          "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
+    kd = os.path.join("kernels", a.slug)
+    os.makedirs(kd, exist_ok=True)
+    with open(os.path.join(kd, a.slug + ".ipynb"), "w") as f:
+        json.dump(nb, f)
+    meta = {"id": "carsonrodrigues/" + a.slug, "title": a.slug, "code_file": a.slug + ".ipynb", "language": "python", "kernel_type": "notebook",
+            "is_private": True, "enable_gpu": not a.oracle, "enable_tpu": False, "enable_internet": False,
+            "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"], "competition_sources": ["gemma-4-developer-agent"],
+            "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]}
+    if not a.oracle:
+        meta["machine_shape"] = "NvidiaL4"
+    with open(os.path.join(kd, "kernel-metadata.json"), "w") as f:
+        json.dump(meta, f, indent=2)
+    print(kd, len(files), "files", len(ids) or "all", "tasks", "budget", json.dumps(budget, sort_keys=True), "from", src)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

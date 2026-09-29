@@ -8,7 +8,7 @@ import json, os, pathlib, re, resource, shutil, statistics, subprocess, sys, tim
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = ROOT / "submissions/v10/skills/swe-tools/scripts"
+SRC = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10") / "skills/swe-tools/scripts"
 PY = sys.executable
 
 try:  # R120: the orphan-process guard is autouse in every v10 module
