@@ -24,7 +24,7 @@ echo "Successfully submitted"
 def _run(tmp, existing, msg):
     fake, calls = _fake_kaggle(tmp, existing)
     now = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M")
-    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0")
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1")
     subprocess.run(["bash", str(SCRIPT), "k", now, msg], env=env, check=True, timeout=60)
     return [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
 
@@ -65,10 +65,37 @@ if [ "$2" = submissions ]; then echo "ConnectionError" >&2; exit 1; fi
 echo "Successfully submitted"
 """)
     fake.chmod(0o755)
-    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0")
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1")
     p = subprocess.Popen(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env)
     try: p.wait(timeout=5)
     except subprocess.TimeoutExpired: pass
     finally: p.kill()
     assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
     assert "not submitting blind" in (tmp_path / "log.txt").read_text()
+
+
+def test_waits_while_own_gpu_kernel_is_running(tmp_path):
+    # regression 2026-09-29: queued GPU eval kernels overlapped sub5's scoring
+    calls = tmp_path / "calls.txt"; state = tmp_path / "state"; state.write_text("RUNNING")
+    fake = tmp_path / "kaggle"
+    fake.write_text(f"""#!/bin/bash
+echo "$@" >> {calls}
+if [ "$1" = kernels ] && [ "$2" = list ]; then printf 'ref title\\n---- ----\\ncarsonrodrigues/g4-l4-v10 x\\ncarsonrodrigues/g4agent-v10 y\\n'; exit 0; fi
+if [ "$1" = kernels ] && [ "$2" = status ]; then echo "has status \\"KernelWorkerStatus.$(cat {state})\\""; exit 0; fi
+if [ "$2" = submissions ]; then echo 'ref,fileName,date,description,status'; exit 0; fi
+echo "Successfully submitted"
+""")
+    fake.chmod(0o755)
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"),
+               SUBMIT_TARGET_EPOCH=str(int(datetime.datetime.now(datetime.timezone.utc).timestamp())))
+    p = subprocess.Popen(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env)
+    try:
+        p.wait(timeout=4)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        p.kill()
+    log = (tmp_path / "log.txt").read_text()
+    assert "own GPU kernels busy: carsonrodrigues/g4-l4-v10" in log
+    assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
+    assert "g4agent-v10" not in log.split("busy:")[1]          # CPU submission notebooks are not GPU kernels

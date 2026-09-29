@@ -22,6 +22,19 @@ t = n.replace(hour=int(a[:2]), minute=int(a[2:]), second=0, microsecond=0)
 print(int((t if t > n else t + d.timedelta(days=1)).timestamp()))' "$AT")}
 echo "$(date -u) [$(hostname -s)] target epoch $TARGET ($(python3 -c "import datetime as d,sys; print(d.datetime.fromtimestamp(int(sys.argv[1]), d.timezone.utc))" "$TARGET"))" >> "$LOG"
 until [ "$(date -u +%s)" -ge "$TARGET" ]; do sleep 20; done
+# GPU-overlap guard (2026-09-29: queued L4 eval kernels started 10 h late and overlapped sub5's scoring). Before
+# submitting, wait while any of our own GPU eval kernels (slug prefix g4-l4- or g4-eval) is QUEUED or RUNNING, up to
+# the end of the UTC day (a later submission the same day still uses the day's slot). SKIP_GPU_GUARD=1 disables it.
+if [ "${SKIP_GPU_GUARD:-0}" != 1 ]; then
+  DAY_END=$(( TARGET - (TARGET % 86400) + 86400 - 600 ))
+  while :; do
+    busy=$("$KAGGLE" kernels list --mine --page-size 50 2>/dev/null | awk 'NR>2{print $1}' | grep -E '/g4-(l4-|eval)' | while read -r k; do
+      "$KAGGLE" kernels status "$k" 2>/dev/null | grep -qE 'QUEUED|RUNNING' && echo "$k"; done | tr '\n' ' ')
+    [ -z "$busy" ] && break
+    [ "$(date -u +%s)" -ge "$DAY_END" ] && { echo "$(date -u) [$(hostname -s)] GPU kernels still busy ($busy) at day end; submitting anyway" >> "$LOG"; break; }
+    echo "$(date -u) [$(hostname -s)] waiting: own GPU kernels busy: $busy" >> "$LOG"; sleep 600
+  done
+fi
 for i in 1 2 3 4 5 6; do
   already; st=$?
   if [ $st -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG already on Kaggle, skipping" >> "$LOG"; break; fi
