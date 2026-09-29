@@ -99,3 +99,14 @@ echo "Successfully submitted"
     assert "own GPU kernels busy: carsonrodrigues/g4-l4-v10" in log
     assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
     assert "g4agent-v10" not in log.split("busy:")[1]          # CPU submission notebooks are not GPU kernels
+
+
+def test_kernel_version_is_passed_through(tmp_path):
+    # regression 2026-09-29: the version was hard-coded to 1, which for g4agent-v10 is the stale v10.0 zip
+    fake, calls = _fake_kaggle(tmp_path, [])
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0",
+               SKIP_GPU_GUARD="1", KERNEL_VERSION="2")
+    subprocess.run(["bash", str(SCRIPT), "g4agent-v10", "0000", "sub6: v10.1"], env=env, check=True, timeout=60)
+    sub = [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
+    assert sub and "-v 2 " in sub[0] + " " and "carsonrodrigues/g4agent-v10" in sub[0]
+    assert "armed g4agent-v10 v2" in (tmp_path / "log.txt").read_text()

@@ -1,6 +1,7 @@
 #!/bin/bash
 # Timed Kaggle submitter. Runs on the Mac or the VPS.
-# Usage: submit_at.sh <kernel-slug> <HHMM UTC> <message> [tag]
+# Usage: [KERNEL_VERSION=N] submit_at.sh <kernel-slug> <HHMM UTC> <message> [tag]   (N = the notebook version whose
+# submission.zip is submitted; 2026-09-29: g4agent-v10 v1 is v10.0, v2 is v10.1, so the version must be explicit)
 # Idempotent across machines: before submitting it asks Kaggle whether a
 # submission whose description starts with <tag> already exists.
 KERNEL=$1; AT=$2; MSG=$3; TAG=${4:-${MSG%%:*}:}
@@ -13,7 +14,7 @@ mkdir -p "$(dirname "$LOG")"
 already() { local out; out=$("$KAGGLE" competitions submissions $COMP -v 2>/dev/null) || return 2
   echo "$out" | grep -q "^ref," || return 2
   echo "$out" | grep -q ",\"\?$TAG" && return 0 || return 1; }
-echo "$(date -u) [$(hostname -s)] armed $KERNEL for $AT UTC (tag $TAG)" >> "$LOG"
+echo "$(date -u) [$(hostname -s)] armed $KERNEL v${KERNEL_VERSION:-1} for $AT UTC (tag $TAG)" >> "$LOG"
 # Target = the NEXT occurrence of AT (UTC) after arming, as an absolute epoch; a late wake still fires, an afternoon
 # arming never fires early (2026-09-27: an HHMM ">=" check fired at 16:12 for a 00:01 target).
 TARGET=${SUBMIT_TARGET_EPOCH:-$(python3 -c 'import datetime as d, sys
@@ -39,7 +40,7 @@ for i in 1 2 3 4 5 6; do
   already; st=$?
   if [ $st -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG already on Kaggle, skipping" >> "$LOG"; break; fi
   if [ $st -eq 2 ]; then echo "$(date -u) [$(hostname -s)] listing failed (network?), not submitting blind; retry $i" >> "$LOG"; sleep 120; continue; fi
-  out=$("$KAGGLE" competitions submit $COMP -k "carsonrodrigues/$KERNEL" -v 1 -f submission.zip -m "$MSG" 2>&1 | tr "\n" " ")
+  out=$("$KAGGLE" competitions submit $COMP -k "carsonrodrigues/$KERNEL" -v "${KERNEL_VERSION:-1}" -f submission.zip -m "$MSG" 2>&1 | tr "\n" " ")
   echo "$(date -u) [$(hostname -s)] attempt $i: $out" >> "$LOG"
   echo "$out" | grep -qi "success" && break
   sleep 60
