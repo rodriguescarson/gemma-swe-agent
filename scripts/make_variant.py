@@ -13,11 +13,18 @@
            removed-line scan, exact whole-line matches first, generic lines dropped); verify's SIBLINGS is
            that scan (same-name defs only when their code repeats a removed line) and never skipped in quick mode (diag 5's prompt parts of B do not fit
            the locator's 370-word cap and are left out)                                     [L4 A/B arm v10_1_sweep]
+  --repair-rounds N   v10 bundles only, N in 0..5 except 2 (the base): the repair budget of the pre-registered ablation
+           (docs/eval/ABLATION_REPAIR.md). fixer.md step 3 and verifier.md step 3 allow N rounds instead of 2; N = 0 is
+           arm A0: the fixer runs verify.py once for its first line and does not edit after it, the verifier's RED and
+           REGRESSIONS go straight to finalize (its step 4, finalize's NOT READY fix, is not a verify round and stays).
+           Prompt text only: verify.py's own RED lines still say "fix the code, then run verify again", which is why
+           summary.py ablation measures compliance (edits after the first verify) per arm.  [ablation arm A0]
 A v10 bundle (scripts/_swe_common.py) carries its own install/bootstrap: the v9 $TMPDIR fix and the v9 levers are
 never applied to it (they would overwrite v10's install.py with helpers_v9/install.py); asking for a v9 lever exits 2.
 Every v10 lever is an exact-once text patch: if the base no longer contains the text it patches, make_variant exits 2
 and leaves no output dir (tests/test_make_variant_v10.py rebuilds the committed arms and compares them byte for byte).
-Usage: python scripts/make_variant.py <base_bundle> <out_dir> [--edit] [--output] [--gate] [--work-temp T] [--flip] [--sweep]"""
+Usage: python scripts/make_variant.py <base_bundle> <out_dir> [--edit] [--output] [--gate] [--work-temp T] [--flip] [--sweep]
+       [--repair-rounds N]"""
 import argparse, os, re, shutil, sys
 
 SC_REL = "skills/swe-tools/scripts"
@@ -300,6 +307,31 @@ SWEEP_EDIT = [
      "        x.extra.append(\"NEXT: python3 /tmp/swe/verify.py\")\n"),
 ]
 
+# ------------------------------------------------------------------------------------------ --repair-rounds N
+REPAIR_FIXER = ("3. Run python3 /tmp/swe/verify.py and act on it, at most 2 rounds: a CLAIM that still fails means fix the "
+                "code (not the reproduction); SIBLINGS means make the same fix where the same defect is; SPEC GAPS means "
+                "add what is missing; for REGRESSIONS follow its note.\n")
+REPAIR_FIXER_ZERO = ("3. Run python3 /tmp/swe/verify.py once, for its first line only; do not edit after it (no repair "
+                     "round).\n")
+REPAIR_VERIFIER_RED = "- RED: fix what it names and run step 3 again; at most 2 repair rounds, none after t=240s.\n"
+REPAIR_VERIFIER_REG = ("- REGRESSIONS: a test that passed before now fails. If it checks the OLD behaviour the issue asks to "
+                       "change, keep your fix; otherwise fix the regression.\n")
+REPAIR_BASE = 2
+REPAIR_MAX = 5
+
+
+def repair_patches(n):
+    """The exact-once patches of --repair-rounds n (n != REPAIR_BASE)."""
+    if n == 0:
+        return [("prompts/fixer.md", [(REPAIR_FIXER, REPAIR_FIXER_ZERO)]),
+                ("prompts/verifier.md", [(REPAIR_VERIFIER_RED, "- RED: go to step 4 (no repair round).\n"),
+                                         (REPAIR_VERIFIER_REG, "- REGRESSIONS: go to step 4 (no repair round).\n")])]
+    word = "round" if n == 1 else "rounds"
+    return [("prompts/fixer.md", [("act on it, at most 2 rounds:", "act on it, at most %d %s:" % (n, word))]),
+            ("prompts/verifier.md", [("at most 2 repair rounds, none after", "at most %d repair %s, none after"
+                                      % (n, word))])]
+
+
 V10_LEVERS = {
     "flip": [("%s/_swe_common.py" % SC_REL, FLIP_COMMON), ("%s/_swe_gate.py" % SC_REL, FLIP_GATE),
              ("prompts/fixer.md", FLIP_FIXER)],
@@ -335,6 +367,8 @@ def main(argv=None):
     for f in ("edit", "output", "gate", "flip", "sweep"): ap.add_argument("--" + f, action="store_true")
     ap.add_argument("--keep-tmp-bug", action="store_true", help="do NOT apply the $TMPDIR install fix (reproduces v4 as submitted)")
     ap.add_argument("--work-temp", type=float, default=None, help="v10 only: temperature of the locator, fixer and verifier")
+    ap.add_argument("--repair-rounds", type=int, default=None,
+                    help="v10 only: repair rounds after verify.py in the fixer and verifier prompts (0 = ablation arm A0)")
     a = ap.parse_args(argv)
     H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helpers_v9")
     V10 = os.path.isfile(os.path.join(a.base, SC_REL, "_swe_common.py"))
@@ -344,6 +378,15 @@ def main(argv=None):
         ap.exit(2, "make_variant: --work-temp needs a v10 bundle and 0 <= T <= 2\n")
     if (a.flip or a.sweep) and not V10:
         ap.exit(2, "make_variant: --flip/--sweep are v10 levers; %s is not a v10 bundle\n" % a.base)
+    if a.repair_rounds is not None:
+        if not V10:
+            ap.exit(2, "make_variant: --repair-rounds is a v10 lever; %s is not a v10 bundle\n" % a.base)
+        if not 0 <= a.repair_rounds <= REPAIR_MAX:
+            ap.exit(2, "make_variant: --repair-rounds needs 0 <= N <= %d\n" % REPAIR_MAX)
+        if a.repair_rounds == REPAIR_BASE:
+            ap.exit(2, "make_variant: --repair-rounds %d is the base itself (use it unchanged as arm B2)\n" % REPAIR_BASE)
+        if a.repair_rounds == 0 and a.flip:
+            ap.exit(2, "make_variant: --repair-rounds 0 replaces the fixer step that --flip extends; build them apart\n")
     if os.path.abspath(a.out) == os.path.abspath(a.base):
         ap.exit(2, "make_variant: the output dir is the base bundle\n")
     if os.path.exists(a.out): shutil.rmtree(a.out)
@@ -389,13 +432,15 @@ def main(argv=None):
         for lever in ("flip", "sweep"):
             if getattr(a, lever):
                 apply_patches(a.out, lever, V10_LEVERS[lever])
+        if a.repair_rounds is not None:
+            apply_patches(a.out, "repair-rounds", repair_patches(a.repair_rounds))
         if usage:
             edit("skills/swe-tools/SKILL.md", lambda s: s.rstrip("\n") + "\n" + "\n".join(f"- `{u}`" for u in usage) + "\n")
     except LeverError as e:
         shutil.rmtree(a.out, ignore_errors=True)
         ap.exit(2, "make_variant: %s\n" % e)
-    print(a.out, "tmpfix:", "n/a (v10)" if V10 else not a.keep_tmp_bug, "work_temp:", a.work_temp, "levers:",
-          [f for f in ("edit", "output", "gate", "flip", "sweep") if getattr(a, f)])
+    print(a.out, "tmpfix:", "n/a (v10)" if V10 else not a.keep_tmp_bug, "work_temp:", a.work_temp,
+          "repair_rounds:", a.repair_rounds, "levers:", [f for f in ("edit", "output", "gate", "flip", "sweep") if getattr(a, f)])
     return 0
 
 

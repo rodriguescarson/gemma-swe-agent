@@ -116,6 +116,95 @@ def test_stale_patch_exits_2_and_leaves_nothing(tmp_path):
     assert r.returncode == 2 and (base / "agent.yaml").exists()
 
 
+# ------------------------------------------------------------------------------ --repair-rounds (ablation arm A0)
+# docs/eval/ABLATION_REPAIR.md: A0 is v10.1 with repair rounds = 0; the lever exists only because the review of
+# 2026-09-30 found the pre-registered A0 arm could not be built (make_variant had no such lever).
+REPAIR_FILES = {"prompts/fixer.md", "prompts/verifier.md"}
+
+
+def _step3(text):
+    return next(ln for ln in text.splitlines() if ln.startswith("3. Run python3 /tmp/swe/verify.py"))
+
+
+def test_repair_rounds_zero_is_arm_a0(tmp_path):
+    """Base case: --repair-rounds 0 changes only the two prompts' repair lines; everything else is byte-identical."""
+    r = make_variant(tmp_path / "a0", "--repair-rounds", "0")
+    assert r.returncode == 0, r.stderr
+    base, got = tree(BASE), tree(tmp_path / "a0")
+    assert set(got) == set(base) and {k for k in got if got[k] != base[k]} == REPAIR_FILES
+    fx = (tmp_path / "a0" / "prompts" / "fixer.md").read_text()
+    assert _step3(fx) == ("3. Run python3 /tmp/swe/verify.py once, for its first line only; do not edit after it (no "
+                          "repair round).")
+    assert "at most 2 rounds" not in fx and "VERIFY: the first line verify printed" in fx
+    bfx = (BASE / "prompts" / "fixer.md").read_text()
+    assert fx.replace(_step3(fx), _step3(bfx)) == bfx                           # one line, nothing else
+    vr = (tmp_path / "a0" / "prompts" / "verifier.md").read_text()
+    assert "- RED: go to step 4 (no repair round).\n- REGRESSIONS: go to step 4 (no repair round).\n" in vr
+    assert "repair rounds" not in vr and "fix the regression" not in vr
+    assert "4. Run python3 /tmp/swe/finalize.py" in vr                            # finalize is not a verify round
+
+
+def test_repair_rounds_one_and_five_only_change_the_count(tmp_path):
+    for n, word in ((1, "round"), (5, "rounds")):
+        r = make_variant(tmp_path / str(n), "--repair-rounds", str(n))
+        assert r.returncode == 0, r.stderr
+        got = tree(tmp_path / str(n))
+        assert {k for k in got if got[k] != tree(BASE)[k]} == REPAIR_FILES
+        fx = (tmp_path / str(n) / "prompts" / "fixer.md").read_text()
+        assert fx == (BASE / "prompts" / "fixer.md").read_text().replace("at most 2 rounds:", "at most %d %s:" % (n, word))
+        vr = (tmp_path / str(n) / "prompts" / "verifier.md").read_text()
+        assert vr == (BASE / "prompts" / "verifier.md").read_text().replace(
+            "at most 2 repair rounds, none", "at most %d repair %s, none" % (n, word))
+
+
+@pytest.mark.parametrize("flags,msg", [
+    (["--repair-rounds", "2"], "is the base itself"),            # B2 is the unchanged base, never a rebuilt copy
+    (["--repair-rounds", "-1"], "0 <= N <= 5"),
+    (["--repair-rounds", "6"], "0 <= N <= 5"),
+    (["--repair-rounds", "0", "--flip"], "--flip extends"),     # A0 replaces the step --flip appends to
+])
+def test_repair_rounds_refusals_leave_nothing(tmp_path, flags, msg):
+    r = make_variant(tmp_path / "x", *flags)
+    assert r.returncode == 2 and msg in r.stderr, r.stderr
+    assert not (tmp_path / "x").exists()
+
+
+def test_repair_rounds_refuses_non_v10_and_a_stale_base(tmp_path):
+    r = make_variant(tmp_path / "v4x", "--repair-rounds", "0", base=ROOT / "submissions" / "v4")
+    assert r.returncode == 2 and "v10 lever" in r.stderr and not (tmp_path / "v4x").exists()
+    base = tmp_path / "base"
+    shutil.copytree(BASE, base, ignore=shutil.ignore_patterns("__pycache__"))
+    p = base / "prompts" / "verifier.md"
+    p.write_text(p.read_text().replace("at most 2 repair rounds", "at most two repair rounds"))
+    for n in ("0", "1"):
+        r = make_variant(tmp_path / "out", "--repair-rounds", n, base=base)
+        assert r.returncode == 2 and "prompts/verifier.md" in r.stderr and "not once" in r.stderr, r.stderr
+        assert not (tmp_path / "out").exists()
+
+
+def test_repair_rounds_composes_with_flip_and_sweep(tmp_path):
+    """--repair-rounds 1 patches only the round count, so it builds on top of --flip (which extends the same step)."""
+    r = make_variant(tmp_path / "both", "--flip", "--sweep", "--repair-rounds", "1")
+    assert r.returncode == 0, r.stderr
+    fx = (tmp_path / "both" / "prompts" / "fixer.md").read_text()
+    assert "at most 1 round:" in fx and "AMBER: follow its NEXT line." in fx
+
+
+def test_repair_arm_compiles_and_the_golden_runner_accepts_it(tmp_path):
+    """The A0 arm compiles with the organisers' compiler (scripts/validate.py) and has the five sub-agents the golden
+    runner needs; its bundle sha differs from the base's, which summary.py ablation checks (B2 != A0)."""
+    r = make_variant(tmp_path / "a0", "--repair-rounds", "0")
+    assert r.returncode == 0, r.stderr
+    env = dict(os.environ, LITELLM_LOCAL_MODEL_COST_MAP="True")
+    v = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(tmp_path / "a0")],
+                       capture_output=True, text=True, timeout=300, env=env)
+    assert v.returncode == 0 and "OK model=gemma-4-31b-it-qat-w4a16-ct" in v.stdout, v.stdout[-2000:] + v.stderr[-2000:]
+    sys.path.insert(0, str(ROOT / "scripts" / "golden"))
+    import run_suite as RS
+    assert RS.check_bundle(tmp_path / "a0") == list(RS.EXPECTED_AGENTS)
+    assert RS.bundle_sha(tmp_path / "a0") != RS.bundle_sha(BASE)
+
+
 # ------------------------------------------------------------------------------------------------ helpers under test
 def scripts_of(tmp_path, bundle, name="scripts"):
     d = tmp_path / name
