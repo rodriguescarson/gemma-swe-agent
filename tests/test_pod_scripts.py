@@ -109,3 +109,10 @@ def test_preflight_requires_hf_auth_before_any_run():
     # a fresh pod without an HF token finished a 3 h race and then could not back up, so it sat idle 50 min
     s = (POD / "preflight.sh").read_text()
     assert "hf auth whoami" in s and s.index("hf auth whoami") < s.index("pytest")
+
+def test_pallets_canary_runs_a_pallets_task():
+    # PALLETS=1 loads only Pallets tasks; the canary's default rich_3006 ran 0 rows and aborted the 2026-09-30 race
+    s = (POD / "chain_pallets.sh").read_text()
+    line = next(l for l in s.splitlines() if "pod/canary.sh" in l)
+    assert '"$CANARY_T"' in line and "CANARY_T=${IDS%% *}" in s
+    assert s.index("IDS=$KEEP") < s.index("CANARY_T=")

@@ -63,7 +63,8 @@ IDS=$KEEP
 for b in $CONTROL $TREAT; do
   LORA_GATE=0 bash pod/preflight.sh "submissions/$b" > "/root/preflight_$b.out" 2>&1 || abort "preflight $b"
 done
-for b in $CONTROL $TREAT; do bash pod/canary.sh "submissions/$b" || abort "canary $b"; done
+CANARY_T=${IDS%% *}   # a Pallets task: PALLETS=1 loads only Pallets tasks, so the default rich_3006 yields 0 rows
+for b in $CONTROL $TREAT; do bash pod/canary.sh "submissions/$b" "$CANARY_T" || abort "canary $b"; done
 echo "PAL_START control=$CONTROL treat=$TREAT compaction=$G4_COMPACTION scale=$G4_L4_SCALE no_editable=$G4_NO_EDITABLE $(date -u +%FT%TZ)" >> eval/progress.log
 
 # One round: control on GPU0, treatment on GPU1.
