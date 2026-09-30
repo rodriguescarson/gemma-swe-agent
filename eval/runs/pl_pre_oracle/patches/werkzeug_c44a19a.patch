@@ -1,0 +1,174 @@
+diff --git a/src/werkzeug/datastructures/__init__.py b/src/werkzeug/datastructures/__init__.py
+index d493fc57..32d05efa 100644
+--- a/src/werkzeug/datastructures/__init__.py
++++ b/src/werkzeug/datastructures/__init__.py
+@@ -10,7 +10,7 @@ from .auth import WWWAuthenticate as WWWAuthenticate
+ from .cache_control import RequestCacheControl as RequestCacheControl
+ from .cache_control import ResponseCacheControl as ResponseCacheControl
+ from .csp import ContentSecurityPolicy as ContentSecurityPolicy
+-from .etag import ETags as ETags
++from .etag import ETagSet as ETagSet
+ from .file_storage import FileMultiDict as FileMultiDict
+ from .file_storage import FileStorage as FileStorage
+ from .headers import EnvironHeaders as EnvironHeaders
+@@ -32,6 +32,15 @@ if not t.TYPE_CHECKING:
+     def __getattr__(name: str) -> t.Any:
+         import warnings
+ 
++        if name == "ETags":
++            warnings.warn(
++                "'ETags' has been renamed to 'ETagSet'. The old name is deprecated and"
++                " will be removed in Werkzeug 3.3.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            return ETagSet
++
+         if name == "CharsetAccept":
+             from .accept import _CharsetAccept
+ 
+diff --git a/src/werkzeug/datastructures/etag.py b/src/werkzeug/datastructures/etag.py
+index 15005e05..836767e5 100644
+--- a/src/werkzeug/datastructures/etag.py
++++ b/src/werkzeug/datastructures/etag.py
+@@ -20,7 +20,7 @@ _etag_re = re.compile(
+ )
+ 
+ 
+-class ETags(cabc.Collection[str]):
++class ETagSet(cabc.Collection[str]):
+     """A parsed ``If-Match`` or ``If-None-Match`` header.
+ 
+     :attr:`.Request.if_match` and :attr:`.Request.if_none_match` return an
+@@ -29,6 +29,9 @@ class ETags(cabc.Collection[str]):
+     :param strong_etags: Unquoted values that were not marked weak.
+     :param weak_etags: Unquoted values that were marked weak.
+     :param star_tag: Whether ``*`` is present in the header value.
++
++    .. versionchanged:: 3.2
++        Renamed from ``ETags``.
+     """
+ 
+     def __init__(
+@@ -205,3 +208,20 @@ class ETags(cabc.Collection[str]):
+ 
+     def __repr__(self) -> str:
+         return f"<{type(self).__name__} {str(self)!r}>"
++
++
++if not t.TYPE_CHECKING:
++
++    def __getattr__(name: str) -> t.Any:
++        if name == "ETags":
++            import warnings
++
++            warnings.warn(
++                "'ETags' has been renamed to 'ETagSet'. The old name is deprecated and"
++                " will be removed in Werkzeug 3.3.",
++                DeprecationWarning,
++                stacklevel=2,
++            )
++            return ETagSet
++
++        raise AttributeError(name)
+diff --git a/src/werkzeug/http.py b/src/werkzeug/http.py
+index 90f6de5e..50cba4b0 100644
+--- a/src/werkzeug/http.py
++++ b/src/werkzeug/http.py
+@@ -1086,7 +1086,7 @@ def unquote_etag(
+     return etag[start + 1 : -1], weak
+ 
+ 
+-def _parse_etags(value: str | None) -> ds.ETags:
++def _parse_etags(value: str | None) -> ds.ETagSet:
+     """Parse an ETag header.
+ 
+     :param value: the tag header to parse
+@@ -1106,7 +1106,7 @@ def _parse_etags(value: str | None) -> ds.ETags:
+         DeprecationWarning,
+         stacklevel=2,
+     )
+-    return ds.ETags.from_header(value)
++    return ds.ETagSet.from_header(value)
+ 
+ 
+ def generate_etag(data: bytes) -> str:
+diff --git a/src/werkzeug/sansio/http.py b/src/werkzeug/sansio/http.py
+index f2a205a9..14d7c6e6 100644
+--- a/src/werkzeug/sansio/http.py
++++ b/src/werkzeug/sansio/http.py
+@@ -77,13 +77,13 @@ def is_resource_modified(
+             # https://tools.ietf.org/html/rfc7232#section-3.2
+             # "A recipient MUST use the weak comparison function when comparing
+             # entity-tags for If-None-Match"
+-            if if_none_match := ds.ETags.from_header(http_if_none_match):
++            if if_none_match := ds.ETagSet.from_header(http_if_none_match):
+                 unmodified = if_none_match.contains_weak(etag)
+ 
+             # https://tools.ietf.org/html/rfc7232#section-3.1
+             # "Origin server MUST use the strong comparison function when
+             # comparing entity-tags for If-Match"
+-            if if_match := ds.ETags.from_header(http_if_match):
++            if if_match := ds.ETagSet.from_header(http_if_match):
+                 unmodified = not if_match.is_strong(etag)
+ 
+     return not unmodified
+diff --git a/src/werkzeug/sansio/request.py b/src/werkzeug/sansio/request.py
+index 6f41be18..b8a5f832 100644
+--- a/src/werkzeug/sansio/request.py
++++ b/src/werkzeug/sansio/request.py
+@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl
+ from .._header_property import header_property
+ from ..datastructures import Accept
+ from ..datastructures import Authorization
+-from ..datastructures import ETags
++from ..datastructures import ETagSet
+ from ..datastructures import Headers
+ from ..datastructures import HeaderSet
+ from ..datastructures import IfRange
+@@ -495,9 +495,9 @@ class Request:
+         """,
+     )
+ 
+-    if_match = header_property[ETags](
++    if_match = header_property[ETagSet](
+         "If-Match",
+-        load_func=ETags.from_header,
++        load_func=ETagSet.from_header,
+         read_only=True,
+         doc="""The ``If-Match`` header. If the response's ETag is present in
+         this set, it returns ``412`` instead.
+@@ -506,9 +506,9 @@ class Request:
+         """,
+     )
+ 
+-    if_none_match = header_property[ETags](
++    if_none_match = header_property[ETagSet](
+         "If-None-Match",
+-        load_func=ETags.from_header,
++        load_func=ETagSet.from_header,
+         read_only=True,
+         doc="""The ``If-None-Match`` header. If the response's ETag is present
+         in this set, it returns ``304`` for ``GET`` requests, or ``412`` for
+diff --git a/src/werkzeug/wrappers/response.py b/src/werkzeug/wrappers/response.py
+index f243e9b3..ae929c83 100644
+--- a/src/werkzeug/wrappers/response.py
++++ b/src/werkzeug/wrappers/response.py
+@@ -6,7 +6,7 @@ from http import HTTPStatus
+ from urllib.parse import urljoin
+ 
+ from .._internal import _get_environ
+-from ..datastructures import ETags
++from ..datastructures import ETagSet
+ from ..datastructures import Headers
+ from ..datastructures import Range
+ from ..http import generate_etag
+@@ -779,7 +779,7 @@ class Response(_SansIOResponse):
+                 self.headers.get("ETag"),
+                 last_modified=self.headers.get("Last-Modified"),
+             ):
+-                if ETags.from_header(environ.get("HTTP_IF_MATCH")):
++                if ETagSet.from_header(environ.get("HTTP_IF_MATCH")):
+                     self.status_code = 412
+                 else:
+                     self.status_code = 304
