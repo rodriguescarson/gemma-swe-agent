@@ -1,0 +1,547 @@
+STDOUT:
+........................................................ssssssssssssssss [ 25%]
+sssss................ss........................F..F......FFFFF.......... [ 51%]
+.....F.................................................................. [ 77%]
+................................................................         [100%]
+=================================== FAILURES ===================================
+_____________ test_pipepager_less_detection_matches_stem[less.exe] _____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7087653c6720>
+tmp_path = PosixPath('/tmp/swegemma_sandbox_320943e6-9d9_a8tv9kxu/tmp/pytest-of-root/pytest-0/test_pipepager_less_detection_1')
+pager_name = 'less.exe', expected_color = True
+
+    @pytest.mark.skipif(WIN, reason="The fake pager is a shell script.")
+    @pytest.mark.parametrize(
+        ("pager_name", "expected_color"),
+        [
+            pytest.param("less", True, id="less"),
+            pytest.param("less.exe", True, id="less.exe"),
+            pytest.param("LESS.EXE", False, id="upper case stays unmatched on POSIX"),
+            pytest.param("cat", False, id="not less"),
+        ],
+    )
+    def test_pipepager_less_detection_matches_stem(
+        monkeypatch, tmp_path, pager_name, expected_color
+    ):
+        """The ``less`` detection behind the ``LESS=-R`` auto-enable matches the
+        command stem, so a ``less.exe`` resolved on Windows is recognized the same
+        as a bare ``less``. POSIX keeps an exact, case-sensitive match.
+        """
+        fake_pager = tmp_path / pager_name
+        fake_pager.write_text("#!/bin/sh\ncat\n", encoding="UTF-8")
+        fake_pager.chmod(0o755)
+    
+        monkeypatch.setattr(click._termui_impl, "isatty", lambda _: True)
+        monkeypatch.setitem(click._termui_impl.os.environ, "PAGER", str(fake_pager))
+        monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+    
+        with click.get_pager_file() as pager:
+>           assert pager.color is expected_color
+E           assert False is True
+E            +  where False = <click._termui_impl._PagerWriter object at 0x7087653c4320>.color
+
+tests/test_termui.py:790: AssertionError
+__________ test_pipepager_less_detection_case_insensitive_on_windows ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x708765330830>
+tmp_path = PosixPath('/tmp/swegemma_sandbox_320943e6-9d9_a8tv9kxu/tmp/pytest-of-root/pytest-0/test_pipepager_less_detection_4')
+
+    @pytest.mark.skipif(WIN, reason="The fake pager is a shell script.")
+    def test_pipepager_less_detection_case_insensitive_on_windows(monkeypatch, tmp_path):
+        """Windows filesystems are case-insensitive, so ``which`` resolves
+        whatever case the file carries: the ``less`` match casefolds there.
+    
+        Runs ``_pipepager`` directly: faking ``WIN`` makes
+        ``_pager_contextmanager`` route to the temp file strategy instead.
+        """
+        fake_pager = tmp_path / "LESS.EXE"
+        fake_pager.write_text("#!/bin/sh\ncat\n", encoding="UTF-8")
+        fake_pager.chmod(0o755)
+    
+        monkeypatch.setattr(click._termui_impl, "WIN", True)
+        monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+    
+        with click._termui_impl._pipepager(fake_pager, []) as (_, color):
+>           assert color is True
+E           assert None is True
+
+tests/test_termui.py:809: AssertionError
+_____ test_pipepager_less_raw_mode_detection[long option with r substring] _____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7087653c9af0>
+cmd_parts = ['less'], less_env = '--prompt=resume', expected_color = None
+expected_less = '--prompt=resume'
+
+    @pytest.mark.parametrize(
+        ("cmd_parts", "less_env", "expected_color", "expected_less"),
+        [
+            pytest.param(["less"], None, True, "-R", id="no flags: inject LESS=-R"),
+            pytest.param(["less", "-R"], None, True, None, id="explicit -R"),
+            pytest.param(["less", "-rX"], None, True, None, id="bundled short flags"),
+            pytest.param(["less"], "-R", True, "-R", id="LESS env var"),
+            pytest.param(
+                ["less", "--RAW-CONTROL-CHARS"], None, True, None, id="long option"
+            ),
+            pytest.param(["less", "-X"], None, None, None, id="unrelated flag"),
+            pytest.param(
+                ["less"],
+                "--prompt=resume",
+                None,
+                "--prompt=resume",
+                id="long option with r substring",
+            ),
+            pytest.param(["less", "README.md"], None, None, None, id="filename with R"),
+            pytest.param(
+                ["less", "requirements.txt"], None, None, None, id="filename with r"
+            ),
+            pytest.param(
+                ["less", "--", "README.md"],
+                None,
+                None,
+                None,
+                id="option terminator shields filenames",
+            ),
+            pytest.param(
+                # The detection matches the bare long option: an ``r`` inside an
+                # option value does not request raw mode.
+                ["less", "--raw-control-chars=x"],
+                None,
+                None,
+                None,
+                id="long option with value",
+            ),
+            pytest.param(
+                # Unbalanced quotes make shlex.split raise: the detection falls
+                # back to whitespace splitting, which still finds the -R.
+                ["less"],
+                '-R "',
+                True,
+                '-R "',
+                id="unparsable LESS",
+            ),
+        ],
+    )
+    def test_pipepager_less_raw_mode_detection(
+        monkeypatch, cmd_parts, less_env, expected_color, expected_less
+    ):
+        """Raw-mode detection parses the option tokens from ``LESS`` and the
+        command line. Filenames and unrelated options carrying the letter ``r``
+        or ``R`` do not request raw mode, and ``_pipepager`` then reports no
+        opinion (``None``) that :func:`get_pager_file` settles to off.
+        {issue}`3416`
+        """
+        if less_env is None:
+            monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+        else:
+            monkeypatch.setitem(click._termui_impl.os.environ, "LESS", less_env)
+    
+        processes: list[_FakePagerProcess] = []
+    
+        def fake_popen(*args, **kwargs):
+            process = _FakePagerProcess(*args, **kwargs)
+            processes.append(process)
+            return process
+    
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        # Popen is faked, so no real binary needs to exist behind the resolved
+        # path: the stem is all the less detection reads from it.
+        cmd_path = pathlib.Path("/tests/less")
+    
+        with click._termui_impl._pipepager(cmd_path, cmd_parts[1:]) as (_, color):
+            pass
+    
+>       assert color is expected_color
+E       assert True is None
+
+tests/test_termui.py:907: AssertionError
+___________ test_pipepager_less_raw_mode_detection[filename with R] ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7087653c8b60>
+cmd_parts = ['less', 'README.md'], less_env = None, expected_color = None
+expected_less = None
+
+    @pytest.mark.parametrize(
+        ("cmd_parts", "less_env", "expected_color", "expected_less"),
+        [
+            pytest.param(["less"], None, True, "-R", id="no flags: inject LESS=-R"),
+            pytest.param(["less", "-R"], None, True, None, id="explicit -R"),
+            pytest.param(["less", "-rX"], None, True, None, id="bundled short flags"),
+            pytest.param(["less"], "-R", True, "-R", id="LESS env var"),
+            pytest.param(
+                ["less", "--RAW-CONTROL-CHARS"], None, True, None, id="long option"
+            ),
+            pytest.param(["less", "-X"], None, None, None, id="unrelated flag"),
+            pytest.param(
+                ["less"],
+                "--prompt=resume",
+                None,
+                "--prompt=resume",
+                id="long option with r substring",
+            ),
+            pytest.param(["less", "README.md"], None, None, None, id="filename with R"),
+            pytest.param(
+                ["less", "requirements.txt"], None, None, None, id="filename with r"
+            ),
+            pytest.param(
+                ["less", "--", "README.md"],
+                None,
+                None,
+                None,
+                id="option terminator shields filenames",
+            ),
+            pytest.param(
+                # The detection matches the bare long option: an ``r`` inside an
+                # option value does not request raw mode.
+                ["less", "--raw-control-chars=x"],
+                None,
+                None,
+                None,
+                id="long option with value",
+            ),
+            pytest.param(
+                # Unbalanced quotes make shlex.split raise: the detection falls
+                # back to whitespace splitting, which still finds the -R.
+                ["less"],
+                '-R "',
+                True,
+                '-R "',
+                id="unparsable LESS",
+            ),
+        ],
+    )
+    def test_pipepager_less_raw_mode_detection(
+        monkeypatch, cmd_parts, less_env, expected_color, expected_less
+    ):
+        """Raw-mode detection parses the option tokens from ``LESS`` and the
+        command line. Filenames and unrelated options carrying the letter ``r``
+        or ``R`` do not request raw mode, and ``_pipepager`` then reports no
+        opinion (``None``) that :func:`get_pager_file` settles to off.
+        {issue}`3416`
+        """
+        if less_env is None:
+            monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+        else:
+            monkeypatch.setitem(click._termui_impl.os.environ, "LESS", less_env)
+    
+        processes: list[_FakePagerProcess] = []
+    
+        def fake_popen(*args, **kwargs):
+            process = _FakePagerProcess(*args, **kwargs)
+            processes.append(process)
+            return process
+    
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        # Popen is faked, so no real binary needs to exist behind the resolved
+        # path: the stem is all the less detection reads from it.
+        cmd_path = pathlib.Path("/tests/less")
+    
+        with click._termui_impl._pipepager(cmd_path, cmd_parts[1:]) as (_, color):
+            pass
+    
+>       assert color is expected_color
+E       assert True is None
+
+tests/test_termui.py:907: AssertionError
+___________ test_pipepager_less_raw_mode_detection[filename with r] ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7087653cb5c0>
+cmd_parts = ['less', 'requirements.txt'], less_env = None, expected_color = None
+expected_less = None
+
+    @pytest.mark.parametrize(
+        ("cmd_parts", "less_env", "expected_color", "expected_less"),
+        [
+            pytest.param(["less"], None, True, "-R", id="no flags: inject LESS=-R"),
+            pytest.param(["less", "-R"], None, True, None, id="explicit -R"),
+            pytest.param(["less", "-rX"], None, True, None, id="bundled short flags"),
+            pytest.param(["less"], "-R", True, "-R", id="LESS env var"),
+            pytest.param(
+                ["less", "--RAW-CONTROL-CHARS"], None, True, None, id="long option"
+            ),
+            pytest.param(["less", "-X"], None, None, None, id="unrelated flag"),
+            pytest.param(
+                ["less"],
+                "--prompt=resume",
+                None,
+                "--prompt=resume",
+                id="long option with r substring",
+            ),
+            pytest.param(["less", "README.md"], None, None, None, id="filename with R"),
+            pytest.param(
+                ["less", "requirements.txt"], None, None, None, id="filename with r"
+            ),
+            pytest.param(
+                ["less", "--", "README.md"],
+                None,
+                None,
+                None,
+                id="option terminator shields filenames",
+            ),
+            pytest.param(
+                # The detection matches the bare long option: an ``r`` inside an
+                # option value does not request raw mode.
+                ["less", "--raw-control-chars=x"],
+                None,
+                None,
+                None,
+                id="long option with value",
+            ),
+            pytest.param(
+                # Unbalanced quotes make shlex.split raise: the detection falls
+                # back to whitespace splitting, which still finds the -R.
+                ["less"],
+                '-R "',
+                True,
+                '-R "',
+                id="unparsable LESS",
+            ),
+        ],
+    )
+    def test_pipepager_less_raw_mode_detection(
+        monkeypatch, cmd_parts, less_env, expected_color, expected_less
+    ):
+        """Raw-mode detection parses the option tokens from ``LESS`` and the
+        command line. Filenames and unrelated options carrying the letter ``r``
+        or ``R`` do not request raw mode, and ``_pipepager`` then reports no
+        opinion (``None``) that :func:`get_pager_file` settles to off.
+        {issue}`3416`
+        """
+        if less_env is None:
+            monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+        else:
+            monkeypatch.setitem(click._termui_impl.os.environ, "LESS", less_env)
+    
+        processes: list[_FakePagerProcess] = []
+    
+        def fake_popen(*args, **kwargs):
+            process = _FakePagerProcess(*args, **kwargs)
+            processes.append(process)
+            return process
+    
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        # Popen is faked, so no real binary needs to exist behind the resolved
+        # path: the stem is all the less detection reads from it.
+        cmd_path = pathlib.Path("/tests/less")
+    
+        with click._termui_impl._pipepager(cmd_path, cmd_parts[1:]) as (_, color):
+            pass
+    
+>       assert color is expected_color
+E       assert True is None
+
+tests/test_termui.py:907: AssertionError
+_ test_pipepager_less_raw_mode_detection[option terminator shields filenames] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7087653cb740>
+cmd_parts = ['less', '--', 'README.md'], less_env = None, expected_color = None
+expected_less = None
+
+    @pytest.mark.parametrize(
+        ("cmd_parts", "less_env", "expected_color", "expected_less"),
+        [
+            pytest.param(["less"], None, True, "-R", id="no flags: inject LESS=-R"),
+            pytest.param(["less", "-R"], None, True, None, id="explicit -R"),
+            pytest.param(["less", "-rX"], None, True, None, id="bundled short flags"),
+            pytest.param(["less"], "-R", True, "-R", id="LESS env var"),
+            pytest.param(
+                ["less", "--RAW-CONTROL-CHARS"], None, True, None, id="long option"
+            ),
+            pytest.param(["less", "-X"], None, None, None, id="unrelated flag"),
+            pytest.param(
+                ["less"],
+                "--prompt=resume",
+                None,
+                "--prompt=resume",
+                id="long option with r substring",
+            ),
+            pytest.param(["less", "README.md"], None, None, None, id="filename with R"),
+            pytest.param(
+                ["less", "requirements.txt"], None, None, None, id="filename with r"
+            ),
+            pytest.param(
+                ["less", "--", "README.md"],
+                None,
+                None,
+                None,
+                id="option terminator shields filenames",
+            ),
+            pytest.param(
+                # The detection matches the bare long option: an ``r`` inside an
+                # option value does not request raw mode.
+                ["less", "--raw-control-chars=x"],
+                None,
+                None,
+                None,
+                id="long option with value",
+            ),
+            pytest.param(
+                # Unbalanced quotes make shlex.split raise: the detection falls
+                # back to whitespace splitting, which still finds the -R.
+                ["less"],
+                '-R "',
+                True,
+                '-R "',
+                id="unparsable LESS",
+            ),
+        ],
+    )
+    def test_pipepager_less_raw_mode_detection(
+        monkeypatch, cmd_parts, less_env, expected_color, expected_less
+    ):
+        """Raw-mode detection parses the option tokens from ``LESS`` and the
+        command line. Filenames and unrelated options carrying the letter ``r``
+        or ``R`` do not request raw mode, and ``_pipepager`` then reports no
+        opinion (``None``) that :func:`get_pager_file` settles to off.
+        {issue}`3416`
+        """
+        if less_env is None:
+            monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+        else:
+            monkeypatch.setitem(click._termui_impl.os.environ, "LESS", less_env)
+    
+        processes: list[_FakePagerProcess] = []
+    
+        def fake_popen(*args, **kwargs):
+            process = _FakePagerProcess(*args, **kwargs)
+            processes.append(process)
+            return process
+    
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        # Popen is faked, so no real binary needs to exist behind the resolved
+        # path: the stem is all the less detection reads from it.
+        cmd_path = pathlib.Path("/tests/less")
+    
+        with click._termui_impl._pipepager(cmd_path, cmd_parts[1:]) as (_, color):
+            pass
+    
+>       assert color is expected_color
+E       assert True is None
+
+tests/test_termui.py:907: AssertionError
+________ test_pipepager_less_raw_mode_detection[long option with value] ________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x708764ec9070>
+cmd_parts = ['less', '--raw-control-chars=x'], less_env = None
+expected_color = None, expected_less = None
+
+    @pytest.mark.parametrize(
+        ("cmd_parts", "less_env", "expected_color", "expected_less"),
+        [
+            pytest.param(["less"], None, True, "-R", id="no flags: inject LESS=-R"),
+            pytest.param(["less", "-R"], None, True, None, id="explicit -R"),
+            pytest.param(["less", "-rX"], None, True, None, id="bundled short flags"),
+            pytest.param(["less"], "-R", True, "-R", id="LESS env var"),
+            pytest.param(
+                ["less", "--RAW-CONTROL-CHARS"], None, True, None, id="long option"
+            ),
+            pytest.param(["less", "-X"], None, None, None, id="unrelated flag"),
+            pytest.param(
+                ["less"],
+                "--prompt=resume",
+                None,
+                "--prompt=resume",
+                id="long option with r substring",
+            ),
+            pytest.param(["less", "README.md"], None, None, None, id="filename with R"),
+            pytest.param(
+                ["less", "requirements.txt"], None, None, None, id="filename with r"
+            ),
+            pytest.param(
+                ["less", "--", "README.md"],
+                None,
+                None,
+                None,
+                id="option terminator shields filenames",
+            ),
+            pytest.param(
+                # The detection matches the bare long option: an ``r`` inside an
+                # option value does not request raw mode.
+                ["less", "--raw-control-chars=x"],
+                None,
+                None,
+                None,
+                id="long option with value",
+            ),
+            pytest.param(
+                # Unbalanced quotes make shlex.split raise: the detection falls
+                # back to whitespace splitting, which still finds the -R.
+                ["less"],
+                '-R "',
+                True,
+                '-R "',
+                id="unparsable LESS",
+            ),
+        ],
+    )
+    def test_pipepager_less_raw_mode_detection(
+        monkeypatch, cmd_parts, less_env, expected_color, expected_less
+    ):
+        """Raw-mode detection parses the option tokens from ``LESS`` and the
+        command line. Filenames and unrelated options carrying the letter ``r``
+        or ``R`` do not request raw mode, and ``_pipepager`` then reports no
+        opinion (``None``) that :func:`get_pager_file` settles to off.
+        {issue}`3416`
+        """
+        if less_env is None:
+            monkeypatch.delitem(click._termui_impl.os.environ, "LESS", raising=False)
+        else:
+            monkeypatch.setitem(click._termui_impl.os.environ, "LESS", less_env)
+    
+        processes: list[_FakePagerProcess] = []
+    
+        def fake_popen(*args, **kwargs):
+            process = _FakePagerProcess(*args, **kwargs)
+            processes.append(process)
+            return process
+    
+        monkeypatch.setattr(subprocess, "Popen", fake_popen)
+        # Popen is faked, so no real binary needs to exist behind the resolved
+        # path: the stem is all the less detection reads from it.
+        cmd_path = pathlib.Path("/tests/less")
+    
+        with click._termui_impl._pipepager(cmd_path, cmd_parts[1:]) as (_, color):
+            pass
+    
+>       assert color is expected_color
+E       assert True is None
+
+tests/test_termui.py:907: AssertionError
+___________________ test_tempfile_pager_passes_pager_params ____________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x70876541aea0>
+capfd = <_pytest.capture.CaptureFixture object at 0x70876541ab40>
+
+    @pytest.mark.skipif(shutil.which("head") is None, reason="head not available")
+    def test_tempfile_pager_passes_pager_params(monkeypatch, capfd):
+        """The temp file backend forwards ``PAGER`` parameters to the command.
+    
+        ``head -n 1`` renders one line out of two when the ``-n 1`` reaches the
+        command.
+        """
+        _force_tempfile_pager(monkeypatch, pager_cmd="head -n 1")
+    
+        click.echo_via_pager("line one\nline two\n")
+    
+        out, err = capfd.readouterr()
+        assert err == ""
+>       assert out.replace("\r\n", "\n") == "line one\n"
+E       AssertionError: assert 'line one\nline two\n\n' == 'line one\n'
+E         
+E           line one
+E         + line two
+E         +
+
+tests/test_termui.py:1245: AssertionError
+- generated xml file: /tmp/swegemma_sandbox_320943e6-9d9_a8tv9kxu/tmp/_swegemma_junit_3300798bafd4.xml -
+=========================== short test summary info ============================
+FAILED tests/test_termui.py::test_pipepager_less_detection_matches_stem[less.exe]
+FAILED tests/test_termui.py::test_pipepager_less_detection_case_insensitive_on_windows
+FAILED tests/test_termui.py::test_pipepager_less_raw_mode_detection[long option with r substring]
+FAILED tests/test_termui.py::test_pipepager_less_raw_mode_detection[filename with R]
+FAILED tests/test_termui.py::test_pipepager_less_raw_mode_detection[filename with r]
+FAILED tests/test_termui.py::test_pipepager_less_raw_mode_detection[option terminator shields filenames]
+FAILED tests/test_termui.py::test_pipepager_less_raw_mode_detection[long option with value]
+FAILED tests/test_termui.py::test_tempfile_pager_passes_pager_params - Assert...
+8 failed, 249 passed, 23 skipped in 0.45s
+
+STDERR:
