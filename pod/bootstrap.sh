@@ -19,7 +19,7 @@ echo "ENV DONE $(date -u)"
 # model (Apache-2.0, not gated) in background while data downloads
 ( hf download google/gemma-4-31B-it-qat-w4a16-ct --local-dir /root/models/g4 > /root/model_dl.log 2>&1 && echo MODEL_OK >> /root/model_dl.log ) &
 MPID=$!
-python scripts/fetch_data.py > /root/data_dl.log 2>&1 || true
+if [ "${SKIP_DATA:-0}" = 1 ]; then echo "SKIP_DATA=1: competition data not fetched" > /root/data_dl.log; else python scripts/fetch_data.py > /root/data_dl.log 2>&1 || true; fi
 python scripts/fetch_data.py wheels/ >> /root/data_dl.log 2>&1 || true
 ln -sfn /root/g4/data/raw/wheels /wheels
 ln -sfn /root/g4/data/raw/graphs /root/g4/data/graphs

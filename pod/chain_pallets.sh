@@ -43,8 +43,10 @@ IDS=$(tr '\n' ' ' < data/pallets/harness/ids.txt)
 # CPU pre-flight (pallets.md 7.3 step 1): gold must resolve and the empty patch must not
 export G4_WHEELHOUSE=/root/g4/data/pallets/harness/wheels
 for m in oracle skip-agent-patch; do
+  # --oracle is a wrapper flag (before eval); --skip-agent-patch is a swegemma eval flag (after eval)
+  pre=""; post=""; [ $m = oracle ] && pre=--oracle || post=--skip-agent-patch
   # shellcheck disable=SC2086
-  /root/hvenv/bin/python scripts/pallets/run_eval_pallets.py --$m eval --tasks data/pallets/harness/tasks.jsonl \
+  /root/hvenv/bin/python scripts/pallets/run_eval_pallets.py $pre eval $post --tasks data/pallets/harness/tasks.jsonl \
     --snapshots-dir data/pallets/harness/snapshots --submission-dir submissions/v4 --results-dir eval/runs/pl_pre_$m \
     --sandbox subprocess --concurrency 4 --display quiet --task-ids $IDS > eval/runs/pl_pre_$m.out 2>&1
 done
