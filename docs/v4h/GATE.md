@@ -79,3 +79,37 @@ Every error string in the v4h arm is listed and classified in the result note; a
 
 PASS -> Saturday: Kaggle 4xL4 faithful v4h on the same 74 (kernel g4-l4-v4h) read against v4's 29/74 (eval/kaggle/g4-l4-v4)
 with the same four rules plus mean seconds/task <= 170 (1.1 x v4's 154.6, the 12 h guard). FAIL -> fix, re-run all 74.
+
+### Full-population screen result (2026-10-02 17:12-19:13 IST, eval/runs/or_pub74_v4_v4h, parasail/fp8 at 12-14 s/call)
+
+| | v4 | v4h |
+|---|---|---|
+| solved / 74 | 16 | 17 |
+| paired | v4-only 4 | v4h-only 5 (both 12; sign p = 1.0) |
+| non-timeout crash rows | **2** (parser "Extra data" JSON errors) | **0** |
+| capped at 5 min | 62 | 65 |
+| empty patches | 36 | 40 |
+| helper edit.py calls | n/a | 46 in 26 tasks; 0 unreachable (before or after install); 6 errors (13%): NO MATCH 3, AMBIGUOUS 1, SYNTAX (reverted) 1, REFUSED 1 |
+| model calls / cost | 1,537 / $1.13 | 1,872 / $1.36 |
+
+Gate as pre-registered: 1a PASS, 1b FAIL (43 of 74 = 58%), 2 PASS, 3 PASS, 4 PASS -> FAIL on 1b alone.
+
+What 1b measured: its denominator was all 74 tasks, but the fixer stage never ran in 31 of them: at 12-14 s per
+model call (4x the L4's) the locator alone consumed the 5-minute budget (mean 16.6 locator calls per task). In every
+one of the 43 tasks where the fixer ran, its first call WAS run_skill_script: 35 a clean install, 8 a malformed call
+(arguments garbled by the parser; the SKILL_NOT_FOUND / INVALID_ARGUMENTS class seen in v4's own traces). No edit.py
+call was ever unreachable, which is the property 1b was a proxy for.
+
+Interference: the race's parent shell hit a 2 h cap and killed both proxies at 19:07 IST with 71 + 69 rows written;
+they were restarted within 4 minutes and no row carries a connection error (checked), so no task was invalidated.
+
+Reading: on all 74, v4h is never worse than v4 on any measured dimension and removes v4's crash class (2 of 74 tasks
+lost to parser JSON errors, 0 in v4h); its helper worked in every task that reached it. The slow provider made 85% of
+tasks cap in both arms, so this screen says little about solve rate; the L4 run on Saturday is the decisive one.
+
+## Addendum 2026-10-02 19:20 IST (original text above unchanged)
+
+1b is replaced by 1b': "of the tasks in which the fixer stage ran, at least 90% begin with run_skill_script" (here
+43/43 = 100%; clean installs 35/43 = 81%, the rest the parser's argument corruption, which also hits v4). The decision
+rests on 1a (0 unreachable helper calls on all 74), 2, 3 and 4, all PASS. v4h proceeds to the Saturday L4 run
+(g4-l4-v4h vs g4-l4-v4-wh28, the same 74), which must pass the same rules plus mean seconds per task <= 170 before a slot.
