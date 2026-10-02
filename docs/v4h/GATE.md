@@ -130,3 +130,14 @@ Reading, sample 2 of the collection (v4h2 on the same 159 tasks, same provider, 
 HANDLED if v4h2 has at most 3 such crash rows over 159 tasks (vs v4h's 10 of 123 projected to ~13 of 159, i.e. a
 cut of at least 75%); PARTIAL if 4-7 (ship v4h2 only after a second idea is tried); UNHANDLED if 8+ (prompt wording
 does not reach it; a structural change is needed). Reported, not gated: solved, empty patches, helper error rate.
+
+## Slot 2026-10-03 00:01 UTC (pre-registered 2026-10-03 01:05 IST; Carson: "lets not waste the round")
+
+`scripts/decide_sub9.sh` at 05:25 IST reads collection sample 2 (v4h2 on the 159 Pallets training tasks, running since
+~02:00 IST): submit **v4h2** (g4agent-v4h2 v1) iff >= 80 tasks are finished AND at most 2 carry the heredoc-as-tool-name
+crash AND no other non-timeout crash class appears; otherwise submit **v4** (g4agent-sub3 v1) as the control read on the
+rebuilt scorer. The choice and the numbers are logged to eval/submit_log.txt. The four Kaggle L4 kernels wait until this
+submission has finished scoring (overnight.sh step 6), so our GPU use never overlaps the scorer.
+Reading v4h2 if chosen: >= 9/58 (0.15) means the thin-v4 direction gains on hidden tasks; 7-8/58 within noise of v4;
+<= 6/58 a regression to explain (crash class or the edit channel). Reading v4 if chosen: the new-scorer baseline for
+every later comparison (old scorer 0.12 x2).
