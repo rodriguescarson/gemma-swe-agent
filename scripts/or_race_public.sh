@@ -10,7 +10,7 @@
 # the harness's wall-clock cap and the helper clock (scale 1.0) both see L4 speed whatever the provider's speed.
 # PROXY result: screening only (bf16 + OpenRouter's tool parser, not int4 + vLLM's gemma4 parser).
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/.."
 CONTROL=${1:?control bundle}; TREAT=${2:?treat bundle}
 OUT="${RACE_OUT:-$PWD/eval/runs/or_pub_$(date -u +%Y%m%dT%H%M%SZ)}"; mkdir -p "$OUT"
 IDS_FILE=${IDS_FILE:-data/kaggle_valid_ids.txt}; cp "$IDS_FILE" "$OUT/ids.txt"
