@@ -59,8 +59,10 @@ PY
 # shellcheck disable=SC2046
 uv pip install -q --system --no-deps $(cat /tmp/newest.txt)
 bash /g4/pod/buildenv.sh > /out/buildenv.log 2>&1
-cp -r "/g4/$HARNESS" /root/h
-export G4_WHEELHOUSE=/root/h/wheels G4_COMPACTION=1 G4_L4_SCALE=1.0 G4_NO_EDITABLE=1 OPENAI_API_KEY=EMPTY
+# 2026-10-02: use the harness in place through the read-only mount. Copying it into the container put 9.6 GB of
+# graphs+embeddings into the Docker VM and drove the Mac under 3 GB free within 80 s (watchdog kill).
+H="/g4/$HARNESS"
+export G4_WHEELHOUSE="$H/wheels" G4_COMPACTION=1 G4_L4_SCALE=1.0 G4_NO_EDITABLE=1 OPENAI_API_KEY=EMPTY
 export OPENAI_BASE_URL=http://host.docker.internal:$PORT/v1
 budget() {
   python - "$1/eval_config.yaml" <<'PY'
@@ -93,7 +95,7 @@ fi
 [ -z "$IDS" ] && { echo "SAMPLE_DONE s$SAMPLE (nothing left) $(date -u +%FT%TZ)" >> /out/progress.log; exit 0; }
 echo "SAMPLE_START s$SAMPLE $(echo $IDS | wc -w) tasks $(date -u +%FT%TZ) $(budget /tmp/bundle)" >> /out/progress.log
 # shellcheck disable=SC2046,SC2086
-TMPDIR=/tmp/sbx python /g4/scripts/pallets/run_eval_pallets.py eval --tasks /root/h/tasks.jsonl --snapshots-dir /root/h/snapshots \
+TMPDIR=/tmp/sbx python /g4/scripts/pallets/run_eval_pallets.py eval --tasks "$H/tasks.jsonl" --snapshots-dir "$H/snapshots" \
   --submission-dir /tmp/bundle --results-dir /out/s$SAMPLE --sandbox subprocess $(budget /tmp/bundle) --concurrency $CONC \
   --display quiet --task-ids $IDS > /out/s$SAMPLE.out 2>&1 || true
 echo "SAMPLE_DONE s$SAMPLE rows=$(wc -l < $DONE 2>/dev/null || echo 0) $(date -u +%FT%TZ)" >> /out/progress.log
