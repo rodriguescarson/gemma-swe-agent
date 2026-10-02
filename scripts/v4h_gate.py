@@ -39,18 +39,21 @@ def arm_stats(out, bundle):
 
 
 def main(out, treat="v4h", control="v4"):
+    n_ids = len(open(f"{out}/ids.txt").read().split())
     t, c = arm_stats(out, treat), arm_stats(out, control)
     print(f"{treat}: {t}")
     print(f"{control}: solved {c['solved']}/{c['rows']}, crashes {c['crashes']}")
-    checks = {"1a no unreachable after install": t["unreachable_after_install"] == 0 and t["rows"] == 10,
-              "1b fixer installs first >=9/10": t["fixer_first_call_install"] >= 9,
+    # smoke (10 tasks) and full-population (74 tasks, docs/v4h/GATE.md 2026-10-02 17:10) rules share this script
+    full = n_ids > 10
+    checks = {"1a no unreachable after install": t["unreachable_after_install"] == 0 and t["rows"] == n_ids,
+              "1b fixer installs first >=90%": t["fixer_first_call_install"] >= (0.9 * n_ids if full else 9),
               "2 err_rate<0.15": t["err_rate"] is not None and t["err_rate"] < 0.15,
-              "3 zero crashes": not t["crashes"],
-              "4 sanity solved>=ctrl-1": t["solved"] >= c["solved"] - 1}
+              ("3 crashes<=control" if full else "3 zero crashes"): (len(t["crashes"]) <= len(c["crashes"])) if full else (not t["crashes"]),
+              ("4 solved>=ctrl-2" if full else "4 sanity solved>=ctrl-1"): t["solved"] >= c["solved"] - (2 if full else 1)}
     for k, v in checks.items():
         print(("PASS " if v else "FAIL ") + k)
-    verdict = "PASS" if all(list(checks.values())[:4]) else "FAIL"
-    print("GATE", verdict + ("" if checks["4 sanity solved>=ctrl-1"] else " (sanity flag: v4h solved fewer than v4-1)"))
+    verdict = "PASS" if all(checks.values()) else "FAIL"
+    print("GATE", verdict, f"(n={n_ids}, {'full population' if full else 'smoke'})")
     return verdict
 
 

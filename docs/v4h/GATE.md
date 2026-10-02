@@ -61,3 +61,21 @@ Carson's rule from this afternoon: nothing is submitted until the candidate has 
 case handled. The 10-task smoke stays a breakage check, not a ship gate. v4h's ladder is now: v4 vs v4h on all 74 public
 tasks through OpenRouter/Docker (scripts/or_race_public.sh, gate metrics on every task), then the Kaggle 4xL4 faithful
 run of v4h on 74 (Saturday quota) against v4's 29/74, then a slot.
+
+## Full-population screen (pre-registered 2026-10-02 17:10 IST, before the run): v4 vs v4h on all 74 public tasks
+
+`scripts/or_race_public.sh v4 v4h` (Docker pod-emulation, scripts/run_eval.py faithful env, compaction on, bundle
+budgets, OpenRouter parasail/fp8 with L4-paced replies, 3 concurrent tasks per arm, same hour for both arms).
+Output eval/runs/or_pub74_v4_v4h; read with `scripts/v4h_gate.py eval/runs/or_pub74_v4_v4h v4h v4`.
+
+All of these must hold for v4h to proceed to the Kaggle L4 run (the last step before any slot):
+1. (1a) zero "can't open file" on edit.py calls after an install, on all 74; (1b) the fixer's first tool call is
+   `run_skill_script` in at least 90% of tasks (67 of 74).
+2. Helper edit error rate (NO MATCH, AMBIGUOUS, ERROR, SYNTAX, REFUSED) under 15% of edit.py calls.
+3. Non-timeout crash rows in v4h <= v4's on the same run (both bundles share the parser-class crashes; v4h must add none).
+4. v4h solved >= v4 solved - 2 (n=74, single-read noise about +-3; this catches a regression, it does not prove a gain).
+Reported, not gated: paired wins/losses and sign test; empty-patch counts; mean seconds per task; provider latency.
+Every error string in the v4h arm is listed and classified in the result note; an unexplained class blocks.
+
+PASS -> Saturday: Kaggle 4xL4 faithful v4h on the same 74 (kernel g4-l4-v4h) read against v4's 29/74 (eval/kaggle/g4-l4-v4)
+with the same four rules plus mean seconds/task <= 170 (1.1 x v4's 154.6, the 12 h guard). FAIL -> fix, re-run all 74.
