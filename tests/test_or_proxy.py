@@ -79,3 +79,24 @@ def test_no_pacing_on_error_or_when_disabled():
     slept = []
     _, _, row = or_proxy.handle(ep, Budget(1.0), {"messages": []}, or_proxy.Pacer(), sleep=slept.append)
     assert not slept and "l4_target_s" not in row
+
+
+def test_capture_writes_body_and_response_for_successful_calls_only(tmp_path):
+    ep, _ = fake_ep(REPLY)
+    log, cap = tmp_path / "p.jsonl", tmp_path / "cap.jsonl"
+    srv = or_proxy.serve(0, ep, Budget(1.0), log, host="127.0.0.1", capture_path=cap)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    port = srv.server_address[1]
+    body = {"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "hi"}], "tools": []}
+    req = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(req).read()
+    bad = urllib.request.Request(f"http://127.0.0.1:{port}/v1/chat/completions", data=json.dumps({"stream": True}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(bad)
+    except urllib.error.HTTPError:
+        pass
+    srv.shutdown()
+    rows = [json.loads(l) for l in cap.read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["body"] == body and rows[0]["response"]["choices"][0]["message"]["content"] == "hi"

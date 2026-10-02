@@ -72,9 +72,14 @@ def handle(ep, budget: Budget, body: dict, pacer: "Pacer | None" = None, sleep=t
     return status, resp, row
 
 
-def serve(port: int, ep, budget: Budget, log_path: Path, host: str = "0.0.0.0", pacer=None) -> ThreadingHTTPServer:
+def serve(port: int, ep, budget: Budget, log_path: Path, host: str = "0.0.0.0", pacer=None,
+          capture_path: "Path | None" = None) -> ThreadingHTTPServer:
+    """capture_path: append one JSON line per successful call {t, body, response} (the exact OpenAI request the harness
+    sent and the exact reply), the raw material for SFT rows (train/build_sft.py). Nothing is reconstructed later."""
     lock = threading.Lock()
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    if capture_path is not None:
+        capture_path.parent.mkdir(parents=True, exist_ok=True)
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -101,6 +106,9 @@ def serve(port: int, ep, budget: Budget, log_path: Path, host: str = "0.0.0.0", 
             row["t"] = round(time.time(), 3)
             with lock, open(log_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
+            if capture_path is not None and status == 200:
+                with lock, open(capture_path, "a") as f:
+                    f.write(json.dumps({"t": row["t"], "body": body, "response": resp}) + "\n")
             self._send(status, resp)
 
     srv = ThreadingHTTPServer((host, port), H)
@@ -115,9 +123,12 @@ def main():
     ap.add_argument("--log", required=True)
     ap.add_argument("--or-provider", default=None)
     ap.add_argument("--l4-pace", action="store_true", help="hold replies to the modelled L4 time per call")
+    ap.add_argument("--capture", default=None, help="JSONL of {t, body, response} for every successful call (SFT raw data)")
+    ap.add_argument("--model", default=None, help="upstream model id (default google/gemma-4-31b-it); e.g. a teacher")
     a = ap.parse_args()
-    ep = make_endpoint("openrouter", or_provider=a.or_provider)
-    srv = serve(a.port, ep, Budget(a.max_usd), Path(a.log), pacer=Pacer() if a.l4_pace else None)
+    ep = make_endpoint("openrouter", or_provider=a.or_provider, upstream_model=a.model)
+    srv = serve(a.port, ep, Budget(a.max_usd), Path(a.log), pacer=Pacer() if a.l4_pace else None,
+                capture_path=Path(a.capture) if a.capture else None)
     print(f"or_proxy :{a.port} -> {ep.model} pin={ep.provider} cap=${a.max_usd} l4_pace={a.l4_pace}", flush=True)
     srv.serve_forever()
 
