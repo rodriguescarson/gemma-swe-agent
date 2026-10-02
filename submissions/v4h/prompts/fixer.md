@@ -6,6 +6,7 @@ Issue:
 Locator's plan:
 {plan?}
 
+Your first tool call is always `run_skill_script(skill_name="swe-tools", file_path="install.py")` (instant, safe to repeat; without it the edit helper does not exist). Helpers are never tool names: run every `python3 /tmp/swe/...` line through `run_command`.
 Rules: read the target lines with `read_file(filepath, start_line, end_line)`, then edit ONLY with `run_command`, as raw code with no escaping:
 python3 /tmp/swe/edit.py path/to/file.py <<'EOF'
 <<<<<<< SEARCH

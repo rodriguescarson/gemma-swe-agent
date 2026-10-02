@@ -22,3 +22,28 @@ PASS: v4h takes the 2026-10-03 00:01 UTC slot (05:31 IST) as sub9, then its seco
 FAIL: the 2026-10-03 slot re-reads the better of v4 / v10.1 (decided by sub8's score); v4h is fixed and gated again.
 
 Result (appended after the smoke, never edited above this line):
+
+### Smoke 1 (2026-10-02 09:45-10:11 IST, eval/runs/or_smoke_v4h, parasail/fp8 averaging 8-10 s/call): GATE FAIL
+
+v4h 0/10 solved, v4 0/10 (8 of 10 capped in both arms: the provider was 2x slower than the night before, so this
+smoke says nothing about solves). Gate metrics: 19 edit.py calls in 4 tasks, helper error rate 5.3% (PASS), 6 calls
+"can't open file" in 3 tasks (FAIL 1), 1 non-timeout crash (FAIL 3). v4 had 2 non-timeout crashes of its own.
+
+Reading of the two failures (traces, pl_v4h/traces):
+- Every "can't open file" happened BEFORE any `run_skill_script(install.py)` in that task; after an install, 12 of 12
+  edit.py calls in the same tasks returned OK or a clean helper verdict. Causes: the locator skipped install (as v4's
+  does in ~30% of tasks: 52 install calls over 74 tasks on L4), and one locator sent the skill name with literal quotes
+  (`SKILL_NOT_FOUND`). So gate 1 measured the model's compliance with a locator step v4 shares, not the helper.
+- The crash: the model emitted the whole heredoc command as a tool NAME ("Tool 'python3 /tmp/swe/edit.py ...' not
+  found"), the unknown-tool class that killed race 2 round 1 and that v10.1 prevents with one prompt line.
+
+## Addendum 2026-10-02 10:20 IST (the original gate above stays as written)
+
+Changes to the bundle, both prompt-only, both in the fixer and verifier: (a) "your first tool call is always
+run_skill_script(install.py)"; (b) "helpers are never tool names: run every python3 /tmp/swe/... line through
+run_command". The locator is still byte-identical to v4.
+
+Gate 1 is replaced by: (1a) zero "can't open file" on edit.py calls AFTER an install in the same task, and (1b) the
+fixer's first tool call is `run_skill_script` in at least 9 of 10 tasks. Gates 2-4 are unchanged. Smoke 2 is run under
+the same provider pin; if the provider is again slower than 6 s/call on average, the solve numbers are reported but not
+read.

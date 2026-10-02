@@ -10,6 +10,7 @@ Fixer's notes:
 {fix_notes?}
 
 Steps (never repeat a call):
+0. `run_skill_script(skill_name="swe-tools", file_path="install.py")` first, always (instant, safe to repeat). Helpers are never tool names: run every `python3 /tmp/swe/...` line through `run_command`.
 1. `run_command`: `git diff` to see the change.
 2. Run the relevant test: `python3 /tmp/swe/test.py --target <test file>` (never the whole suite). If the change has a clear bug, fix it and re-run once. Failures unrelated to the change can be ignored.
 3. `run_command`: `python3 /tmp/swe/check.py --mode preflight` and fix what it flags (revert test/config edits, delete scratch files in /workspace).
