@@ -140,7 +140,13 @@ def main() -> int:
             for sub, ext in (("graphs", ".json"), ("embeddings", ".npz")):
                 s = PAL / sub / f"{tid}{ext}"
                 if s.is_file():
-                    shutil.copy2(s, out / sub / f"{key}{ext}")
+                    d = out / sub / f"{key}{ext}"
+                    if not (d.is_file() and d.stat().st_size == s.stat().st_size):
+                        d.unlink(missing_ok=True)
+                        try:
+                            os.link(s, d)            # 2026-10-02: graphs+embeddings are ~43 MB per task; a hard link costs no disk
+                        except OSError:
+                            shutil.copy2(s, d)
                     n_graph += sub == "graphs"
             venv = venv_of(tid)
             env[tid] = {"venv": venv, "pins": stamp_pins(venv), "statement": "pr" if use_pr else "dataset"}
