@@ -38,3 +38,12 @@ def test_variant_compiles_with_the_official_compiler(tmp_path):
     # validate.py prints the compiled gen config per agent; the level comes back as the ThinkingLevel enum
     fixer = p.stdout.split("LlmAgent fixer")[1].split("LlmAgent")[0]
     assert "'include_thoughts': True" in fixer and "ThinkingLevel.LOW" in fixer, fixer
+
+
+def test_cap_override_changes_only_max_time_minutes(tmp_path):
+    out = tmp_path / "c"
+    T.build(str(V4H), str(out), "LOW", cap="4.0")
+    e = (out / "eval_config.yaml").read_text(); e0 = (V4H / "eval_config.yaml").read_text()
+    assert "max_time_minutes: 4.0" in e and e.replace("max_time_minutes: 4.0", "max_time_minutes: 5") == e0
+    for rel in ("prompts/fixer.md", "sub_agents/fixer.yaml", "skills/swe-tools/scripts/edit.py"):
+        assert filecmp.cmp(V4H / rel, out / rel, shallow=False), rel
