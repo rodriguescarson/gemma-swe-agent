@@ -22,7 +22,10 @@ for f in data/pallets/dev40_ids.txt data/pallets/holdout_ids.txt; do
     echo "LEAK GUARD: $IDS_FILE intersects $f (an eval set); refusing"; exit 2
   fi
 done
-cp "$IDS_FILE" "$OUT/ids.txt"
+# keep only ids the packed harness holds (pack.py drops tasks of another venv, e.g. the 5 flask-wz2 ones)
+grep -Fxf "$HARNESS/ids.txt" "$IDS_FILE" > "$OUT/ids.txt" || true
+echo "ids: $(wc -l < "$IDS_FILE") requested, $(wc -l < "$OUT/ids.txt") in $HARNESS, dropped: $(grep -vFxf "$HARNESS/ids.txt" "$IDS_FILE" | tr "\n" " ")"
+[ -s "$OUT/ids.txt" ] || { echo "no requested id is in $HARNESS/ids.txt"; exit 2; }
 curl -sf "http://127.0.0.1:$PORT/v1/models" >/dev/null 2>&1 && { echo "port $PORT busy (stale or_proxy?)"; exit 1; }
 IMAGE=python:3.12-slim
 docker image inspect g4-pallets-linux:local >/dev/null 2>&1 && IMAGE=g4-pallets-linux:local
