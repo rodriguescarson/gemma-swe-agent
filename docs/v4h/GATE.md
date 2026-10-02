@@ -54,3 +54,10 @@ v4h: 21 edit.py calls in 8 tasks, 0 "can't open file" before or after install, f
 10/10 tasks, helper error rate 0.0%, 0 crash rows (v4: 1), empty patches 1 (v4: 4). Solved 2/10 vs v4 3/10 (paired 1-2,
 both 1): reported, not read (provider still 2x slower than L4-paced). Ships as sub9, 2026-10-03 00:01 UTC, notebook
 g4agent-v4h version 2.
+
+### 2026-10-02 17:00 IST: sub9 DISARMED before it fired
+
+Carson's rule from this afternoon: nothing is submitted until the candidate has run on all 74 public tasks with every
+case handled. The 10-task smoke stays a breakage check, not a ship gate. v4h's ladder is now: v4 vs v4h on all 74 public
+tasks through OpenRouter/Docker (scripts/or_race_public.sh, gate metrics on every task), then the Kaggle 4xL4 faithful
+run of v4h on 74 (Saturday quota) against v4's 29/74, then a slot.
