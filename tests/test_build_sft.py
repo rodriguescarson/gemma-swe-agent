@@ -83,3 +83,13 @@ def test_unmatched_calls_are_counted_not_crashed(world):
         f.write(json.dumps({"t": 9, "body": body("an unknown statement", "fixer"), "response": reply(text="x")}) + "\n")
     rows, stats = B.build([str(cap)], str(tasks), [str(results)])
     assert stats["no_task"] == 1 and stats["rows"] == 2
+
+
+def test_pairs_judge_each_sample_by_its_own_results(world, tmp_path):
+    tmp, tasks, results, cap, stmt = world
+    # sample 2: the same task unsolved; its capture must contribute nothing even though the pool says t_ok resolved
+    cap2 = tmp / "cap2.jsonl"; res2 = tmp / "res2.jsonl"
+    cap2.write_text(json.dumps({"t": 1, "body": body(stmt("t_ok"), "fixer"), "response": reply(("read_file", {"filepath": "z.py"}))}) + "\n")
+    res2.write_text(json.dumps({"instance_id": "t_ok", "resolved": False}) + "\n")
+    rows, stats = B.build([], str(tasks), [], pairs=[(str(cap), [str(results)]), (str(cap2), [str(res2)])])
+    assert stats["rows"] == 2 and stats["unsolved_or_unknown"] == 2 and not any("z.py" in r["completion"] for r in rows)

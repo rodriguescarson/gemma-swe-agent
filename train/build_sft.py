@@ -73,11 +73,14 @@ def load_results(paths):
     return out
 
 
-def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_only=True, max_prompt_chars=160000):
+def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_only=True, max_prompt_chars=160000, pairs=()):
+    """captures share the results in results_paths; pairs = [(capture, [results...])] bind a capture to its own sample's
+    results, so a solved and an unsolved sample of the same task never share a verdict."""
     idx = TaskIndex(tasks_path)
-    resolved = load_results(results_paths)
+    pool = load_results(results_paths)
     stats, seen, rows = Counter(), set(), []
-    for cap in captures:
+    work = [(c, pool) for c in captures] + [(c, load_results(r)) for c, r in pairs]
+    for cap, resolved in work:
         for line in open(cap):
             if not line.strip():
                 continue
@@ -122,9 +125,10 @@ def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--capture", action="append", required=True)
+    ap.add_argument("--capture", action="append", default=[], help="capture(s) judged by the shared --results pool")
+    ap.add_argument("--pair", action="append", default=[], help="CAPTURE=RESULTS: a capture judged by its own sample's results")
     ap.add_argument("--tasks", required=True)
-    ap.add_argument("--results", action="append", required=True)
+    ap.add_argument("--results", action="append", default=[])
     ap.add_argument("--out", required=True)
     ap.add_argument("--exclude-ids", action="append", default=[])
     ap.add_argument("--all-outcomes", action="store_true", help="keep calls from unsolved tasks too")
@@ -133,7 +137,12 @@ def main():
     excl = set()
     for p in a.exclude_ids:
         excl |= {l.strip() for l in open(p) if l.strip()}
-    rows, stats = build(a.capture, a.tasks, a.results, excl, not a.all_outcomes, a.max_prompt_chars)
+    pairs = [(c.split("=", 1)[0], [c.split("=", 1)[1]]) for c in a.pair]
+    if not a.capture and not pairs:
+        ap.error("give --capture (with --results) or --pair CAPTURE=RESULTS")
+    if a.capture and not a.results:
+        ap.error("--capture needs --results")
+    rows, stats = build(a.capture, a.tasks, a.results, excl, not a.all_outcomes, a.max_prompt_chars, pairs)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w") as f:
         for r in rows:
