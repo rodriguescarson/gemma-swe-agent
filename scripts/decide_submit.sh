@@ -8,6 +8,11 @@
 EVAL=$1; CAND=$2; FALL=$3; AT=$4; MIN=$5; MSG_C=$6; MSG_F=$7
 HERE=$(cd "$(dirname "$0")" && pwd)
 LOG=${SUBMIT_LOG:-$HERE/submit_log.txt}; KAGGLE=${KAGGLE_BIN:-kaggle}; OUT=${DECIDE_OUT:-$HERE/decide_out}
+if [ -z "${KAGGLE_BIN:-}" ] && ! command -v "$KAGGLE" >/dev/null 2>&1; then   # same PATH trap as submit_at.sh (2026-10-02)
+  for c in "$HERE/venv/bin/kaggle" "$HERE/../.venv/bin/kaggle" "$HOME/.local/bin/kaggle"; do [ -x "$c" ] && { KAGGLE=$c; break; }; done
+fi
+command -v "$KAGGLE" >/dev/null 2>&1 || { echo "$(date -u) [$(hostname -s)] ABORT: kaggle binary not found (KAGGLE_BIN=$KAGGLE); not armed" >> "$LOG"; exit 2; }
+export KAGGLE_BIN=$KAGGLE
 TARGET=${SUBMIT_TARGET_EPOCH:-$(python3 -c 'import datetime as d, sys
 n = d.datetime.now(d.timezone.utc); a = sys.argv[1]
 t = n.replace(hour=int(a[:2]), minute=int(a[2:]), second=0, microsecond=0)

@@ -10,6 +10,15 @@ LOG=${SUBMIT_LOG:-$HERE/eval/submit_log.txt}
 KAGGLE=${KAGGLE_BIN:-kaggle}
 COMP=gemma-4-developer-agent
 mkdir -p "$(dirname "$LOG")"
+# 2026-10-02: sub8 never went out because the detached shell had no `kaggle` on PATH (the VPS keeps it in
+# g4submit/venv/bin); the script then retried a failing listing for the whole slot. Resolve the binary at ARM time and
+# refuse loudly if it is missing, so a bad PATH is caught the moment the job is armed, not at 00:01 UTC.
+if [ -z "${KAGGLE_BIN:-}" ] && ! command -v "$KAGGLE" >/dev/null 2>&1; then   # an explicit KAGGLE_BIN is never second-guessed
+  for c in "$(dirname "$0")/venv/bin/kaggle" "$HERE/.venv/bin/kaggle" "$HOME/.local/bin/kaggle"; do
+    [ -x "$c" ] && { KAGGLE=$c; break; }
+  done
+fi
+command -v "$KAGGLE" >/dev/null 2>&1 || { echo "$(date -u) [$(hostname -s)] ABORT: kaggle binary not found (KAGGLE_BIN=$KAGGLE); not armed" >> "$LOG"; echo "kaggle binary not found" >&2; exit 2; }
 # 0 = a submission with TAG exists, 1 = listing succeeded and it does not, 2 = listing failed (unknown: never submit on it)
 already() { local out; out=$("$KAGGLE" competitions submissions $COMP -v 2>/dev/null) || return 2
   echo "$out" | grep -q "^ref," || return 2

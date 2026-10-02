@@ -110,3 +110,23 @@ def test_kernel_version_is_passed_through(tmp_path):
     sub = [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
     assert sub and "-v 2 " in sub[0] + " " and "carsonrodrigues/g4agent-v10" in sub[0]
     assert "armed g4agent-v10 v2" in (tmp_path / "log.txt").read_text()
+
+
+def test_missing_kaggle_binary_aborts_at_arm_time(tmp_path):
+    # 2026-10-02: sub8 was lost because the detached VPS shell had no `kaggle` on PATH; the job must refuse to arm
+    env = dict(os.environ, KAGGLE_BIN=str(tmp_path / "nope"), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0")
+    p = subprocess.run(["bash", str(SCRIPT), "k", "0001", "sub9: x"], env=env, capture_output=True, text=True, timeout=30)
+    assert p.returncode == 2 and "kaggle binary not found" in p.stderr
+    log = (tmp_path / "log.txt").read_text()
+    assert "ABORT: kaggle binary not found" in log and "] armed " not in log and "target epoch" not in log
+
+
+def test_venv_kaggle_next_to_the_script_is_found(tmp_path):
+    # the VPS layout: g4submit/submit_at.sh + g4submit/venv/bin/kaggle, PATH without it
+    d = tmp_path / "g4submit"; (d / "venv" / "bin").mkdir(parents=True)
+    script = d / "submit_at.sh"; script.write_text(SCRIPT.read_text()); script.chmod(0o755)
+    fake, calls = _fake_kaggle(d / "venv" / "bin", ["sub2: older"])
+    env = dict(os.environ, SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1", PATH="/usr/bin:/bin")
+    env.pop("KAGGLE_BIN", None)
+    subprocess.run(["bash", str(script), "k", "0001", "sub3: v4 staged"], env=env, check=True, timeout=60)
+    assert len([l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]) == 1

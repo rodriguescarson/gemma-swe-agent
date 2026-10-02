@@ -18,6 +18,11 @@ CAP=${MAX_USD_ARM:-4}; CONC=${CONC:-2}
 # crusoe/bf16 (the golden-eval pin) answered 0/6 with 429 on 2026-09-30 23:20 IST; parasail/fp8 and deepinfra/fp8 6/6
 PROVIDER=${OR_PROVIDER:-parasail/fp8}
 PY=${PY:-.venv/bin/python}
+# 2026-10-02: a proxy left over from an earlier race answered the readiness check, so one arm ran against the wrong
+# proxy (wrong log, wrong cap) while its own proxy died on "Address already in use". Refuse to start on a busy port.
+for p in 8790 8791; do
+  curl -sf "http://127.0.0.1:$p/v1/models" >/dev/null 2>&1 && { echo "port $p is already in use (a stale or_proxy?); kill it first: pgrep -f scripts/or_proxy.py"; exit 1; }
+done
 "$PY" scripts/or_proxy.py --port 8790 --max-usd "$CAP" --or-provider "$PROVIDER" --l4-pace --log "$OUT/proxy_$CONTROL.jsonl" > "$OUT/proxy_$CONTROL.out" 2>&1 &
 P1=$!
 "$PY" scripts/or_proxy.py --port 8791 --max-usd "$CAP" --or-provider "$PROVIDER" --l4-pace --log "$OUT/proxy_$TREAT.jsonl" > "$OUT/proxy_$TREAT.out" 2>&1 &
