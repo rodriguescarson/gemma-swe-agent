@@ -37,3 +37,27 @@ patched vLLM), so this smoke catches breakage, not the real time cost. That cost
 Slot: 2026-10-04 00:01 UTC (05:31 IST) as sub10, armed after sub9 fires on 2026-10-03.
 
 Result (appended after the smoke and after the read, never edited above this line):
+
+### Smoke (2026-10-02 10:45-11:15 IST, eval/runs/or_smoke_think, parasail/fp8 in a slow hour: 11.4 s/call for the control)
+
+| | v4h (5 min) | v4h_think (4 min) |
+|---|---|---|
+| solved / 10 | 1 | 0 |
+| non-empty patches | 6 | **2** |
+| capped | 9 | 10 |
+| crash rows / overflow rows | 0 / 0 | 0 / 0 |
+| model calls per task | 27.9 | 11.2 |
+| mean completion tokens per call | 83 | **291** (max 3,428) |
+| mean latency per call (proxy) | 11.4 s | 26.4 s |
+
+Gate as written: clause 1 (0 crashes) PASS, clause 2 (0 overflows) PASS, clause 3 ("8 of 10 non-empty patches OR
+solved >= control - 1"): 2/10 non-empty FAILS the first half, 0 >= 1 - 1 passes the second half on a technicality
+created by the control's own bad hour. Reading in substance: thinking LOW tripled the output per call (291 vs 83
+tokens). On L4 at ~35 ms per output token that is ~10 s of decode per call before any prompt processing, so 11 calls
+fill 4 minutes and 8 of 10 tasks end with no patch. A bundle that produces a patch in 2 of 10 tasks would score about 0
+on the hidden set regardless of provider speed.
+
+Decision proposed (Carson decides, this deviates from the approved queue): do NOT ship v4h_think on 2026-10-04. Use that
+slot for v4h's second read (or the better base once sub8 is in). Thinking returns to the queue only if Saturday's L4
+timing kernel (docs/v4h/THINK_TIMING.md) shows mean task time <= 155 s, which this smoke makes unlikely at level LOW;
+a MINIMAL-level variant is the retest if any. Cost of the smoke: $0.31.
