@@ -77,7 +77,13 @@ DONE=/out/s$SAMPLE/task_results.jsonl
 if [ -f "$DONE" ]; then
   IDS=$(python - "$DONE" /out/ids.txt <<'PY'
 import json, sys
-done = {json.loads(l)["instance_id"] for l in open(sys.argv[1]) if l.strip()}
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.strip()]
+# a row whose error is a dead proxy (connection refused / APIConnection) is not a result: re-run that task
+bad = {r["instance_id"] for r in rows if any(k in str(r.get("error") or "") for k in ("onnection", "refused", "APIConnection"))}
+done = {r["instance_id"] for r in rows} - bad
+if bad:
+    keep = [json.dumps(r) for r in rows if r["instance_id"] not in bad]
+    open(sys.argv[1], "w").write("".join(k + "\n" for k in keep))
 print(" ".join(i for i in open(sys.argv[2]).read().split() if i not in done))
 PY
 )
