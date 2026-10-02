@@ -23,6 +23,7 @@ PY
 )
 choice=${verdict%% *}
 echo "$(date -u) [$(hostname -s)] decide_sub9: $verdict" | tee -a eval/submit_log.txt >> eval/overnight/progress.log
+( SUBMIT_LOG=eval/submit_log.txt; until grep -q "attempt 1\|already on Kaggle" "$SUBMIT_LOG" 2>/dev/null && [ "$(date -u +%H%M)" -ge 0002 ]; do sleep 60; done; touch eval/overnight/sub9_submitted ) &
 if [ "$choice" = v4h2 ]; then
   KERNEL_VERSION=1 exec bash scripts/submit_at.sh g4agent-v4h2 0001 "sub9: v4h2 = v4 + edit helper + explicit run_command call shape (74 public: 0 crashes; Pallets s2: $verdict)"
 else

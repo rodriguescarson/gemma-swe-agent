@@ -72,7 +72,9 @@ fi
 
 # 6. Kaggle after the quota reset (05:30 IST = 00:00 UTC) AND after today's submission has finished scoring (no GPU
 #    kernels of ours while a submission scores: Carson 2026-09-26), one kernel at a time
-until [ "$(date -u +%H%M)" -ge "0005" ] && [ "$(date -u +%H%M)" -lt "2300" ]; do sleep 120; done
+# wait for: (a) the day's submission to have been made (decide_sub9.sh writes the marker) and (b) no submission PENDING
+until [ -f eval/overnight/sub9_submitted ]; do sleep 300; done
+step "sub9 submitted; waiting for its scoring to finish before any GPU kernel"
 until ! kaggle competitions submissions -c gemma-4-developer-agent -v 2>/dev/null | sed -n 2p | grep -q PENDING; do sleep 600; done
 step "no submission pending; starting the Kaggle kernel sequence"
 push_wait() {  # <slug>
