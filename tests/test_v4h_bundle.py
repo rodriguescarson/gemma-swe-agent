@@ -48,3 +48,14 @@ def test_bundle_compiles_with_the_official_compiler():
     assert p.returncode == 0, p.stdout + p.stderr
     fixer_line = p.stdout.split("LlmAgent fixer")[1].split("\n")[0]
     assert "edit_file" not in fixer_line and "SkillToolset" in fixer_line, fixer_line
+
+
+def test_v4h2_differs_from_v4h_only_in_the_call_shape_lines():
+    V4H2 = ROOT / "submissions" / "v4h2"
+    assert files(V4H2) == files(V4H)
+    changed = {rel for rel in files(V4H) if not filecmp.cmp(V4H / rel, V4H2 / rel, shallow=False)}
+    assert changed == {"prompts/fixer.md", "prompts/verifier.md"}, changed
+    for name in ("fixer", "verifier"):
+        a, b = (V4H / "prompts" / f"{name}.md").read_text().splitlines(), (V4H2 / "prompts" / f"{name}.md").read_text().splitlines()
+        assert len(a) == len(b) and sum(x != y for x, y in zip(a, b)) == 1
+        assert 'run_command(command="python3 /tmp/swe/edit.py ...")' in (V4H2 / "prompts" / f"{name}.md").read_text()

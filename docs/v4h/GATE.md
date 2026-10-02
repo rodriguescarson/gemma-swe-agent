@@ -113,3 +113,20 @@ tasks cap in both arms, so this screen says little about solve rate; the L4 run 
 43/43 = 100%; clean installs 35/43 = 81%, the rest the parser's argument corruption, which also hits v4). The decision
 rests on 1a (0 unreachable helper calls on all 74), 2, 3 and 4, all PASS. v4h proceeds to the Saturday L4 run
 (g4-l4-v4h vs g4-l4-v4-wh28, the same 74), which must pass the same rules plus mean seconds per task <= 170 before a slot.
+
+## v4h2 (pre-registered 2026-10-03 00:40 IST): the heredoc-as-tool-name crash
+
+Collection sample 1 (v4h on the 159 Pallets training tasks, 2026-10-02 night): 10 of the first 123 tasks (8%) ended
+with "Sandbox execution error: Tool 'python3 /tmp/swe/edit.py ...' not found". In all 10 it was the model's FIRST
+edit attempt of the task (8 fixer, 2 verifier): the shell line was written in the tool-name slot instead of as
+run_command's command. On the 74 public tasks the same bundle had 0 such crashes (26 tasks with edits). A crash
+discards the patch, so this is a case to handle before any slot.
+
+v4h2 = v4h with one line changed in prompts/fixer.md and prompts/verifier.md: the exact call shape
+run_command(command="python3 /tmp/swe/edit.py ...") is shown and the bare form is named as an unknown tool
+(tests/test_v4h_bundle.py pins the diff). Everything else is byte-identical.
+
+Reading, sample 2 of the collection (v4h2 on the same 159 tasks, same provider, same settings): the class is
+HANDLED if v4h2 has at most 3 such crash rows over 159 tasks (vs v4h's 10 of 123 projected to ~13 of 159, i.e. a
+cut of at least 75%); PARTIAL if 4-7 (ship v4h2 only after a second idea is tried); UNHANDLED if 8+ (prompt wording
+does not reach it; a structural change is needed). Reported, not gated: solved, empty patches, helper error rate.
