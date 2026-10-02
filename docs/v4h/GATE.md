@@ -47,3 +47,10 @@ Gate 1 is replaced by: (1a) zero "can't open file" on edit.py calls AFTER an ins
 fixer's first tool call is `run_skill_script` in at least 9 of 10 tasks. Gates 2-4 are unchanged. Smoke 2 is run under
 the same provider pin; if the provider is again slower than 6 s/call on average, the solve numbers are reported but not
 read.
+
+### Smoke 2 (2026-10-02 10:12-10:36 IST, eval/runs/or_smoke2_v4h, parasail/fp8 at 6-7 s/call, bundle commit 352583a): GATE PASS
+
+v4h: 21 edit.py calls in 8 tasks, 0 "can't open file" before or after install, fixer's first call was install in
+10/10 tasks, helper error rate 0.0%, 0 crash rows (v4: 1), empty patches 1 (v4: 4). Solved 2/10 vs v4 3/10 (paired 1-2,
+both 1): reported, not read (provider still 2x slower than L4-paced). Ships as sub9, 2026-10-03 00:01 UTC, notebook
+g4agent-v4h version 2.
