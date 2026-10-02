@@ -260,7 +260,94 @@ lines.append("HELPER_CHECK " + ("PASS" if ok else "FAIL")); print("\n".join(line
 '''
 
 
-def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None):
+CELL_PROBE = r'''
+# G-A LoRA probe (docs/v11/GA_PROBE.md): does an adapter change this server's outputs at all? Runs before the agent smoke.
+import json, statistics, time, urllib.request
+BASE = 'http://127.0.0.1:8000/v1'
+def _get(path):
+    with urllib.request.urlopen(BASE + path, timeout=120) as r: return json.load(r)
+def chat(model, content, max_tokens=32, timeout=600):
+    body = json.dumps({'model': model, 'messages': [{'role': 'user', 'content': content}], 'max_tokens': max_tokens, 'temperature': 0, 'seed': 1}).encode()
+    req = urllib.request.Request(BASE + '/chat/completions', data=body, headers={'Content-Type': 'application/json', 'Authorization': 'Bearer EMPTY'})
+    t = time.time()
+    with urllib.request.urlopen(req, timeout=timeout) as r: out = json.load(r)
+    return (out['choices'][0]['message'].get('content') or ''), int((out.get('usage') or {}).get('completion_tokens') or 0), time.time() - t
+ids = [m['id'] for m in _get('/models')['data']]
+print('MODELS', ids)
+def adapter_id(name): return next((i for i in ids if i == name or i.endswith(':' + name) or i.endswith('/' + name)), None)
+base_id = next(i for i in ids if ':' not in i and i.split('/')[-1] not in ADAPTER_NAMES)
+PROMPTS = ['List the first ten prime numbers.', 'Write a Python function that reverses a string.', 'What is the capital of Portugal?',
+  'Explain what a race condition is in two sentences.', 'Give three synonyms for the word fast.', 'Write a haiku about rain.',
+  'What does the git stash command do?', 'Convert 100 degrees Fahrenheit to Celsius.', 'Name four sorting algorithms.',
+  'Write a regular expression that matches an email address.', 'What is the difference between a list and a tuple in Python?',
+  'Summarise the plot of Romeo and Juliet in one sentence.', 'How many bits are in a byte?', 'Write a SQL query that counts rows in a table named users.',
+  'What is the time complexity of binary search?', 'Translate good morning into French.', 'Write a bash one-liner that counts lines in all .py files.',
+  'What is a Python decorator?', 'Name the planets of the solar system in order.', 'Explain the difference between TCP and UDP briefly.']
+def run_all(model): return [chat(model, p)[0] for p in PROMPTS]
+res = {'models': ids, 'base_id': base_id, 'adapters': {}}
+base1 = run_all(base_id); base2 = run_all(base_id)
+res['noise_floor'] = sum(a != b for a, b in zip(base1, base2))
+for name in ADAPTER_NAMES:
+    mid = adapter_id(name)
+    if mid is None: res['adapters'][name] = {'listed': False}; continue
+    try: res['adapters'][name] = {'listed': True, 'id': mid, 'diff_vs_base': sum(a != b for a, b in zip(base1, run_all(mid)))}
+    except Exception as e: res['adapters'][name] = {'listed': True, 'id': mid, 'error': repr(e)[:200]}
+    print(name, res['adapters'][name], flush=True)
+long_prompt = 'Summarise this text in one sentence. ' + 'The quick brown fox jumps over the lazy dog. ' * 150
+def tps(model):
+    xs = []
+    for _ in range(3):
+        _, n, dt = chat(model, long_prompt, max_tokens=128); xs.append(n / max(dt, 1e-6))
+    return round(statistics.median(xs), 2)
+res['tps_base'] = tps(base_id)
+zb = adapter_id('zb')
+if zb:
+    try: res['tps_zb'] = tps(zb)
+    except Exception as e: res['tps_zb'] = 0; res['tps_zb_error'] = repr(e)[:200]
+    try:
+        _, n, dt = chat(zb, 'Reply with the single word ok. ' + 'word ' * 24000, max_tokens=8, timeout=900); res['long_ctx_zb_s'] = round(dt, 1)
+    except Exception as e: res['long_ctx_zb_s'] = 'ERROR ' + repr(e)[:200]
+A = res['adapters']
+checks = {'P1_applied': any(A.get(n, {}).get('diff_vs_base', 0) >= 18 for n in ('loud', 'loud2')),
+          'P2_zero_b_harmless': A.get('zb', {}).get('diff_vs_base', 99) <= res['noise_floor'] + 1,
+          'P3_listed': all(A.get(n, {}).get('listed') for n in ADAPTER_NAMES),
+          'P4_decode_tax_le_10pct': res.get('tps_zb', 0) >= 0.9 * res['tps_base'],
+          'P5_long_ctx_returns': isinstance(res.get('long_ctx_zb_s'), (int, float))}
+res['checks'] = checks
+res['prefix'] = 'plan_A' if A.get('loud', {}).get('diff_vs_base', 0) >= 18 else ('loud2' if A.get('loud2', {}).get('diff_vs_base', 0) >= 18 else 'none')
+res['GA_pre_smoke'] = 'PASS' if checks['P1_applied'] and checks['P2_zero_b_harmless'] and checks['P5_long_ctx_returns'] else 'FAIL'
+json.dump(res, open(W / 'lora_probe.json', 'w'), indent=1); print(json.dumps(res, indent=1))
+for k, v in checks.items(): print(('PASS ' if v else 'FAIL ') + k)
+print('GA_PRE_SMOKE', res['GA_pre_smoke'], 'prefix', res['prefix'], flush=True)
+'''
+
+CELL_ROUTE = r'''
+# P6: the agent smoke's fixer calls must have gone to the adapter-backed model.
+import glob, json
+n_fixer = n_zb = 0
+for f in glob.glob(str(W / 'results' / '**' / 'trace_*.json'), recursive=True):
+    for s in json.load(open(f)).get('steps', []):
+        for c in s.get('tool_calls') or []:
+            if (c.get('extra') or {}).get('author') == 'fixer':
+                mv = str((c.get('extra') or {}).get('model_version') or s.get('model_name') or '')
+                n_fixer += 1; n_zb += (':zb' in mv or mv.endswith('/zb') or mv == 'zb')
+rows = [json.loads(l) for l in open(W / 'results.jsonl')]
+crash = [r['id'] for r in rows if r.get('err') and 'timeout' not in str(r.get('err')).lower()]
+p6 = len(rows) == len(IDS) and not crash and n_fixer > 0 and n_zb == n_fixer
+print('ROUTING fixer calls', n_fixer, 'to :zb', n_zb, '| rows', len(rows), 'crash', crash)
+print(('PASS ' if p6 else 'FAIL ') + 'P6_agent_smoke')
+pre = json.load(open(W / 'lora_probe.json'))
+pre['P6_agent_smoke'] = p6; pre['GA'] = 'PASS' if pre['GA_pre_smoke'] == 'PASS' and p6 else 'FAIL'
+json.dump(pre, open(W / 'lora_probe.json', 'w'), indent=1); print('GA', pre['GA'])
+'''
+
+
+def adapter_names(bundle):
+    d = os.path.join(bundle, "adapters")
+    return sorted(n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n, "adapter_model.safetensors"))) if os.path.isdir(d) else []
+
+
+def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None, probe=None, names=()):
     run = CELL_RUN
     for k, v in (("@MIN_TOKENS@", CONTEXT_CACHE["min_tokens"]), ("@TTL@", CONTEXT_CACHE["ttl_seconds"]),
                  ("@CACHE_INTERVALS@", CONTEXT_CACHE["cache_intervals"]), ("@INTERVAL@", COMPACTION["compaction_interval"]),
@@ -277,6 +364,10 @@ for rel, b in FILES.items():
     p = AGENT_DIR / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(b))
 ''' + CELL_BUDGET + CELL_DATA_TAIL)
     cells = [CELL_INSTALL, data, CELL_VLLM, run]
+    if probe == "lora":
+        if not names:
+            raise SystemExit("--probe lora needs a bundle with adapters/<name>/adapter_model.safetensors (scripts/make_test_adapters.py)")
+        cells = [CELL_INSTALL, data, CELL_VLLM, "ADAPTER_NAMES = " + json.dumps(list(names)) + "\n" + CELL_PROBE, run, CELL_ROUTE]
     if helper_b64 is not None:
         cells.insert(1, "HELPERS_B64 = " + json.dumps(helper_b64) + "\ndef _helper_check():" + HELPER_BODY.replace("\n", "\n    ") +
                      "\ntry: _helper_check()\nexcept Exception as e: print('HELPER_CHECK ERROR', repr(e)[:300])\n")
@@ -289,6 +380,7 @@ def main(argv=None):
     ap.add_argument("--oracle", action="store_true")
     ap.add_argument("--patches", help="rescore agent patches: json list of {task,cfg,patch} (CPU, Kaggle env)")
     ap.add_argument("--helper-check", help="skill scripts dir to test for sandbox reachability on the Kaggle image (CPU)")
+    ap.add_argument("--probe", choices=["lora"], help="lora: run the G-A adapter probe (docs/v11/GA_PROBE.md) before the agent smoke")
     ap.add_argument("--min", type=float, default=None, help="override max_time_minutes (default: eval_config.yaml)")
     ap.add_argument("--calls", type=int, default=None, help="override max_tool_calls (default: eval_config.yaml)")
     ap.add_argument("--turns", type=int, default=None, help="override max_turns (default: eval_config.yaml)")
@@ -318,7 +410,7 @@ def main(argv=None):
             if f.endswith(".py"):
                 with open(os.path.join(a.helper_check, f), "rb") as fh:
                     hb[f] = base64.b64encode(fh.read()).decode()
-    cells = build_cells(files, ids, patches, a.oracle, budget, override, hb)
+    cells = build_cells(files, ids, patches, a.oracle, budget, override, hb, probe=a.probe, names=adapter_names(a.bundle))
     nb = {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": c} for c in cells],
           "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
     kd = os.path.join("kernels", a.slug)

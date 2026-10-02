@@ -247,3 +247,21 @@ def test_kernel_records_the_wheel_set(tmp_path):
     src = cells(tmp_path, "t-sha")
     assert "wheelhouse_sha256.txt" in src[0] and "hashlib.sha256()" in src[0]
     assert not any("VllmConfig(" in c for c in src[:1])
+
+
+def test_probe_lora_adds_probe_and_routing_cells(tmp_path):
+    # docs/v11/GA_PROBE.md: the probe cell runs between vLLM startup and the agent smoke; routing check after it
+    sys.path.insert(0, str(ROOT / "scripts")); import make_test_adapters as M
+    M.build(str(ROOT / "submissions" / "v4"), str(tmp_path / "pb"), 20261003)
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\nrich_3067\n")
+    build(tmp_path, tmp_path / "pb", "g4-l4-lora-probe", "--ids", str(ids), "--probe", "lora")
+    cs = cells(tmp_path, "g4-l4-lora-probe")
+    assert len(cs) == 6 and "ADAPTER_NAMES = [\"loud\", \"loud2\", \"zb\"]" in cs[3] and "lora_probe.json" in cs[3]
+    assert "P6_agent_smoke" in cs[5] and "GA_PRE_SMOKE" in cs[3]
+    for c in cs:
+        compile(c, "<cell>", "exec")
+    nb = (tmp_path / "kernels" / "g4-l4-lora-probe" / "g4-l4-lora-probe.ipynb").stat().st_size
+    assert nb < 1_000_000, nb
+    assert "adapters/zb/adapter_model.safetensors" in cs[1]
+    r = build(tmp_path, ROOT / "submissions" / "v4", "nope", "--probe", "lora", check=False)
+    assert r.returncode != 0 and "needs a bundle with adapters" in (r.stdout + r.stderr)
