@@ -35,4 +35,6 @@ def test_variant_compiles_with_the_official_compiler(tmp_path):
     T.build(str(V4H), str(tmp_path / "t"), "LOW")
     p = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(tmp_path / "t")], capture_output=True, text=True)
     assert p.returncode == 0, p.stdout[-600:] + p.stderr[-1200:]
-    assert "'include_thoughts': True" in p.stdout and "'thinking_level': 'LOW'" in p.stdout, p.stdout
+    # validate.py prints the compiled gen config per agent; the level comes back as the ThinkingLevel enum
+    fixer = p.stdout.split("LlmAgent fixer")[1].split("LlmAgent")[0]
+    assert "'include_thoughts': True" in fixer and "ThinkingLevel.LOW" in fixer, fixer

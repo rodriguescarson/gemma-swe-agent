@@ -20,7 +20,7 @@ def show(a, depth=0):
     tools = [getattr(t, 'name', getattr(t, '__name__', type(t).__name__)) for t in getattr(a, 'tools', [])]
     gcc = getattr(a, 'generate_content_config', None)
     print('  '*depth + f"{type(a).__name__} {a.name} model={getattr(getattr(a,'model',None),'model',getattr(a,'model',None))} tools={tools}")
-    if gcc is not None and depth == 0: print('  '*depth + f"  gen: {gcc.model_dump(exclude_none=True)}")
+    if gcc is not None: print('  '*depth + f"  gen: {gcc.model_dump(exclude_none=True)}")
     for s in getattr(a, 'sub_agents', []) or []: show(s, depth+1)
 show(agent)
 size = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(d) for f in fs)
