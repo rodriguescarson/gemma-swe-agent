@@ -38,11 +38,16 @@ def stage_of(body):
 
 
 def first_user_text(body):
+    """The text to match a task against: the system prompt (fixer/verifier carry the issue there, via
+    {problem_description}) plus the first user message (the locator's task prompt)."""
+    out = []
     for m in body.get("messages", []):
-        if m.get("role") == "user":
+        if m.get("role") in ("system", "user"):
             c = m.get("content")
-            return c if isinstance(c, str) else " ".join(p.get("text", "") for p in (c or []) if isinstance(p, dict))
-    return ""
+            out.append(c if isinstance(c, str) else " ".join(p.get("text", "") for p in (c or []) if isinstance(p, dict)))
+            if m.get("role") == "user":
+                break
+    return "\n".join(out)
 
 
 class TaskIndex:
