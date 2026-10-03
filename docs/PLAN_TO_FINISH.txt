@@ -1,0 +1,81 @@
+PLAN TO FINISH  (written 2026-10-03 08:50 IST)
+==============================================
+
+GOAL
+----
+Two selected submissions on the private leaderboard on Dec 2 that are the best this pipeline can produce, and a
+paper-track entry by Nov 12. Public checkpoint: 12 of 58 (0.21). First place today is 14 of 58; we are at 7 of 58
+(v4, old scorer). sub9 (v4h2) is scoring now; result ~20:30 IST today.
+
+The only lever with room for +5 tasks is a LoRA trained on verified trajectories; everything else is a thin v4
+variant worth 0-2 tasks. So the finish line is: (A) a validated thin base (v4h2), (B) a trained adapter that applies
+on the scorer and beats the base in a paired run, (C) the paper.
+
+HOW WE WORK FROM HERE: TESTS FIRST, GLUE INCLUDED
+-------------------------------------------------
+Last night every failure was in untested glue, while every tested component held:
+  - overnight time gate passed at any hour            -> untested shell condition
+  - "submitted" marker grep matched 2-day-old log lines -> untested grep
+  - slot rule counted provider APIError as a bundle crash -> untested classifier
+  - Kaggle install cell fed cp312 wheels to Python 3.13 -> untested environment assumption
+  - submit_at armed "0001" at 00:23 UTC -> tomorrow   -> untested time arithmetic
+  - collect.sh copied a 9.6 GB harness into Docker    -> untested disk footprint
+Rule: no shell step without a pytest that exercises it with a fake clock / fake kaggle / fake docker. The test is
+written first and must FAIL before the fix. "It ran once" is not a test. This is already the rule for Python code
+(edit.py 18 tests, build_sft 5, renderer 5, proxy 7); it now applies to every .sh and every kernel cell.
+
+ERRORS OPEN RIGHT NOW AND THEIR FIXES (each: test first, then code)
+-------------------------------------------------------------------
+E1  OpenRouter key hit its total limit (403). Owner: Carson. Raise the key limit or create a new key at
+    openrouter.ai/settings/keys; put it in ~/Projects/.env as OPENROUTER_KEY. Test: scripts/or_proxy.py gets a 200
+    on one probe call before any pass starts (add a --probe flag; collect.sh refuses to start on a failed probe).
+E2  Kaggle image is Python 3.13; install cell pushes cp312 wheels. Test: a unit test that filters a wheel list by
+    the running interpreter's tags (packaging.tags) and rejects cp312 under 3.13. Code: CELL_INSTALL installs only
+    compatible wheels; if a required wheel (tvm_ffi, cbor2) has no 3.13 build in the wheelhouse, the kernel must
+    stop with a clear message instead of a traceback, and the fallback is to pin the notebook environment (check
+    the host notebook's current settings first).
+E3  Slot decision classified provider errors as crashes. Test: a results file with APIError / connection rows must
+    not change the verdict. Code: decide_sub9 ignores "APIError", "onnection", "refused", "budget".
+E4  submit_at "0001" armed after 00:01 UTC targets tomorrow. Test: arming at 00:23 UTC for "0001" with
+    SUBMIT_NOW=1 fires immediately. Code: a SUBMIT_NOW flag (or SUBMIT_TARGET_EPOCH=0, which exists; use it).
+E5  Overnight marker: grep matched old "attempt 1" lines. Test: the waiter ignores lines older than its own
+    start. Code: write the marker from decide_sub9 itself after the submit call returns, not from a grep.
+E6  Overnight time gate. Test: a fake clock at 19:51 UTC must wait; at 00:06 UTC must pass. Code: compare against
+    the start-of-day epoch, as submit_at.sh already does.
+E7  Pre-flight killed by the disk watchdog during sample overlap. Code: coverage.sh now runs it alone (done);
+    test: the loop refuses to start a pass under MIN_FREE_GB (shell test with a fake df).
+E8  Heredoc-as-tool-name crash: v4h 10/123 -> v4h2 1/159. HANDLED by the pre-registered rule (<= 3). Keep the
+    measurement in every future pass (it is in the summary line).
+
+ORDERED CHECKLIST TO THE FINISH LINE
+------------------------------------
+Each step has a pass condition written before it runs. A step that fails is fixed and re-run; it is never skipped.
+
+ 1. [today] sub9 (v4h2) score. Pass: >= 8/58 keeps v4h2 as base; <= 6 means investigate before any slot.
+ 2. [today] E1-E6 fixed test-first; re-push g4-l4-lora-probe; wait; read docs/v11/GA_PROBE.md rules.
+    Pass: adapters apply (loud changes >= 18/20 outputs), zero-B harmless, long context returns.
+ 3. [today/tomorrow] g4-l4-v4h2 and g4-l4-v4-wh28 on all 74 public tasks, sequential, never while a submission
+    scores. Pass: v4h2 solved >= v4 - 2, crashes <= v4, mean secs/task <= 170, 0 helper unreachable.
+ 4. [this week] pre-flight the 159 training tasks (running now); remove invalid ones from the target with reasons.
+ 5. [this week] coverage loop on the valid set with the rotation Gemma / Qwen3-Coder / DeepSeek-V4-Pro /
+    gpt-oss-120b / Kimi-K2.6, two passes at a time, until >= 90% of valid tasks have at least one solved
+    trajectory or 6 rounds. Budget: ~$90. Pass: stitched rows >= 10,000, validate_rows clean.
+ 6. [this week] Adaption: upload, train v11a at platform defaults (r8, 1 epoch, lr 1e-4, q/k/v/o), download,
+    inspect base revision + template, add to the probe as a 4th adapter. Pass: applies and does not hurt.
+ 7. [next week] Z slot: base + v11a adapter on the hidden set. Pass: >= base - 1 (it is a path test, not a gain test).
+ 8. [next week] Paired L4 run base vs base+adapter on 74 (3.5 h each). Pass: +3 tasks or more, CI reported.
+ 9. [by Nov 8] adapter iteration 2 only if 8 passed; else the LoRA track closes and the thin-base line continues.
+10. [Oct 25] paper drafts entered (A: evals do not predict hidden; B: GemmaTraj resource). [Nov 12] final.
+11. [Nov 28] freeze; select the two finals by mean of reads.
+
+WHAT WE STOP DOING
+------------------
+- No submission without the full-population run (74 public on L4, or 159 Pallets for crash classes).
+- No new pipeline weight (stages, repair loops, gates) on the main track.
+- No GPU pods. OpenRouter for screening and data, Kaggle L4 for faithful runs, Adaption for training.
+- No shell glue without a test. No "it ran once".
+
+DAILY RHYTHM
+------------
+05:31 IST slot (only when a validated candidate exists; empty slots are fine), ~17:30-20:30 score lands,
+22:00 next-day decision written in docs/v4h/GATE.md before anything is armed, one line to Carson per day.
