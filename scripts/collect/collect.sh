@@ -94,10 +94,14 @@ else
 fi
 [ -z "$IDS" ] && { echo "SAMPLE_DONE s$SAMPLE (nothing left) $(date -u +%FT%TZ)" >> /out/progress.log; exit 0; }
 echo "SAMPLE_START s$SAMPLE $(echo $IDS | wc -w) tasks $(date -u +%FT%TZ) $(budget /tmp/bundle)" >> /out/progress.log
+# swegemma/results.py rewrites task_results.jsonl at the end of a run with only that run's tasks: keep the earlier rows
+# of a resumed sample aside and fold them back afterwards (scripts/collect/merge_results.py, tests/test_collect_resume.py)
+[ -f "$DONE" ] && cp "$DONE" "${DONE%.jsonl}.prev.jsonl"
 # shellcheck disable=SC2046,SC2086
 TMPDIR=/tmp/sbx python /g4/scripts/pallets/run_eval_pallets.py eval --tasks "$H/tasks.jsonl" --snapshots-dir "$H/snapshots" \
   --submission-dir /tmp/bundle --results-dir /out/s$SAMPLE --sandbox subprocess $(budget /tmp/bundle) --concurrency $CONC \
   --display quiet --task-ids $IDS > /out/s$SAMPLE.out 2>&1 || true
+python /g4/scripts/collect/merge_results.py "/out/s$SAMPLE" >> /out/progress.log 2>&1 || true
 echo "SAMPLE_DONE s$SAMPLE rows=$(wc -l < $DONE 2>/dev/null || echo 0) $(date -u +%FT%TZ)" >> /out/progress.log
 SH
 for k in $(seq 1 "$SAMPLES"); do
