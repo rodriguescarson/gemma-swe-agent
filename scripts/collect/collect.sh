@@ -101,6 +101,9 @@ TMPDIR=/tmp/sbx python /g4/scripts/pallets/run_eval_pallets.py eval --tasks "$H/
 echo "SAMPLE_DONE s$SAMPLE rows=$(wc -l < $DONE 2>/dev/null || echo 0) $(date -u +%FT%TZ)" >> /out/progress.log
 SH
 for k in $(seq 1 "$SAMPLES"); do
+  # E7: never start a pass into a full disk; E1: never start a pass on a key that is over its limit (one probe call)
+  bash scripts/collect/disk_guard.sh | tee -a "$OUT/progress.log" || exit 3
+  "$PY" scripts/or_proxy.py --probe --or-provider "$PROVIDER" --model "$MODEL" 2>&1 | tee -a "$OUT/progress.log" || { echo "PROBE FAILED: not starting s$k" | tee -a "$OUT/progress.log"; exit 4; }
   "$PY" scripts/or_proxy.py --port "$PORT" --max-usd "$CAP" --or-provider "$PROVIDER" --model "$MODEL" --l4-pace \
     --log "$OUT/proxy_s$k.jsonl" --capture "$OUT/capture_s$k.jsonl" > "$OUT/proxy_s$k.out" 2>&1 &
   P=$!

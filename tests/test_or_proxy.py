@@ -100,3 +100,25 @@ def test_capture_writes_body_and_response_for_successful_calls_only(tmp_path):
     srv.shutdown()
     rows = [json.loads(l) for l in cap.read_text().splitlines()]
     assert len(rows) == 1 and rows[0]["body"] == body and rows[0]["response"]["choices"][0]["message"]["content"] == "hi"
+
+
+def test_probe_reports_upstream_ok_or_the_refusal():
+    """E1 (docs/PLAN_TO_FINISH.txt): a pass never starts on a key that is over its limit; one probe call decides."""
+    ep, sent = fake_ep(REPLY)
+    ok, status, msg = or_proxy.probe(ep)
+    assert ok and status == 200 and sent[0]["max_tokens"] <= 8 and sent[0]["messages"][0]["role"] == "user"
+    ep2, _ = fake_ep(None, status=403)
+    ok, status, msg = or_proxy.probe(ep2)
+    assert not ok and status == 403 and "boom" in msg
+
+
+def test_probe_cli_exit_codes(tmp_path, monkeypatch):
+    rc = []
+    monkeypatch.setattr(or_proxy, "probe", lambda ep: (False, 403, "Key limit exceeded"))
+    monkeypatch.setattr(sys, "argv", ["or_proxy.py", "--probe", "--or-provider", "any"])
+    monkeypatch.setattr(or_proxy, "make_endpoint", lambda *a, **k: object(), raising=False)
+    try:
+        or_proxy.main()
+    except SystemExit as e:
+        rc.append(e.code)
+    assert rc == [3]

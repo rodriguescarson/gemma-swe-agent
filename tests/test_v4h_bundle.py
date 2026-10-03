@@ -59,3 +59,20 @@ def test_v4h2_differs_from_v4h_only_in_the_call_shape_lines():
         a, b = (V4H / "prompts" / f"{name}.md").read_text().splitlines(), (V4H2 / "prompts" / f"{name}.md").read_text().splitlines()
         assert len(a) == len(b) and sum(x != y for x, y in zip(a, b)) == 1
         assert 'run_command(command="python3 /tmp/swe/edit.py ...")' in (V4H2 / "prompts" / f"{name}.md").read_text()
+
+
+def test_v4h3_differs_from_v4h2_only_in_the_verifier_loop_lines():
+    """v4h3 = v4h2 + a bounded fix-and-test loop in the verifier (one variable). Evidence (eval/kaggle/g4-l4-v4/
+    failure_taxonomy.json): of 27 right-file-wrong-fix tasks on L4, 10 never ran a test and 7 ended on a failing test
+    (4 with >100 s left); v4's verifier re-runs once at most."""
+    V4H2, V4H3 = ROOT / "submissions" / "v4h2", ROOT / "submissions" / "v4h3"
+    assert files(V4H3) == files(V4H2)
+    changed = {rel for rel in files(V4H2) if not filecmp.cmp(V4H2 / rel, V4H3 / rel, shallow=False)}
+    assert changed == {"prompts/verifier.md"}, changed
+    a, b = (V4H2 / "prompts" / "verifier.md").read_text().splitlines(), (V4H3 / "prompts" / "verifier.md").read_text().splitlines()
+    assert len(a) == len(b) and sum(x != y for x, y in zip(a, b)) == 1
+    v3 = (V4H3 / "prompts" / "verifier.md").read_text()
+    assert "at most 3 more rounds" in v3 and "budget warning" in v3 and "never the whole suite" in v3
+    assert "re-run once" not in v3
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(V4H3)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-1500:]

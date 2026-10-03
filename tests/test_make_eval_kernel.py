@@ -265,3 +265,31 @@ def test_probe_lora_adds_probe_and_routing_cells(tmp_path):
     assert "adapters/zb/adapter_model.safetensors" in cs[1]
     r = build(tmp_path, ROOT / "submissions" / "v4", "nope", "--probe", "lora", check=False)
     assert r.returncode != 0 and "needs a bundle with adapters" in (r.stdout + r.stderr)
+
+
+def test_pin_original_and_kernel_id_reuse_an_older_slug_environment(tmp_path):
+    # E2 (docs/PLAN_TO_FINISH.txt): Kaggle's image moved to Python 3.13 and the wheelhouse has only cp312 wheels; new
+    # versions of a slug created under 3.12, pushed with docker_image_pinning_type=original, keep the 3.12 image
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
+    build(tmp_path, ROOT / "submissions" / "v4", "g4-l4-v4h2", "--ids", str(ids), "--pin", "original", "--kernel-id", "g4-l4-v4")
+    meta = json.loads((tmp_path / "kernels" / "g4-l4-v4h2" / "kernel-metadata.json").read_text())
+    assert meta["id"] == "carsonrodrigues/g4-l4-v4" and meta["title"] == "g4-l4-v4" and meta["code_file"] == "g4-l4-v4.ipynb"
+    assert meta["docker_image_pinning_type"] == "original"
+    assert (tmp_path / "kernels" / "g4-l4-v4h2" / "g4-l4-v4.ipynb").exists()
+    meta2 = json.loads(json.dumps(meta))
+    build(tmp_path, ROOT / "submissions" / "v4", "plain", "--ids", str(ids))
+    assert "docker_image_pinning_type" not in json.loads((tmp_path / "kernels" / "plain" / "kernel-metadata.json").read_text())
+
+
+def test_install_cell_filters_wheels_by_interpreter_tags(tmp_path):
+    m = _mod()
+    names = ["adk_eval_core-0.1.0-py3-none-any.whl", "cbor2-6.1.4-cp312-cp312-manylinux_2_28_x86_64.whl",
+             "vllm-0.19.1-cp38-abi3-manylinux_2_31_x86_64.whl", "xgrammar-0.1.0-cp313-cp313-manylinux_2_28_x86_64.whl"]
+    ok, bad = m.split_wheels_by_tags(names, python_tag="cp313")
+    assert "cbor2-6.1.4-cp312-cp312-manylinux_2_28_x86_64.whl" in bad and "xgrammar-0.1.0-cp313-cp313-manylinux_2_28_x86_64.whl" in ok
+    assert "vllm-0.19.1-cp38-abi3-manylinux_2_31_x86_64.whl" in ok and "adk_eval_core-0.1.0-py3-none-any.whl" in ok
+    ok12, bad12 = m.split_wheels_by_tags(names, python_tag="cp312")
+    assert not [b for b in bad12 if "cp312" in b] and "xgrammar-0.1.0-cp313-cp313-manylinux_2_28_x86_64.whl" in bad12
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
+    build(tmp_path, ROOT / "submissions" / "v4", "k", "--ids", str(ids))
+    assert "split_wheels_by_tags" in cells(tmp_path, "k")[0] and "incompatible wheels for this interpreter" in cells(tmp_path, "k")[0]

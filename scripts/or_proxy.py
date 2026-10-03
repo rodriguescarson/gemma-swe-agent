@@ -72,6 +72,15 @@ def handle(ep, budget: Budget, body: dict, pacer: "Pacer | None" = None, sleep=t
     return status, resp, row
 
 
+def probe(ep) -> tuple:
+    """One tiny upstream call: (ok, status, message). E1 (docs/PLAN_TO_FINISH.txt): a pass never starts on a key that is
+    over its limit (OpenRouter answers 403 'Key limit exceeded' to every call; the 2026-10-03 sample 3 was 159 of them)."""
+    status, resp, _ = handle(ep, Budget(0.05), {"messages": [{"role": "user", "content": "Reply with the single word ok."}],
+                                                "max_tokens": 4, "temperature": 0})
+    msg = ((resp or {}).get("error") or {}).get("message") if status != 200 else "ok"
+    return status == 200, status, str(msg)
+
+
 def serve(port: int, ep, budget: Budget, log_path: Path, host: str = "0.0.0.0", pacer=None,
           capture_path: "Path | None" = None) -> ThreadingHTTPServer:
     """capture_path: append one JSON line per successful call {t, body, response} (the exact OpenAI request the harness
@@ -118,15 +127,22 @@ def serve(port: int, ep, budget: Budget, log_path: Path, host: str = "0.0.0.0", 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", type=int, required=True)
-    ap.add_argument("--max-usd", type=float, required=True)
-    ap.add_argument("--log", required=True)
+    ap.add_argument("--port", type=int, default=None)
+    ap.add_argument("--max-usd", type=float, default=None)
+    ap.add_argument("--log", default=None)
+    ap.add_argument("--probe", action="store_true", help="one upstream call, exit 0 on 200 / 3 otherwise; no server")
     ap.add_argument("--or-provider", default=None)
     ap.add_argument("--l4-pace", action="store_true", help="hold replies to the modelled L4 time per call")
     ap.add_argument("--capture", default=None, help="JSONL of {t, body, response} for every successful call (SFT raw data)")
     ap.add_argument("--model", default=None, help="upstream model id (default google/gemma-4-31b-it); e.g. a teacher")
     a = ap.parse_args()
     ep = make_endpoint("openrouter", or_provider=a.or_provider, upstream_model=a.model)
+    if a.probe:
+        ok, status, msg = probe(ep)
+        print(f"or_proxy probe {getattr(ep, 'model', a.model)}: {'OK' if ok else 'FAILED'} status={status} {msg[:160]}", flush=True)
+        sys.exit(0 if ok else 3)
+    if a.port is None or a.max_usd is None or a.log is None:
+        ap.error("--port, --max-usd and --log are required unless --probe")
     srv = serve(a.port, ep, Budget(a.max_usd), Path(a.log), pacer=Pacer() if a.l4_pace else None,
                 capture_path=Path(a.capture) if a.capture else None)
     print(f"or_proxy :{a.port} -> {ep.model} pin={ep.provider} cap=${a.max_usd} l4_pace={a.l4_pace}", flush=True)

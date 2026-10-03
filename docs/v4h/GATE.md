@@ -151,3 +151,35 @@ decide_sub9.sh fired at 05:53 IST with sample 2 at 80 tasks: heredoc crashes 1, 
 infrastructure, not bundle behaviour, so the rule's intent ("no new crash class in the bundle") was met; v4h2 was
 submitted by hand at 08:36 IST (03:06 UTC) as sub9. Final sample 2: 159 tasks, 18 solved, 1 heredoc crash (v4h: 10/123).
 Fixes owed in code: decide_sub9 must ignore APIError/connection rows; submit_at.sh must accept an explicit "now" target.
+
+### Addendum 2026-10-03 09:40 IST: the sub9 sample-2 read had 85 phantom rows
+
+`scripts/analyze_failures.py eval/collect/pallets_v4h2_s2/s1` (written today) classifies the 159 rows of the v4h2
+Pallets sample that the 08:36 IST hand submission of sub9 was read against: 18 solved, 22 right-file-wrong-fix, 7
+wrong-files, 4 no-patch, 21 timeout-no-patch, and **87 "crash" rows of which 85 are `litellm.APIError ... Key limit
+exceeded`** (the OpenRouter key hit its total limit mid-sample; those tasks never made a model call, their traces hold
+only the user message). The pre-registered rule needed `rows >= 80`; the rows that actually ran were 74, so the
+rule's precondition was NOT met and "1 heredoc crash of 159" is "1 of 74". The 08:33 decision log already recorded the
+APIError misclassification (E3) but not this denominator. sub9 stays as submitted (the slot would otherwise have gone
+unused, Carson 00:58 IST); the reading of its score must treat the crash-class evidence as n=74 plus the 74 public tasks
+of 2026-10-02 (0 crashes), not n=233. decide_sub9.sh now ignores provider errors AND counts rows only among tasks that
+reached the model (the 80-row floor is on real rows); tests/test_decide_sub9.py covers both.
+
+## v4h3 pre-registration (2026-10-03 09:55 IST, before any run)
+
+v4h3 = v4h2 with ONE change: the verifier's step 2 loops ("read the failing assertion, edit, and re-run: at most 3 more
+rounds, stop as soon as a budget warning appears") instead of "fix it and re-run once". Evidence it is aimed at:
+`eval/kaggle/g4-l4-v4/failure_taxonomy.json` (v4, 4xL4, 29/74): of the 27 right-file-wrong-fix tasks, 10 never ran a
+test, 10 ended on a passing existing test (the loop cannot help those), 7 ended on a failing test, 4 of them with more
+than 100 s unused. Upper bound of the variable on this run: about 7 of 74; expected +1 to +3; the 10 "existing tests
+pass, hidden tests fail" tasks need a different variable (repro from the issue text), kept for v4h4 only if v4h3 shows
+signal. Bundle test: tests/test_v4h_bundle.py::test_v4h3_differs_from_v4h2_only_in_the_verifier_loop_lines.
+
+Measurement: Kaggle 4xL4, all 74 public tasks, kernel g4-l4-v4h3-p312 (pinned 3.12 image), the same day and wheelhouse
+as g4-l4-v4h2-p312. Pass, all required:
+1. solved(v4h3) >= solved(v4h2) on the same 74 (paired; +-3 is single-read noise, so a tie is a pass for the *slot
+   candidate* only if 2-4 also hold and the paired wins are not all on one repo);
+2. mean seconds per task <= 190 (hidden set runs 1.6-1.8x slower; 120 x 190 x 1.8 = 11.4 h under the 12 h cap);
+3. non-timeout crash rows <= v4h2's; 0 helper-unreachable calls;
+4. tasks ending on a failing existing test with > 60 s unused: fewer than v4h2's (the mechanism the change claims).
+FAIL on 2 -> the loop bound drops to 2 rounds and re-runs; FAIL on 1 with 2-4 passing -> v4h3 is not a slot candidate.

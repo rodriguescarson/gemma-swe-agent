@@ -10,7 +10,7 @@ itself with the host's code and stops before vLLM starts if the result differs f
 
 Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> --ids ids.txt [--oracle | --patches labels.json]
        [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir]"""
-import argparse, base64, json, os, re, sys
+import argparse, inspect, base64, json, os, re, sys
 
 BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_seconds")
 # The host notebook's defaults when a key is absent (cell 10 of the 2026-09-27 run; HARNESS_README 7.1 agrees).
@@ -119,7 +119,32 @@ def bundle_files(bundle):
     return files
 
 
-CELL_INSTALL = r'''
+def split_wheels_by_tags(names, python_tag=None):
+    """Split wheel file names into (compatible, incompatible) for one CPython tag (default: the running interpreter).
+
+    The Kaggle image moved to Python 3.13 on 2026-10-03 while the wheelhouse ships cp312 builds of tvm_ffi, cbor2, ...;
+    pip then installs them anyway (--no-deps --force-reinstall ignores tags on explicit paths) and the import fails
+    later with a traceback. Pure-python (py3/none), matching cpXY, and stable-ABI (cpXY-abi3 with XY <= ours) wheels pass.
+    """
+    import sys
+    python_tag = python_tag or "cp%d%d" % sys.version_info[:2]
+    ok, bad = [], []
+    for n in names:
+        parts = (n[:-4] if n.endswith(".whl") else n).split("-")
+        if len(parts) < 5:        # not a tagged wheel name: leave it to pip
+            ok.append(n); continue
+        pys, abi = parts[-3].split("."), parts[-2]
+        good = False
+        for py in pys:
+            if py.startswith("py3") or py == python_tag:
+                good = True
+            elif abi == "abi3" and py.startswith("cp") and py[2:].isdigit() and int(py[2:]) <= int(python_tag[2:]):
+                good = True
+        (ok if good else bad).append(n)
+    return ok, bad
+
+
+CELL_INSTALL = inspect.getsource(split_wheels_by_tags) + r'''
 import glob, importlib, os, shutil, subprocess, sys, json, time, base64
 from pathlib import Path
 os.environ.update({'LITELLM_LOCAL_MODEL_COST_MAP': 'True', 'TRANSFORMERS_NO_TF': '1', 'VLLM_WORKER_MULTIPROC_METHOD': 'spawn',
@@ -136,7 +161,16 @@ for w in WHEELHOUSE_DIR.glob('*.whl'):
     if 'cutlass' in w.name.lower(): continue
     n = w.name.replace('cu128', '+cu128') if ('cu128' in w.name and '+' not in w.name) else w.name
     if not (tmp / n).exists(): os.symlink(w, tmp / n)
-subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--no-deps', '--force-reinstall', *sorted(str(w) for w in tmp.glob('*.whl'))], check=True)
+_ok, _bad = split_wheels_by_tags(sorted(w.name for w in tmp.glob('*.whl')))
+if _bad:
+    _dist = lambda n: n.split('-')[0].lower().replace('_', '-')
+    _missing = sorted({_dist(b) for b in _bad} - {_dist(o) for o in _ok})
+    print('incompatible wheels for this interpreter (python %s), skipped: %s' % (sys.version.split()[0], ' '.join(_bad)))
+    if _missing:
+        raise SystemExit('STOP: no compatible build in the wheelhouse for %s on python %s. Push this kernel as a new version '
+                         'of a slug created under the older image with docker_image_pinning_type=original (make_eval_kernel.py '
+                         '--pin original --kernel-id <old-slug>) instead of burning GPU time on a traceback.' % (' '.join(_missing), sys.version.split()[0]))
+subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--no-deps', '--force-reinstall', *[str(tmp / n) for n in _ok]], check=True)
 importlib.invalidate_caches(); print('wheelhouse ok')
 # The wheel set this run used, by content: the host rebuilt vllm and adk_submission in place under the same version
 # strings (org_update_0928 1.1), so A/B arms are paired only when these files are identical (scripts/ab_l4_decide.py).
@@ -385,6 +419,10 @@ def main(argv=None):
     ap.add_argument("--calls", type=int, default=None, help="override max_tool_calls (default: eval_config.yaml)")
     ap.add_argument("--turns", type=int, default=None, help="override max_turns (default: eval_config.yaml)")
     ap.add_argument("--timeout", type=int, default=None, help="override timeout_seconds (default: eval_config.yaml)")
+    ap.add_argument("--pin", choices=["original", "latest"], default=None,
+                    help="kernel-metadata docker_image_pinning_type; 'original' keeps the image the slug was created with")
+    ap.add_argument("--kernel-id", default=None,
+                    help="push as a new version of this existing slug (id/title/code_file) while writing under kernels/<slug>/")
     a = ap.parse_args(argv)
     override = {k: v for k, v in (("max_time_minutes", a.min), ("max_tool_calls", a.calls), ("max_turns", a.turns),
                                    ("timeout_seconds", a.timeout)) if v is not None}
@@ -415,14 +453,17 @@ def main(argv=None):
           "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
     kd = os.path.join("kernels", a.slug)
     os.makedirs(kd, exist_ok=True)
-    with open(os.path.join(kd, a.slug + ".ipynb"), "w") as f:
+    kid = a.kernel_id or a.slug
+    with open(os.path.join(kd, kid + ".ipynb"), "w") as f:
         json.dump(nb, f)
-    meta = {"id": "carsonrodrigues/" + a.slug, "title": a.slug, "code_file": a.slug + ".ipynb", "language": "python", "kernel_type": "notebook",
+    meta = {"id": "carsonrodrigues/" + kid, "title": kid, "code_file": kid + ".ipynb", "language": "python", "kernel_type": "notebook",
             "is_private": True, "enable_gpu": not a.oracle, "enable_tpu": False, "enable_internet": False,
             "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"], "competition_sources": ["gemma-4-developer-agent"],
             "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]}
     if not a.oracle:
         meta["machine_shape"] = "NvidiaL4"
+    if a.pin:
+        meta["docker_image_pinning_type"] = a.pin
     with open(os.path.join(kd, "kernel-metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)
     print(kd, len(files), "files", len(ids) or "all", "tasks", "budget", json.dumps(budget, sort_keys=True), "from", src)

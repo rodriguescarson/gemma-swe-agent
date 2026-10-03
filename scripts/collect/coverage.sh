@@ -13,8 +13,13 @@ LOG=eval/collect/coverage.log; export TARGET_IDS=${TARGET_IDS:-data/pallets/trai
 step() { echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] $*" | tee -a "$LOG"; }
 free_gb() { df -g /System/Volumes/Data | awk 'NR==2{print $4}'; }
 # bundle|model|provider. Open-weight, permissive licences only (Apache-2.0 / MIT / modified MIT); Gemma for on-policy data.
-MODELS=("v4h2|deepseek/deepseek-v4-pro|any" "v4h2|openai/gpt-oss-120b|any" "v4h2|moonshotai/kimi-k2.6|any"
-        "v4h2|qwen/qwen3-coder|any" "v4h2|google/gemma-4-31b-it|parasail/fp8" "v4h2|deepseek/deepseek-v4-pro|any")
+# 2026-10-03 09:12 IST: openai/gpt-oss-120b dropped: 8 of 179 tool calls carried malformed JSON arguments ('"]' glitch) and
+# ADK's json.loads ends the task on the first one (0 of 8 tasks solved). Gemma appears twice: on-policy data is what the
+# LoRA needs most, and sampling at the bundle temperature gives a new attempt per pass.
+# 10:10 IST: deepseek-v4-pro dropped too: 11 of 12 finished tasks timed out in the locator (completion p50 118 tokens
+# under L4 pacing). Rotation = the two teachers that produce patches in 5 min (kimi untested, qwen 14 solved on 10-02) + Gemma.
+MODELS=("v4h2|moonshotai/kimi-k2.6|any" "v4h2|qwen/qwen3-coder|any" "v4h2|google/gemma-4-31b-it|parasail/fp8"
+        "v4h2|moonshotai/kimi-k2.6|any" "v4h2|google/gemma-4-31b-it|parasail/fp8" "v4h2|qwen/qwen3-coder|any")
 remaining() {   # stdout: remaining ids; stderr: the COVERAGE line
   python3 - <<'PY'
 import json, glob, os, sys
@@ -57,22 +62,13 @@ for round in $(seq 1 "${MAX_ROUNDS:-4}"); do
     spec=${!slot}; bundle=${spec%%|*}; rest=${spec#*|}; model=${rest%%|*}; prov=${rest#*|}
     tag="cov_r${round}_${slot}_$(echo "$model" | tr '/.:' '___')"; port=8794; [ "$slot" = B ] && port=8795
     step "round $round slot $slot: $bundle via $model ($prov) -> $tag (free $(free_gb)GB)"
-    SAMPLES=1 CONC=4 MAX_USD=20 PORT=$port MODEL=$model PROVIDER=$prov HARNESS=data/pallets/harness_train \
+    SAMPLES=1 CONC=4 MAX_USD=${PASS_USD:-10} PORT=$port MODEL=$model PROVIDER=$prov HARNESS=data/pallets/harness_train \
       bash scripts/collect/collect.sh "$bundle" "eval/collect/cov_r${round}_ids.txt" "$tag" > "eval/collect/$tag.out" 2>&1 &
     sleep 90
   done
   wait
   step "round $round done: $(remaining 2>&1 >/dev/null) (free $(free_gb)GB)"
 done
-# 3. stitch every pass (success-only, per-pass verdicts) and validate
-PAIRS=()
-for d in eval/collect/*/; do
-  c="${d}capture_s1.jsonl"; r="${d}s1/task_results.jsonl"
-  [ -s "$c" ] && [ -s "$r" ] && PAIRS+=(--pair "$c=$r")
-done
-.venv/bin/python train/build_sft.py "${PAIRS[@]}" --tasks data/pallets/harness_train/tasks.jsonl --out data/v11/rows_stitched.jsonl \
-  --exclude-ids data/pallets/dev40_ids.txt --exclude-ids data/pallets/holdout_ids.txt > eval/collect/stitch.out 2>&1
-.venv/bin/python train/validate_rows.py data/v11/rows_stitched.jsonl --exclude-ids data/pallets/dev40_ids.txt --exclude-ids data/pallets/holdout_ids.txt \
-  --min-rows 10000 --report eval/collect/rows_stitched_report.json > eval/collect/validate_stitched.out 2>&1
-step "stitched: validate exit $? $(python3 -c "import json; r=json.load(open('eval/collect/rows_stitched_report.json')); print({k: r[k] for k in ('rows','tasks','rows_per_task','problems')})" 2>/dev/null)"
+# 3. stitch every pass, all samples (scripts/collect/stitch.sh: pairs.py + build_sft + validate_rows)
+bash scripts/collect/stitch.sh
 step "COVERAGE DONE: $(remaining 2>&1 >/dev/null) (free $(free_gb)GB)"
