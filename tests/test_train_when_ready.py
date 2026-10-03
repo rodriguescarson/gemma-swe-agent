@@ -13,15 +13,20 @@ def _run(tmp, report, report_age_s=0, launched_before=False):
     if launched_before:
         marker.write_text("x")
     env = dict(os.environ, REPORT=str(rep), TRAINER=str(fake), CALLS=str(tmp / "calls"), MARKER=str(marker), ROWS=str(tmp / "rows.jsonl"),
-               SINCE_EPOCH=str(int(time.time()) - 60), READY_POLL_S="0", READY_MAX_POLLS="2", MIN_ROWS="10000")
+               SINCE_EPOCH=str(int(time.time()) - 60), READY_POLL_S="0", READY_MAX_POLLS="2", MIN_ROWS="10000",
+               SEQ_LOG=str(tmp / "seq.log"))   # never the repo's progress log (a test run polluted it on 10-03)
     r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
     calls = (tmp / "calls").read_text() if (tmp / "calls").exists() else ""
     return r.returncode, calls, r.stdout + r.stderr, marker.exists()
 
 
 def test_launches_once_on_a_fresh_ok_report(tmp_path):
+    real_log = ROOT / "eval" / "overnight" / "progress.log"
+    before = real_log.read_text() if real_log.exists() else None
     rc, calls, out, marker = _run(tmp_path, {"ok": True, "rows": 10400})
     assert rc == 0 and calls.count("FAKE_TRAIN") == 1 and "--launch" in calls and marker
+    assert (tmp_path / "seq.log").exists() and "LAUNCHED" in (tmp_path / "seq.log").read_text()
+    assert (real_log.read_text() if real_log.exists() else None) == before   # the test never touches the real log
 
 
 def test_does_not_launch_on_failing_or_small_report(tmp_path):
