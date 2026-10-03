@@ -48,3 +48,29 @@ def test_cli_refuses_small_sets_without_flag_and_never_launches_by_default(tmp_p
     assert p.returncode != 0 and "10000" in (p.stdout + p.stderr)
     src = (ROOT / "train" / "adaption_train.py").read_text()
     assert 'if not a.launch:' in src and 'c.autoscientist.create(**payload)' in src.split("if not a.launch:")[1]
+
+
+def test_download_unpacks_a_zstd_tarball(tmp_path, monkeypatch):
+    """2026-10-03: the run artefact is a zstd-compressed tar (magic 28 b5 2f fd), not gzip; tarfile alone fails with
+    'invalid header'. download() must detect zstd and unpack it (zstd CLI or the zstandard module)."""
+    import tarfile, subprocess, shutil
+    src = tmp_path / "src"; src.mkdir(); (src / "adapter_config.json").write_text(json.dumps({"r": 8, "target_modules": ["q_proj"]}))
+    (src / "adapter_model.safetensors").write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
+    tar = tmp_path / "a.tar"
+    with tarfile.open(tar, "w") as t:
+        for f in src.iterdir(): t.add(f, arcname=f.name)
+    assert shutil.which("zstd"), "zstd CLI needed for this test"
+    subprocess.run(["zstd", "-q", "-f", str(tar), "-o", str(tmp_path / "a.tar.zst")], check=True)
+    blob = (tmp_path / "a.tar.zst").read_bytes()
+    assert blob[:4] == b"\x28\xb5\x2f\xfd"
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def iter_bytes(self): yield blob
+    class _AS:
+        class with_streaming_response:
+            @staticmethod
+            def download(run_id): return _Resp()
+    class _C: autoscientist = _AS()
+    facts = A.download(_C(), "run-1", str(tmp_path / "out"))
+    assert "adapter_model.safetensors" in " ".join(facts["files"]) and facts["adapter_config"]["r"] == 8

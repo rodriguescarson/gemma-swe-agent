@@ -92,8 +92,24 @@ def download(c, run_id: str, out_dir: str) -> dict:
         with open(tgz, "wb") as f:
             for chunk in r.iter_bytes():
                 f.write(chunk)
-    with tarfile.open(tgz) as t:
-        t.extractall(out)
+    with open(tgz, "rb") as f:
+        magic = f.read(4)
+    if magic == b"\x28\xb5\x2f\xfd":      # zstd-compressed tar (what the platform ships, 2026-10-03), not gzip
+        import shutil, subprocess
+        if shutil.which("zstd"):
+            tar = out / "adapter.tar"
+            with open(tar, "wb") as tf:
+                subprocess.run(["zstd", "-dc", str(tgz)], stdout=tf, check=True)
+            with tarfile.open(tar) as t:
+                t.extractall(out)
+            tar.unlink()
+        else:
+            import zstandard
+            with open(tgz, "rb") as f, tarfile.open(fileobj=zstandard.ZstdDecompressor().stream_reader(f), mode="r|") as t:
+                t.extractall(out)
+    else:
+        with tarfile.open(tgz) as t:
+            t.extractall(out)
     facts = {"files": sorted(str(p.relative_to(out)) for p in out.rglob("*") if p.is_file())}
     for p in out.rglob("adapter_config.json"):
         cfg = json.load(open(p)); facts["adapter_config"] = {k: cfg.get(k) for k in ("base_model_name_or_path", "r", "lora_alpha", "target_modules", "revision")}
