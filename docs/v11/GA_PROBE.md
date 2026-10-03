@@ -64,3 +64,24 @@ r=1 (not q/k/v/o): the adapters travel base64-embedded in the notebook and the l
 q/k/v/o at r=4 would embed ~13 MB. A random r=1 adapter on every layer's q_proj still perturbs every layer's attention,
 which is what the >= 18/20 test needs. Everything else in the G-A2 block stands. Runs as a new version of the Sep-28
 slug g4-l4-v9-eog (3.12 image) so it does not disturb the v4h2/v4/v4h3 sequence on g4-l4-v4.
+
+## v11a adapter (Adaption run f37ea20b, downloaded 2026-10-03 21:02 IST) and its probe, pre-registered before the run
+
+Facts read from the artefact: PEFT LoRA r=8, alpha=16, target q_proj/k_proj/v_proj/o_proj, layers 0-59 (v_proj
+present on 50 layers only: the KV-shared layers carry no v_proj), 460 tensors, F32, 90.1 MB; keys
+`base_model.model.model.layers.N.self_attn.<m>.lora_{A,B}.weight` (the plain Llama/Together style = this probe's
+`loud4`); base_model_name_or_path `google/gemma-4-31B-it` (Adaption's only Gemma 4 base; the scorer serves the June
+QAT int4 checkpoint; the shipped chat_template.jinja sha 85a08664 differs from the June template 94899c0f, which does
+not touch our rows since they were rendered with the June template before upload). Trainer: 202 steps, 1 epoch, loss
+0.93 -> 0.11 (12,501 rows from 49 tasks: memorisation of the training tasks is the first thing to suspect).
+Packaged: `train/package_adapter.py adapters/v11a/unpacked --bundle submissions/v4h2 --out submissions/v4h2_v11a
+--name v11a --key-style loud` (plan_A keys, the style G-A showed an effect for); validate.py OK; weights in the
+private dataset carsonrodrigues/g4-adapters-v11a.
+
+**V-1 probe (kernel: v4h2_v11a + zb control, --probe lora, --adapters-dataset): pass, all required**
+1. v11a listed and routed (fixer/verifier calls go to `:v11a`); 2. v11a diff_vs_base >= 2 of 20 (applied: a trained
+adapter changes some greedy answers, not none); 3. zb diff <= noise + 1; 4. 5-task smoke: 5 rows, 0 crash rows,
+mean seconds per task <= 1.3 x the base run's; 5. long-context prompt through v11a returns.
+PASS -> the Z slot candidate is v4h2_v11a, read on the hidden split after the L4 74-task pair (v4h2_v11a vs v4h2,
+same day, same wheelhouse): ship only if solved >= v4h2 - 1 (a path test, not a gain test) and crashes <= v4h2's.
+FAIL on 2 -> the key style is wrong (try loud4, the adapter's native style) before any conclusion about the adapter.
