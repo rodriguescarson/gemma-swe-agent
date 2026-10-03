@@ -36,3 +36,25 @@ closed until a new wheelhouse version says otherwise. No further LoRA work.
 **P1 passes only for `loud2`** = the key prefix in docs/v11/plan_A.md is wrong; every later adapter uses the loud2 prefix.
 
 Result (appended after the run, never edited above this line):
+
+### Result 2026-10-03 20:01 IST: G-A FAIL (probe sha 25f5edd7209a)
+checks {"P1_applied": false, "P2_zero_b_harmless": true, "P3_listed": true, "P4_decode_tax_le_10pct": false, "P5_long_ctx_returns": true}; P6 True; diff_vs_base {"loud": null, "loud2": null, "zb": null}; prefix none. LoRA track closed until a new wheelhouse version says otherwise (rule above).
+
+#### Addendum 2026-10-03 20:05 IST (numbers behind the FAIL line above; written before any follow-up run)
+Kernel g4-l4-v4 v3 (4xL4, Python 3.12 pin, wheelhouse of 2026-09-30), 20 prompts, greedy, 32 tokens:
+`loud` (plan_A prefix) differs from base on **6 of 20**; `loud2` **0**; `zb` **0**; base-vs-base noise floor **0**.
+P2 PASS, P3 PASS (all three listed), P4 FAIL-as-reported (32.6 -> 28.6 tok/s = 12% decode tax, inside the
+0.75-0.9 "continue" band), P5 PASS (24k-token prompt through zb in 18.5 s), P6 PASS (5/5 rows, 0 crashes, fixer on :zb).
+Reading: adapters under the plan_A prefix ARE applied (6 vs 0 is above the floor and prefix-specific: the loud2 prefix
+maps to nothing), but a random r=4 adapter on layer 0's q_proj alone perturbs greedy top-1 on only 6 prompts, so the
+>= 18 threshold measured the adapter's loudness, not application. P1 stays FAIL as pre-registered; the threshold did
+not transfer (the Vesuvius lesson). The packager key style is `loud` (plan_A) if the follow-up confirms application.
+
+**G-A2 (pre-registered here, before the run):** same kernel, adapters `zb`, `loud` (unchanged controls) plus
+`loud_all` = N(0,1) A and B, r=4, on q_proj/k_proj/v_proj/o_proj of ALL 60 layers under the plan_A prefix, and
+`loud3` (`base_model.model.language_model.model.layers.N`, Gemma-3 HF style) / `loud4`
+(`base_model.model.model.layers.N`, Llama/Together style), each q_proj layer 0 only.
+PASS = `loud_all` differs on >= 18/20 (an adapter touching every attention projection in every layer cannot leave
+greedy outputs alone if it is applied) AND `zb` <= noise + 1. Then the LoRA track is open with key style `loud`
+(or loud3/loud4 if one of those alone reaches >= 18 and loud_all does not). FAIL (`loud_all` < 18) = the stack applies
+adapters only partially (a scorer-side defect to report on the forum) and the LoRA track is closed.
