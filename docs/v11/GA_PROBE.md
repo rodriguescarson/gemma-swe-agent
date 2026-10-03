@@ -100,3 +100,8 @@ L4 read stays queued behind v4h3 (full-population evidence for the paper and for
 Next adapter (v11b), only after that read: balance the final text-reply rows against continuation rows, cap rows
 per task, hold out tasks for an on-adapter validation loss, and lower lr/epochs; a smoke must beat the control's
 solved count before any 74-task slot.
+Mechanism (traces of the 5 smoke tasks, v11a vs the zb control): the v11a fixer is a read loop: 65 of 75 calls are
+read_file with 50 exact repeats (fastapi_14986; control 22 calls, 1 repeat), 96 of 117 with 82 repeats (fastapi_15280;
+control 42/7), 82 of 94 with 79 repeats (fastapi_15588). The verifier gets 2 calls because the fixer eats the budget.
+The training rows over-represent read_file steps of long successful trajectories; v11b must weight the edit/reply
+transitions and drop exact-repeat calls from the rows (dedup consecutive identical calls per trajectory).
