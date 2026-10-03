@@ -293,3 +293,13 @@ def test_install_cell_filters_wheels_by_interpreter_tags(tmp_path):
     ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
     build(tmp_path, ROOT / "submissions" / "v4", "k", "--ids", str(ids))
     assert "split_wheels_by_tags" in cells(tmp_path, "k")[0] and "incompatible wheels for this interpreter" in cells(tmp_path, "k")[0]
+
+
+def test_probe_cell_scores_every_loud_adapter_and_maps_its_prefix(tmp_path):
+    """G-A2: P1 must consider every adapter named loud*, and the prefix verdict must name the style of the loudest
+    adapter that passes (plan_A for loud/loud_all, then loud2, loud3, loud4)."""
+    src = SCRIPT.read_text()
+    cell = src[src.index("CELL_PROBE = "):]
+    assert "startswith('loud')" in cell and "PREFIX_OF" in cell
+    for name in ("'loud_all': 'plan_A'", "'loud3': 'loud3'", "'loud4': 'loud4'"):
+        assert name in cell

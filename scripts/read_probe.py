@@ -8,7 +8,7 @@ sha), exit 0 on PASS, 2 on FAIL. tests/test_read_probe.py.
 import argparse, datetime, hashlib, json, sys
 from pathlib import Path
 
-STYLE = {"plan_A": "loud", "loud2": "loud2", "none": "none"}
+STYLE = {"plan_A": "loud", "loud2": "loud2", "loud3": "loud3", "loud4": "loud4", "none": "none"}
 
 
 def main(argv=None):
@@ -19,7 +19,8 @@ def main(argv=None):
     ga = r.get("GA") or r.get("GA_pre_smoke") or "FAIL"
     style = STYLE.get(r.get("prefix"), "none")
     checks = r.get("checks", {}); A = r.get("A", {})
-    diffs = {n: A.get(n, {}).get("diff_vs_base") for n in ("loud", "loud2", "zb")}
+    A = r.get("adapters") or A                      # the kernel stores per-adapter results under "adapters"
+    diffs = {n: A.get(n, {}).get("diff_vs_base") for n in A}
     print(f"GA={ga} KEY_STYLE={style} checks={checks} P6={r.get('P6_agent_smoke')} diffs={diffs}")
     doc = Path(a.doc)
     text = doc.read_text() if doc.exists() else ""

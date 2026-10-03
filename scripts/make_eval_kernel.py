@@ -342,13 +342,15 @@ if zb:
         _, n, dt = chat(zb, 'Reply with the single word ok. ' + 'word ' * 24000, max_tokens=8, timeout=900); res['long_ctx_zb_s'] = round(dt, 1)
     except Exception as e: res['long_ctx_zb_s'] = 'ERROR ' + repr(e)[:200]
 A = res['adapters']
-checks = {'P1_applied': any(A.get(n, {}).get('diff_vs_base', 0) >= 18 for n in ('loud', 'loud2')),
+PREFIX_OF = {'loud': 'plan_A', 'loud_all': 'plan_A', 'loud2': 'loud2', 'loud3': 'loud3', 'loud4': 'loud4'}   # G-A2
+LOUD = [n for n in ADAPTER_NAMES if n.startswith('loud')]
+checks = {'P1_applied': any(A.get(n, {}).get('diff_vs_base', 0) >= 18 for n in LOUD),
           'P2_zero_b_harmless': A.get('zb', {}).get('diff_vs_base', 99) <= res['noise_floor'] + 1,
           'P3_listed': all(A.get(n, {}).get('listed') for n in ADAPTER_NAMES),
           'P4_decode_tax_le_10pct': res.get('tps_zb', 0) >= 0.9 * res['tps_base'],
           'P5_long_ctx_returns': isinstance(res.get('long_ctx_zb_s'), (int, float))}
 res['checks'] = checks
-res['prefix'] = 'plan_A' if A.get('loud', {}).get('diff_vs_base', 0) >= 18 else ('loud2' if A.get('loud2', {}).get('diff_vs_base', 0) >= 18 else 'none')
+res['prefix'] = next((PREFIX_OF[n] for n in ('loud_all', 'loud', 'loud2', 'loud3', 'loud4') if n in A and A[n].get('diff_vs_base', 0) >= 18), 'none')
 res['GA_pre_smoke'] = 'PASS' if checks['P1_applied'] and checks['P2_zero_b_harmless'] and checks['P5_long_ctx_returns'] else 'FAIL'
 json.dump(res, open(W / 'lora_probe.json', 'w'), indent=1); print(json.dumps(res, indent=1))
 for k, v in checks.items(): print(('PASS ' if v else 'FAIL ') + k)

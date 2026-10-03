@@ -58,3 +58,9 @@ PASS = `loud_all` differs on >= 18/20 (an adapter touching every attention proje
 greedy outputs alone if it is applied) AND `zb` <= noise + 1. Then the LoRA track is open with key style `loud`
 (or loud3/loud4 if one of those alone reaches >= 18 and loud_all does not). FAIL (`loud_all` < 18) = the stack applies
 adapters only partially (a scorer-side defect to report on the forum) and the LoRA track is closed.
+
+**G-A2 amendment 2026-10-03 20:20 IST (before the build, before the run):** `loud_all` = q_proj of ALL 60 layers at
+r=1 (not q/k/v/o): the adapters travel base64-embedded in the notebook and the largest notebook ever pushed is 0.5 MB;
+q/k/v/o at r=4 would embed ~13 MB. A random r=1 adapter on every layer's q_proj still perturbs every layer's attention,
+which is what the >= 18/20 test needs. Everything else in the G-A2 block stands. Runs as a new version of the Sep-28
+slug g4-l4-v9-eog (3.12 image) so it does not disturb the v4h2/v4/v4h3 sequence on g4-l4-v4.

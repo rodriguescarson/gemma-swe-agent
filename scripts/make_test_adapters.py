@@ -24,13 +24,22 @@ import struct
 import numpy as np
 
 HIDDEN, Q_OUT = 5376, 8192
-KEY_A = "base_model.model.model.language_model.layers.{n}.self_attn.q_proj.lora_{ab}.weight"     # plan_A.md:98
-KEY_B = "base_model.model.language_model.layers.{n}.self_attn.q_proj.lora_{ab}.weight"           # one "model." fewer
-SPECS = {  # name: (layers, rank, random_B, key template)
-    "zb": ([0], 4, False, KEY_A),       # r=4, layer 0: the sample submission's own shape
-    "loud": ([0], 4, True, KEY_A),
-    "loud2": ([0], 4, True, KEY_B),
+MODULES = {"q_proj": (HIDDEN, Q_OUT), "o_proj": (Q_OUT, HIDDEN)}      # module: (in_features, out_features)
+KEY_A = "base_model.model.model.language_model.layers.{n}.self_attn.{m}.lora_{ab}.weight"     # plan_A.md:98
+KEY_B = "base_model.model.language_model.layers.{n}.self_attn.{m}.lora_{ab}.weight"           # one "model." fewer
+KEY_C = "base_model.model.language_model.model.layers.{n}.self_attn.{m}.lora_{ab}.weight"     # Gemma-3 HF style (G-A2)
+KEY_D = "base_model.model.model.layers.{n}.self_attn.{m}.lora_{ab}.weight"                    # Llama/Together style (G-A2)
+SPECS = {  # name: (layers, rank, random_B, key template, modules)
+    "zb": ([0], 4, False, KEY_A, ["q_proj"]),       # r=4, layer 0: the sample submission's own shape
+    "loud": ([0], 4, True, KEY_A, ["q_proj"]),
+    "loud2": ([0], 4, True, KEY_B, ["q_proj"]),
+    # G-A2 (docs/v11/GA_PROBE.md, 2026-10-03): the first probe's loud flipped only 6/20; an adapter on every layer's
+    # q_proj cannot leave greedy outputs alone if adapters are applied at all. r=1 keeps the embedded notebook small.
+    "loud_all": (list(range(60)), 1, True, KEY_A, ["q_proj"]),
+    "loud3": ([0], 4, True, KEY_C, ["q_proj"]),
+    "loud4": ([0], 4, True, KEY_D, ["q_proj"]),
 }
+DEFAULT_NAMES = ("zb", "loud", "loud2")             # the first probe's set, kept reproducible
 
 
 def write_safetensors(path, tensors):
@@ -60,17 +69,19 @@ def read_safetensors_header(path):
 
 
 def make_adapter(name, seed):
-    layers, r, random_b, key = SPECS[name]
+    layers, r, random_b, key, modules = SPECS[name]
     rng = np.random.default_rng(seed + sum(map(ord, name)))
     tensors = {}
     for n in layers:
-        a = rng.standard_normal((r, HIDDEN)).astype(np.float16)
-        b = rng.standard_normal((Q_OUT, r)).astype(np.float16) if random_b else np.zeros((Q_OUT, r), np.float16)
-        tensors[key.format(n=n, ab="A")] = a
-        tensors[key.format(n=n, ab="B")] = b
+        for m in modules:
+            fin, fout = MODULES[m]
+            a = rng.standard_normal((r, fin)).astype(np.float16)
+            b = rng.standard_normal((fout, r)).astype(np.float16) if random_b else np.zeros((fout, r), np.float16)
+            tensors[key.format(n=n, m=m, ab="A")] = a
+            tensors[key.format(n=n, m=m, ab="B")] = b
     cfg = {"base_model_name_or_path": "google/gemma-4-31b-it-qat-w4a16-ct", "bias": "none", "inference_mode": True,
            "layers_to_transform": layers, "lora_alpha": 2 * r, "lora_dropout": 0.0, "peft_type": "LORA", "r": r,
-           "target_modules": ["q_proj"], "task_type": "CAUSAL_LM", "use_dora": False, "use_rslora": False}
+           "target_modules": list(modules), "task_type": "CAUSAL_LM", "use_dora": False, "use_rslora": False}
     return cfg, tensors
 
 
@@ -81,12 +92,12 @@ def sha256(path):
     return h.hexdigest()
 
 
-def build(bundle, out, seed, adapter_stage="fixer", adapter_name="zb"):
+def build(bundle, out, seed, adapter_stage="fixer", adapter_name="zb", names=DEFAULT_NAMES):
     if os.path.exists(out):
         shutil.rmtree(out)
     shutil.copytree(bundle, out, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "._*", ".DS_Store"))
     manifest = {"seed": seed, "bundle": bundle, "files": {}}
-    for name in SPECS:
+    for name in names:
         d = os.path.join(out, "adapters", name)
         os.makedirs(d)
         cfg, tensors = make_adapter(name, seed)
@@ -112,8 +123,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--seed", type=int, default=20261003)
     ap.add_argument("--stage", default="fixer", help="sub-agent that gets `adapter: zb`")
+    ap.add_argument("--names", default=",".join(DEFAULT_NAMES), help="adapters to build, e.g. zb,loud,loud_all,loud3,loud4 (G-A2)")
     a = ap.parse_args()
-    m = build(a.bundle, a.out, a.seed, a.stage)
+    m = build(a.bundle, a.out, a.seed, a.stage, names=tuple(a.names.split(",")))
     total = sum(os.path.getsize(os.path.join(a.out, "adapters", k)) for k in m["files"])
     print(f"{a.out}: {len(m['files'])} adapter files, {total / 1e6:.2f} MB; sha of zb weights {m['files']['zb/adapter_model.safetensors'][:12]}")
 
