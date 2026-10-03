@@ -303,3 +303,21 @@ def test_probe_cell_scores_every_loud_adapter_and_maps_its_prefix(tmp_path):
     assert "startswith('loud')" in cell and "PREFIX_OF" in cell
     for name in ("'loud_all': 'plan_A'", "'loud3': 'loud3'", "'loud4': 'loud4'"):
         assert name in cell
+
+
+def test_adapters_dataset_option_keeps_weights_out_of_the_notebook(tmp_path):
+    """--adapters-dataset owner/slug: adapter weights come from the Kaggle dataset (flat <name>__adapter_model.safetensors),
+    the manifest and configs stay embedded, the data cell copies the weights into the bundle and stops on a sha mismatch,
+    and the dataset is a kernel dataset source."""
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
+    build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k", "--ids", str(ids), "--probe", "lora",
+          "--adapters-dataset", "carsonrodrigues/g4-adapters-probe2")
+    cs = cells(tmp_path, "k")
+    files = ns_value(cs[1], "FILES")
+    assert not any(k.endswith(".safetensors") for k in files), [k for k in files if k.endswith(".safetensors")]
+    assert "adapters/MANIFEST.json" in files and "adapters/zb/adapter_config.json" in files
+    assert 'ADAPTERS_DATASET = "carsonrodrigues/g4-adapters-probe2"' in cs[1] and "sha mismatch" in cs[1] and "__adapter_model.safetensors" in cs[1]
+    meta = json.loads((tmp_path / "kernels" / "k" / "kernel-metadata.json").read_text())
+    assert "carsonrodrigues/g4-adapters-probe2" in meta["dataset_sources"]
+    build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k2", "--ids", str(ids), "--probe", "lora")
+    assert any(k.endswith(".safetensors") for k in ns_value(cells(tmp_path, "k2")[1], "FILES"))   # default: embedded

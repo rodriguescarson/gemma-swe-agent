@@ -383,7 +383,27 @@ def adapter_names(bundle):
     return sorted(n for n in os.listdir(d) if os.path.isfile(os.path.join(d, n, "adapter_model.safetensors"))) if os.path.isdir(d) else []
 
 
-def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None, probe=None, names=()):
+CELL_ADAPTERS_DATASET = r'''
+if ADAPTERS_DATASET:
+    # weights come from a flat private dataset (<name>__adapter_model.safetensors); the manifest in the bundle is the
+    # source of truth for what must be there and what its sha256 is (scripts/adapters_dataset.py)
+    import hashlib
+    _owner, _slug = ADAPTERS_DATASET.split('/')
+    _src = Path('/kaggle/input/datasets') / _owner / _slug
+    if not _src.exists(): _src = Path('/kaggle/input') / _slug
+    _man = json.loads((AGENT_DIR / 'adapters' / 'MANIFEST.json').read_text())
+    for _rel, _sha in _man['files'].items():
+        if not _rel.endswith('.safetensors'): continue
+        _s = _src / _rel.replace('/', '__'); _d = AGENT_DIR / 'adapters' / _rel
+        if not _s.exists(): raise SystemExit(f'STOP: adapter weights {_rel} missing from dataset {ADAPTERS_DATASET} at {_src}')
+        _d.parent.mkdir(parents=True, exist_ok=True); shutil.copyfile(_s, _d)
+        _got = hashlib.sha256(_d.read_bytes()).hexdigest()
+        if _got != _sha: raise SystemExit(f'STOP: sha mismatch for {_rel}: manifest {_sha[:12]} vs dataset {_got[:12]}')
+    print('adapters from dataset ok:', sorted(r for r in _man['files'] if r.endswith('.safetensors')), flush=True)
+'''
+
+
+def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None, probe=None, names=(), adapters_dataset=None):
     run = CELL_RUN
     for k, v in (("@MIN_TOKENS@", CONTEXT_CACHE["min_tokens"]), ("@TTL@", CONTEXT_CACHE["ttl_seconds"]),
                  ("@CACHE_INTERVALS@", CONTEXT_CACHE["cache_intervals"]), ("@INTERVAL@", COMPACTION["compaction_interval"]),
@@ -398,7 +418,7 @@ W = Path('/kaggle/working'); AGENT_DIR = W / 'bundle'
 shutil.rmtree(AGENT_DIR, ignore_errors=True)
 for rel, b in FILES.items():
     p = AGENT_DIR / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(b))
-''' + CELL_BUDGET + CELL_DATA_TAIL)
+''' + "ADAPTERS_DATASET = " + json.dumps(adapters_dataset) + "\n" + CELL_ADAPTERS_DATASET + CELL_BUDGET + CELL_DATA_TAIL)
     cells = [CELL_INSTALL, data, CELL_VLLM, run]
     if probe == "lora":
         if not names:
@@ -423,6 +443,8 @@ def main(argv=None):
     ap.add_argument("--timeout", type=int, default=None, help="override timeout_seconds (default: eval_config.yaml)")
     ap.add_argument("--pin", choices=["original", "latest"], default=None,
                     help="kernel-metadata docker_image_pinning_type; 'original' keeps the image the slug was created with")
+    ap.add_argument("--adapters-dataset", default=None, metavar="OWNER/SLUG",
+                    help="take adapter weights from this Kaggle dataset (scripts/adapters_dataset.py) instead of embedding them")
     ap.add_argument("--kernel-id", default=None,
                     help="push as a new version of this existing slug (id/title/code_file) while writing under kernels/<slug>/")
     a = ap.parse_args(argv)
@@ -439,6 +461,8 @@ def main(argv=None):
                 if r["patch"].strip():
                     patches.setdefault(r["cfg"], {})[r["task"]] = r["patch"]
     files = bundle_files(a.bundle)
+    if a.adapters_dataset:
+        files = {k: v for k, v in files.items() if not k.endswith(".safetensors")}
     ids = []
     if a.ids:
         with open(a.ids) as f:
@@ -450,7 +474,8 @@ def main(argv=None):
             if f.endswith(".py"):
                 with open(os.path.join(a.helper_check, f), "rb") as fh:
                     hb[f] = base64.b64encode(fh.read()).decode()
-    cells = build_cells(files, ids, patches, a.oracle, budget, override, hb, probe=a.probe, names=adapter_names(a.bundle))
+    cells = build_cells(files, ids, patches, a.oracle, budget, override, hb, probe=a.probe, names=adapter_names(a.bundle),
+                        adapters_dataset=a.adapters_dataset)
     nb = {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": c} for c in cells],
           "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
     kd = os.path.join("kernels", a.slug)
@@ -460,7 +485,8 @@ def main(argv=None):
         json.dump(nb, f)
     meta = {"id": "carsonrodrigues/" + kid, "title": kid, "code_file": kid + ".ipynb", "language": "python", "kernel_type": "notebook",
             "is_private": True, "enable_gpu": not a.oracle, "enable_tpu": False, "enable_internet": False,
-            "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"], "competition_sources": ["gemma-4-developer-agent"],
+            "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"] + ([a.adapters_dataset] if a.adapters_dataset else []),
+            "competition_sources": ["gemma-4-developer-agent"],
             "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]}
     if not a.oracle:
         meta["machine_shape"] = "NvidiaL4"
