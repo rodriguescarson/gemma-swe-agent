@@ -316,7 +316,7 @@ def test_adapters_dataset_option_keeps_weights_out_of_the_notebook(tmp_path):
     files = ns_value(cs[1], "FILES")
     assert not any(k.endswith(".safetensors") for k in files), [k for k in files if k.endswith(".safetensors")]
     assert "adapters/MANIFEST.json" in files and "adapters/zb/adapter_config.json" in files
-    assert 'ADAPTERS_DATASET = "carsonrodrigues/g4-adapters-probe2"' in cs[1] and "sha mismatch" in cs[1] and "__adapter_model.safetensors" in cs[1]
+    assert ns_value(cs[1], "ADAPTERS_DATASET") == "carsonrodrigues/g4-adapters-probe2" and "sha mismatch" in cs[1] and "__adapter_model.safetensors" in cs[1]
     meta = json.loads((tmp_path / "kernels" / "k" / "kernel-metadata.json").read_text())
     assert "carsonrodrigues/g4-adapters-probe2" in meta["dataset_sources"]
     build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k2", "--ids", str(ids), "--probe", "lora")
