@@ -19,4 +19,4 @@ for slot in A B; do
   sleep 90
 done
 wait
-step "resample done: $(for s in A B; do for k in 1 2 3; do f=eval/collect/resample_${s}_gemma/s$k/task_results.jsonl; [ -s "$f" ] && printf '%s/s%s %s/%s ' "$s" "$k" "$(grep -c '"resolved": true' "$f")" "$(wc -l < "$f" | tr -d ' ')"; done; done)"
+step "resample done: $(for s in A B; do for k in 1 2 3 4; do f=eval/collect/resample_${s}_gemma/s$k/task_results.jsonl; [ -s "$f" ] && printf '%s/s%s %s/%s ' "$s" "$k" "$(grep -c '"resolved": true' "$f")" "$(wc -l < "$f" | tr -d ' ')"; done; done)"
