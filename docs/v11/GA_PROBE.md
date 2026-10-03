@@ -88,3 +88,15 @@ FAIL on 2 -> the key style is wrong (try loud4, the adapter's native style) befo
 
 ### Result 2026-10-03 22:33 IST: G-A PASS (probe sha afe55fa43a4c)
 checks {"P1_applied": true, "P2_zero_b_harmless": true, "P3_listed": true, "P4_decode_tax_le_10pct": false, "P5_long_ctx_returns": true}; P6 True; diff_vs_base {"loud": 6, "loud3": 5, "loud4": 6, "loud_all": 20, "zb": 0}; prefix plan_A -> every adapter is packaged with `train/package_adapter.py ... --key-style loud`.
+
+### V-1 result 2026-10-04 01:30 IST (kernel g4-eval74-v2 v3, 4xL4, dataset-backed v11a + zb)
+1 listed+routed PASS; 2 v11a diff_vs_base **4/20** (applied) PASS; 3 zb 0, noise 0 PASS; 5 long context 18.4 s PASS;
+4 smoke **FAIL**: 5 rows, **0 solved** (the zb control smoke on the same 5 tasks: 1 solved), 2 non-timeout error rows
+(one "Failed to apply agent patch", one "exceeded tool call budget"), mean 248 s; tool calls per task 65/70/68/70/70
+vs the control's 56/15/63/40/20. Reading: the adapter is applied and makes the agent call tools until the budget;
+12,501 training rows of which 11,547 are tool-call continuations, from 49 tasks, 1 epoch, loss 0.11: it learned
+"continue calling" and the training tasks, not better fixes. **v4h2_v11a is not a slot candidate.** Its 74-task
+L4 read stays queued behind v4h3 (full-population evidence for the paper and for v11b's data recipe), not before it.
+Next adapter (v11b), only after that read: balance the final text-reply rows against continuation rows, cap rows
+per task, hold out tasks for an on-adapter validation loss, and lower lr/epochs; a smoke must beat the control's
+solved count before any 74-task slot.
