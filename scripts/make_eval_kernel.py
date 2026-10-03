@@ -424,7 +424,7 @@ W = Path('/kaggle/working'); AGENT_DIR = W / 'bundle'
 shutil.rmtree(AGENT_DIR, ignore_errors=True)
 for rel, b in FILES.items():
     p = AGENT_DIR / rel; p.parent.mkdir(parents=True, exist_ok=True); p.write_bytes(base64.b64decode(b))
-''' + "ADAPTERS_DATASET = " + json.dumps(adapters_dataset) + "\n" + CELL_ADAPTERS_DATASET + CELL_BUDGET + CELL_DATA_TAIL)
+''' + "ADAPTERS_DATASET = " + repr(adapters_dataset) + "\n" + CELL_ADAPTERS_DATASET + CELL_BUDGET + CELL_DATA_TAIL)
     cells = [CELL_INSTALL, data, CELL_VLLM, run]
     if probe == "lora":
         if not names:

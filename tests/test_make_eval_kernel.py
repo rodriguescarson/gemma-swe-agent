@@ -321,6 +321,9 @@ def test_adapters_dataset_option_keeps_weights_out_of_the_notebook(tmp_path):
     assert "carsonrodrigues/g4-adapters-probe2" in meta["dataset_sources"]
     build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k2", "--ids", str(ids), "--probe", "lora")
     assert any(k.endswith(".safetensors") for k in ns_value(cells(tmp_path, "k2")[1], "FILES"))   # default: embedded
+    # 2026-10-04: json.dumps(None) wrote `ADAPTERS_DATASET = null` -> NameError in the kernel (g4-lora-test v3 ERROR)
+    assert "ADAPTERS_DATASET = None" in cells(tmp_path, "k2")[1] and " = null" not in cells(tmp_path, "k2")[1]
+    assert ns_value(cells(tmp_path, "k2")[1], "ADAPTERS_DATASET") is None
 
 
 def test_helper_check_commands_follow_the_helper_set(tmp_path):
