@@ -198,3 +198,14 @@ scorer that is actually running. Reading: 0.12 -> scorer unchanged for v4, v4h2'
 v4h2 read decides, sub11); 0.10 -> the rebuild cost v4 a task too, v4h2 == v4 within noise; <= 0.08 -> the scorer
 drift is the story, not the bundles. No new candidate ships until the L4 pair is read (rule: full population first).
 submit_at waits while our own GPU kernels run (the sequence may still be on v4h3/think at 05:31) and submits after.
+
+### v4h2 on 4xL4, all 74 public tasks (kernel g4-l4-v4 v4, wheelhouse 2026-09-30, Python 3.12 pin; 2026-10-03 22:25 -> 01:32 IST)
+**25/74 solved**, 0 non-timeout error rows, 6 timeouts, 13 empty patches, mean 159.3 s/task (v4 on 09-29, old
+wheelhouse: 29/74, 154.6 s, 2 crashes). Paired against that v4 read: v4h2-only 4 (fastapi_14458, rich_3894,
+fastapi_14616, rich_3506), v4-only 8 (fastapi_11194, rich_3180, rich_3777, rich_3675, rich_3521, rich_3278, rich_2725,
+rich_3006). Against the Saturday rules: crashes 0 <= v4's PASS; mean secs 159 <= 170 PASS; **solved 25 < 29 - 2 FAIL**;
+helper-unreachable count pending the traces. Consistent with the hidden read (v4h2 0.10 vs v4 0.12 on the old scorer).
+Confound still open: wheelhouse (the v4 read predates the Sep-30 rebuild); the same-wheelhouse control
+g4-l4-v4-wh28-p312 runs next and sub10 (v4 on the rebuilt scorer) reads at 05:31 IST. If v4-wh28 also lands ~25, the
+rebuild cost everyone 4 tasks and v4h2 == v4; if v4-wh28 lands ~29, v4h2's edit channel costs 4 tasks and the base
+for v4h3/v4h4 reverts to v4's edit_file path with the install fix only.
