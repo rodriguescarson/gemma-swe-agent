@@ -7,7 +7,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 DECIDE_AT=${DECIDE_AT:-0525}
-until [ "$(TZ=Asia/Kolkata date +%H%M)" -ge "$DECIDE_AT" ]; do sleep 30; done
+# decide as soon as sample 2 has 80 finished tasks, or at DECIDE_AT at the latest
+R0=eval/collect/pallets_v4h2_s2/s1/task_results.jsonl
+until [ "$(TZ=Asia/Kolkata date +%H%M)" -ge "$DECIDE_AT" ] || [ "$(cat "$R0" 2>/dev/null | wc -l | tr -d " ")" -ge 80 ]; do sleep 30; done
 R=eval/collect/pallets_v4h2_s2/s1/task_results.jsonl
 verdict=$(python3 - "$R" <<'PY'
 import json, sys, os, collections
