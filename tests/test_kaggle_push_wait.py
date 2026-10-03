@@ -9,10 +9,10 @@ SCRIPT = ROOT / "scripts" / "kaggle_push_wait.sh"
 
 def _setup(tmp, slug, kid, statuses):
     kd = tmp / "kernels" / slug; kd.mkdir(parents=True)
-    (kd / "kernel-metadata.json").write_text(json.dumps({"id": "carsonrodrigues/" + kid, "code_file": kid + ".ipynb"}))
+    (kd / "kernel-metadata.json").write_text(json.dumps({"id": "carsonrodrigues/" + kid, "code_file": kid + ".ipynb", "enable_gpu": True}))
     (kd / (kid + ".ipynb")).write_text("{}")
     fake = tmp / "kaggle"
-    fake.write_text('#!/bin/bash\necho "$@" >> "$FAKE_LOG"\n'
+    fake.write_text('#!/bin/bash\n[ "$1" = --version ] && { echo "Kaggle CLI ${FAKE_CLI_VERSION:-2.2.4}"; exit 0; }\necho "$@" >> "$FAKE_LOG"\n'
                     'case "$1 $2" in\n'
                     '  "kernels push") echo "Kernel version 7 successfully pushed";;\n'
                     '  "kernels status") n=$(cat "$FAKE_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$FAKE_COUNT";'
@@ -31,7 +31,9 @@ def test_polls_the_metadata_id_and_fetches_output_under_the_slug(tmp_path):
     r = subprocess.run(["bash", str(SCRIPT), "g4-l4-lora-probe-p312"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
     calls = (tmp_path / "calls.log").read_text()
     assert r.returncode == 0, r.stdout + r.stderr
-    assert "kernels push -p kernels/g4-l4-lora-probe-p312" in calls
+    # 2026-10-03: a push without --accelerator ran the 4xL4 probe on 2xT4 (vLLM refused bf16); the metadata's
+    # machine_shape is ignored by every CLI, only the 2.x CLI's --accelerator flag selects the machine
+    assert "kernels push -p kernels/g4-l4-lora-probe-p312 --accelerator NvidiaL4" in calls
     assert "kernels status carsonrodrigues/g4-l4-v4" in calls and "carsonrodrigues/g4-l4-lora-probe-p312" not in calls
     assert "kernels output carsonrodrigues/g4-l4-v4 -p eval/kaggle/g4-l4-lora-probe-p312" in calls
     assert (tmp_path / "eval" / "kaggle" / "g4-l4-lora-probe-p312" / "lora_probe.json").exists()
@@ -56,6 +58,18 @@ def test_pushes_exactly_once_and_a_failed_push_is_nonzero(tmp_path):
     r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and (tmp_path / "calls.log").read_text().count("kernels push") == 1
     env2 = _setup(tmp_path / "b", "k", "k", ["COMPLETE"])
-    (tmp_path / "b" / "kaggle").write_text('#!/bin/bash\necho "$@" >> "$FAKE_LOG"\n[ "$1 $2" = "kernels push" ] && echo "403 Forbidden"\n')
+    (tmp_path / "b" / "kaggle").write_text('#!/bin/bash\n[ "$1" = --version ] && { echo "Kaggle CLI 2.2.4"; exit 0; }\necho "$@" >> "$FAKE_LOG"\n[ "$1 $2" = "kernels push" ] && echo "403 Forbidden"\n')
     r2 = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path / "b", env=env2, capture_output=True, text=True, timeout=60)
     assert r2.returncode != 0 and "push FAILED" in r2.stdout and "kernels status" not in (tmp_path / "b" / "calls.log").read_text()
+
+
+def test_gpu_kernel_refuses_a_1x_cli_and_cpu_kernel_gets_no_accelerator(tmp_path):
+    env = _setup(tmp_path, "k", "k", ["COMPLETE"])
+    env["FAKE_CLI_VERSION"] = "1.7.4.5"
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0 and "Kaggle CLI 2" in r.stdout and not (tmp_path / "calls.log").exists()
+    env2 = _setup(tmp_path / "cpu", "c", "c", ["COMPLETE"])
+    meta = tmp_path / "cpu" / "kernels" / "c" / "kernel-metadata.json"
+    meta.write_text(json.dumps({"id": "carsonrodrigues/c", "code_file": "c.ipynb", "enable_gpu": False}))
+    r2 = subprocess.run(["bash", str(SCRIPT), "c"], cwd=tmp_path / "cpu", env=env2, capture_output=True, text=True, timeout=60)
+    assert r2.returncode == 0 and "--accelerator" not in (tmp_path / "cpu" / "calls.log").read_text()

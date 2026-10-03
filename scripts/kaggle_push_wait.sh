@@ -12,8 +12,16 @@ POLL=${PUSH_POLL_S:-300}; SETTLE=${PUSH_SETTLE_S:-120}
 out="eval/kaggle/$slug"
 if [ -s "$out/results.jsonl" ] || [ -s "$out/lora_probe.json" ]; then echo "$slug: output already present, skip"; exit 0; fi
 kid=$(python3 -c "import json; print(json.load(open('kernels/$slug/kernel-metadata.json'))['id'])") || { echo "$slug: no kernel-metadata.json"; exit 1; }
-echo "$(date -u) $slug: push (runs as $kid)"
-ack=$("$KAGGLE" kernels push -p "kernels/$slug" 2>&1 | tail -2 | tr '\n' ' ')
+gpu=$(python3 -c "import json; print(bool(json.load(open('kernels/$slug/kernel-metadata.json')).get('enable_gpu')))")
+# 2026-10-03: the metadata's machine_shape is ignored by every CLI; only the 2.x CLI's --accelerator selects the machine.
+# A push without it ran the 4xL4 probe on 2xT4 (vLLM: "Bfloat16 is only supported on compute capability >= 8.0").
+accel=()
+if [ "$gpu" = True ]; then
+  "$KAGGLE" --version 2>&1 | grep -q "Kaggle CLI 2" || { echo "$slug: GPU kernel needs Kaggle CLI 2.x with --accelerator (have: $("$KAGGLE" --version 2>&1 | head -1)); set KAGGLE_BIN"; exit 1; }
+  accel=(--accelerator "${ACCELERATOR:-NvidiaL4}")
+fi
+echo "$(date -u) $slug: push (runs as $kid${accel:+, ${accel[*]}})"
+ack=$("$KAGGLE" kernels push -p "kernels/$slug" ${accel[@]+"${accel[@]}"} 2>&1 | tail -2 | tr '\n' ' ')
 echo "$slug: $ack"
 echo "$ack" | grep -qi "successfully pushed" || { echo "$slug: push FAILED"; exit 1; }
 sleep "$SETTLE"
