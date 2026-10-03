@@ -35,12 +35,19 @@ def test_fixer_and_verifier_lose_edit_file_and_gain_the_skill():
     assert "edit_file" in loc                                   # the locator is untouched v4 (it never called edit_file)
 
 
-def test_install_puts_edit_py_in_the_sandbox_tmp_only(tmp_path):
+def test_v4h2f_install_puts_every_helper_in_the_sandbox_tmp(tmp_path):
+    """2026-10-04: on the scorer (4xL4 traces of g4-l4-v4 v4) v4h2's locate.py failed 145 of 151 calls, check.py 61/62,
+    test.py 19/19 with "can't open file": the sandbox rewrites /tmp/swe/<x>.py to <sandbox>/tmp/swe/<x>.py and only
+    edit.py had been copied there. Every helper goes into every sandbox tmp dir; the historical v4h/v4h2 bundles are
+    left as submitted (sub9) and the fixed bundle is v4h2f."""
+    V4H2F = ROOT / "submissions" / "v4h2f"
     env = dict(os.environ, TMPDIR=str(tmp_path), TEST_TMPDIR=str(tmp_path))
-    p = subprocess.run([sys.executable, str(V4H / "skills/swe-tools/scripts/install.py")], capture_output=True, text=True, env=env)
-    assert p.returncode == 0 and "edit.py in" in p.stdout, p.stdout + p.stderr
-    assert (tmp_path / "swe" / "edit.py").exists()
-    assert not (tmp_path / "swe" / "locate.py").exists()       # the other helpers stay where v4 put them
+    p = subprocess.run([sys.executable, str(V4H2F / "skills/swe-tools/scripts/install.py")], capture_output=True, text=True, env=env)
+    assert p.returncode == 0 and "helpers in" in p.stdout, p.stdout + p.stderr
+    for h in ("edit.py", "locate.py", "test.py", "check.py", "_ws.py"):
+        assert (tmp_path / "swe" / h).exists(), h
+    changed = {rel for rel in files(ROOT / "submissions" / "v4h2") if not filecmp.cmp(ROOT / "submissions" / "v4h2" / rel, V4H2F / rel, shallow=False)}
+    assert files(V4H2F) == files(ROOT / "submissions" / "v4h2") and changed == {"skills/swe-tools/scripts/install.py"}, changed
 
 
 def test_bundle_compiles_with_the_official_compiler():

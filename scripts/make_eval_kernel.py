@@ -287,9 +287,15 @@ code = ("import os, shutil, subprocess, sys, tempfile\nsrc = %r\nwith tempfile.T
 m.write_file(".adk_exec_chk.py", code); lines = ["install: " + m.run_command(f"python3 {m.work_dir}/.adk_exec_chk.py").stdout.strip()[:300]]
 m.run_command(f"rm -f {m.work_dir}/.adk_exec_chk.py")
 ok = True
-for c in ('python3 /tmp/swe/locate.py "parse_header"', "python3 /tmp/swe/test.py --target tests/test_mod.py", 'python3 /tmp/swe/run.py --timeout 5 "echo hi"', "python3 /tmp/swe/gate.py", "cat /tmp/swe/last.log"):
+# probe exactly the helpers shipped (2026-10-04: v4h2's locate/test/check were unreachable on the scorer while edit worked)
+PROBES = {"locate.py": 'python3 /tmp/swe/locate.py "parse_header"', "test.py": "python3 /tmp/swe/test.py --target tests/test_mod.py",
+          "check.py": "python3 /tmp/swe/check.py --mode preflight",
+          "edit.py": "python3 /tmp/swe/edit.py pkg/mod.py <<'EOF'\n<<<<<<< SEARCH\n    return x\n=======\n    return x  # edited\n>>>>>>> REPLACE\nEOF",
+          "run.py": 'python3 /tmp/swe/run.py --timeout 5 "echo hi"', "gate.py": "python3 /tmp/swe/gate.py"}
+for h, c in PROBES.items():
+    if h not in HELPERS_B64: continue
     r = m.run_command(c); o = (r.stdout + r.stderr); bad = "can't open file" in o or "No such file" in o; ok &= not bad
-    lines.append(("FAIL " if bad else "ok   ") + c + " -> " + o.strip().replace("\n", " | ")[:200])
+    lines.append(("FAIL " if bad else "ok   ") + c.split("\n")[0] + " -> " + o.strip().replace("\n", " | ")[:200])
 lines.append("HELPER_CHECK " + ("PASS" if ok else "FAIL")); print("\n".join(lines)); open("/kaggle/working/helper_check.txt", "w").write("\n".join(lines) + "\n")
 '''
 

@@ -321,3 +321,17 @@ def test_adapters_dataset_option_keeps_weights_out_of_the_notebook(tmp_path):
     assert "carsonrodrigues/g4-adapters-probe2" in meta["dataset_sources"]
     build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k2", "--ids", str(ids), "--probe", "lora")
     assert any(k.endswith(".safetensors") for k in ns_value(cells(tmp_path, "k2")[1], "FILES"))   # default: embedded
+
+
+def test_helper_check_commands_follow_the_helper_set(tmp_path):
+    """--helper-check probes the helpers that are actually shipped (v4h2f: edit/locate/test/check), not the Sep-27 set
+    (run.py/gate.py); each probe must go through run_command with the literal /tmp/swe path the agent uses."""
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
+    build(tmp_path, ROOT / "submissions" / "v4h2f", "hc", "--ids", str(ids), "--oracle", "--helper-check",
+          str(ROOT / "submissions" / "v4h2f" / "skills" / "swe-tools" / "scripts"))
+    cell = cells(tmp_path, "hc")[1]
+    assert "HELPERS_B64" in cell and "_helper_check" in cell
+    for h in ("locate.py", "test.py", "check.py", "edit.py"):
+        assert f"/tmp/swe/{h}" in cell, h
+    assert "if h not in HELPERS_B64: continue" in cell       # probes outside the shipped set are skipped at run time
+    assert "HELPER_CHECK" in cell
