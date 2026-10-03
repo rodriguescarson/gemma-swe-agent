@@ -94,11 +94,18 @@ def test_committed_split_equals_recomputation():
 
 def test_runnable_today_counts_and_split_independent_of_runnable():
     doc = json.loads(F.SPLIT_FILE.read_text())
+    assert sorted(v["split"] for v in doc["tasks"].values()).count("dev") == 55 and len(doc["tasks"]) == 74
     run = {t for t in doc["tasks"] if F.runnable(t)[0]}
     dev = {t for t in run if doc["tasks"][t]["split"] == "dev"}
     if not all(T.kpar_ok(r) for r in ("rich", "requests")):
         pytest.skip(f"kpar venvs missing: {T.build_cmd('rich')}")
-    assert (len(dev), len(run - dev)) == (30, 10)
+    local = {t for t in doc["tasks"] if T.has_snapshot(t)}
+    assert run == {t for t in local if T.kpar_ok(t)}
+    if len(local) == 74 and T.kpar_ok("fastapi"):      # 2026-09-30: all 74 snapshots fetched, fastapi venv built
+        assert (len(dev), len(run - dev)) == (55, 19)
+    elif local == {t for t in doc["tasks"] if not t.startswith("fastapi_") and t not in
+                   ("rich_4076", "rich_4077", "rich_4079")}:
+        assert (len(dev), len(run - dev)) == (30, 10)   # the 40 snapshots of 2026-09-29
     assert "runnable" not in json.dumps(doc)
 
 
@@ -205,6 +212,51 @@ def test_plan_more_than_six_places_and_word_cap():
     plan2, info2 = F.make_plan(huge, long_cause, fix, False, "none")
     assert info2["cause_words"] == 20 and info2["files_keep"] in (3, 1)
     assert "REPRO: none" in plan2 and "REPRO: fails on original" in F.make_plan(ents, "C.", "F.", True, "none")[0]
+
+
+def test_plan_names_the_functions_of_cut_entries():
+    """Regression 2026-09-30: the 6-entry FILES cap dropped gold functions from the golden plan, so the oracle L control
+    failed its 'functions' check on fastapi_14306 (serialize_response, get_request_handler.app, ...) the first time
+    fastapi ran; fastapi_15800, rich_3061 and rich_3930 had the same latent gap. Base: <= 6 entries, no tail. Edges:
+    a cut function the plan already names elsewhere (tail unchanged, so older fixtures keep their sha), a name that
+    only occurs inside a longer identifier, module-level and new-file entries, a qualname cut twice, and the word cap
+    forcing a shorter FILES line (the tail then names more)."""
+    def ent(i, q, f="p/a.py", new=False):
+        return {"file": f, "start": i, "end": i, "qualname": q, "new_file": new, "nstart": i, "nend": i}
+    six = [ent(i, f"f{i}") for i in range(1, 7)]
+    plan, _ = F.make_plan(six, "C.", "F.", False, "none")
+    assert "more places" not in plan and all(F.named(f"f{i}", plan) for i in range(1, 7))
+    # the cut function is named in FIX already: the tail keeps its old form
+    seven = six + [ent(7, "Box.apply")]
+    plan, _ = F.make_plan(seven, "C.", "Call apply once.", False, "none")
+    assert plan.split("\n")[0].endswith("and 1 more places in p/a.py")
+    # not named: 'app' inside get_websocket_app does not count; a cut module-level / new-file entry adds nothing
+    cut = six + [ent(7, None), ent(8, "get_request_handler.app", "p/r.py"), ent(9, "get_websocket_app.app", "p/r.py"),
+                 ent(10, None, "p/new.py", new=True), ent(11, "get_request_handler.app", "p/r.py"),
+                 ent(12, "Err.__str__")]
+    plan, info = F.make_plan(cut, "C.", "Touch get_websocket_app.", False, "none")
+    first = plan.split("\n")[0]
+    assert first.endswith("and 6 more places in p/a.py, p/r.py, p/new.py "
+                          "(get_request_handler.app, get_websocket_app.app, Err.__str__)"), first
+    names = [g["name"] for g in F.gold_functions(cut)]
+    assert names and all(F.named(n, plan) for n in names) and info["files_keep"] == 6
+    assert F.plan_words(plan) <= F.PLAN_WORDS_MAX
+    assert not F.named("app", "get_websocket_app") and F.named("__str__", "Err.__str__")
+    # the word cap shrinks FILES to 3 entries: the functions of entries 4-6 are then named in the tail too
+    many = [ent(i, f"handler_{i}") for i in range(1, 9)]
+    plan, info = F.make_plan(many, " ".join(["w"] * 40) + ".", " ".join(["x"] * 75), False, "none")
+    assert info["files_keep"] == 3 and all(F.named(f"handler_{i}", plan) for i in range(1, 9)), plan
+    assert F.plan_words(plan) <= F.PLAN_WORDS_MAX
+    assert plan.split("\n")[0].endswith("(handler_4, handler_5, handler_6, handler_7, handler_8)")
+
+
+def test_committed_golden_plans_name_every_gold_function():
+    """The oracle L control's 'functions' check, on every committed fixture (dev and holdout, read-only): the golden
+    plan names each gold function, and stays within 120 words."""
+    fx = json.loads((ROOT / "eval" / "golden" / "fixtures" / "task_fixtures.json").read_text())["tasks"]
+    bad = {t: [g["name"] for g in f["gold_functions"] if not F.named(g["name"], f["plan"])] for t, f in fx.items()}
+    assert not {t: m for t, m in bad.items() if m}
+    assert all(F.plan_words(f["plan"]) <= F.PLAN_WORDS_MAX for f in fx.values())
 
 
 def test_first_sentence_and_cut_words():
@@ -928,11 +980,14 @@ def test_failure_count_parsing():
     assert F.failure_count("timeout after 180s (hang)") is None and F.failure_count("") is None
 
 
-def test_pytest_skip_never_leaks_out_of_the_builder():
+def test_pytest_skip_never_leaks_out_of_the_builder(monkeypatch, tmp_path):
     # pytest sets OutcomeException.__module__ = "builtins"; a __module__ test missed every skip (regression)
     assert F.is_pytest_outcome(pytest.skip.Exception("x")) and F.is_pytest_outcome(pytest.fail.Exception("x"))
     assert not F.is_pytest_outcome(ValueError("x")) and not F.is_pytest_outcome(KeyboardInterrupt())
-    assert not T.has_snapshot("fastapi_15661")
+    # hermetic: an empty snapshot dir (every snapshot is local since 2026-09-30, so a real missing one no longer exists)
+    monkeypatch.setattr(T, "SNAP_DIR", tmp_path)
+    monkeypatch.setattr(T, "_BASE_MEMO", {})
+    assert F._T() is T and not T.has_snapshot("fastapi_15661")
     r = F.guarded(T.base_ws, "fastapi_15661")                 # tasks.require_snapshot -> pytest.skip
     assert "error" in r and "skipped" in r["error"] and "snapshot missing" in r["error"]
     assert F.runnable("fastapi_15661") == (False, "snapshot missing: data/raw/snapshots/fastapi_15661.tgz")

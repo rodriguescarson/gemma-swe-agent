@@ -108,19 +108,19 @@ SPEC_NAMES = {
          "x_live_restarts x_capped x_clean",
     "L": "l_all_gold_files_named l_gold_files_named l_gold_functions_named l_plan_format l_plan_words "
          "l_plan_within_words l_repro_fails_on_original l_repro_valid l_ended_by_text l_t_end l_within_time l_calls "
-         "l_within_calls l_llm_calls l_prompt_tokens",
+         "l_within_calls l_llm_calls l_prompt_tokens l_l4_s l_files_named_n l_gold_files_in_files_line",
     "F": "f_hidden_pass f_touches_all_gold_files f_gold_files_touched f_nonempty f_applies f_compiles f_no_protected "
          "f_no_scratch f_notes_format f_ended_by_text f_first_edit_t f_first_edit_in_time f_verify_rounds f_t_end "
-         "f_calls f_llm_calls f_prompt_tokens",
+         "f_calls f_llm_calls f_prompt_tokens f_l4_s",
     "V": "v_variant_goal v_hidden_pass v_not_worse v_hidden_nodes_delta v_submitted_by_verifier "
          "v_finalize_before_submit v_no_protected v_no_scratch v_ended_by_text v_t_end v_calls v_llm_calls "
-         "v_prompt_tokens",
+         "v_prompt_tokens v_l4_s",
 }
 
 
 def test_registry_matches_spec_7_2():
     want = {n for v in SPEC_NAMES.values() for n in v.split()}
-    assert set(GM.METRICS) == want and len(want) == 59
+    assert set(GM.METRICS) == want and len(want) == 64
     for n, m in GM.METRICS.items():
         assert callable(getattr(GM, "m_" + n)), n
         assert set(m) == {"suites", "kind", "better", "headline", "doc"} and m["doc"], n
@@ -663,7 +663,7 @@ def test_generated_files_need_no_sys_path(tmp_path):
                        capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr[-2000:]
     got = json.loads(p.stdout)
-    assert len(got) == 59
+    assert {Path(fp).stem for fp in got} == set(GM.METRICS) and len(got) == 64
     for fp, r in got.items():
         assert r == GM._score(Path(fp).stem, i), fp
 

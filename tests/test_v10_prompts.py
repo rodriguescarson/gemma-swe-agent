@@ -11,8 +11,8 @@ except Exception:  # built in parallel by the core component; absent until it la
 
 from test_v10_bundle import (BUNDLE, CLI_SCRIPTS, GEN, GRAPH_TOOLS, LIB_SCRIPTS, ROOT, SCRIPTS, SKILL_TOOLS,
                              STAGES, SUBMITTERS, NotConstant, _parse, common_alias_env, common_constants,
-                             compiled_info, const_eval, helper_usage_flags, load_yaml, module_constants, prompts, read,
-                             spec_blocks, spec_text, stage_tools_yaml)
+                             compiled_info, const_eval, helper_usage_flags, is_v102, load_yaml, module_constants,
+                             prompts, read, spec_blocks, spec_text, stage_tools_yaml, SPEC_V102)
 
 PLACEHOLDERS = ("{problem_description}", "{plan?}", "{fix_notes?}")
 STAGE_PLACEHOLDERS = {"setup": set(), "locator": {"{problem_description}"},
@@ -43,7 +43,11 @@ WORST_TREE_CHARS = 4777                     # the longest 150-line workspace tre
 # out 300 tokens); "submit" is submit_patch's short confirmation.
 HELPER_OUT = {"install": (180, 400), "locate": (1200, 1800), "grep": (800, 1800), "view": (2500, 2800),
               "edit": (700, 1500), "run": (600, 2500), "verify": (900, 2000), "finalize": (250, 1000),
-              "status": (1200, 2200), "repro": (900, 1200), "submit": (150, 150)}
+              "status": (1200, 2200), "status_start": (600, 800), "repro": (900, 1200), "submit": (150, 150)}
+# v10.2 (SPEC_v10_2 6): "status_start" is the phase-start status (the LOCATOR DIGEST, cap 800) that the v10.2 fixer
+# runs first; a v10.1 bundle's fixer prompt has no such step, so its mix is unchanged.
+V102 = is_v102()
+STATUS_FIRST = "1. Run python3 /tmp/swe/status.py first"
 
 
 def permitted_mix():
@@ -53,11 +57,12 @@ def permitted_mix():
     then verifies up to R rounds with a view and an edit between rounds; the verifier checks status, verifies, repairs
     up to K rounds (view + edit + verify each) and runs finalize twice (NOT READY once) before submitting."""
     ps = prompts()
-    r = int(re.search(r"at most (\d+) rounds", ps["fixer"]).group(1))
+    r = int(re.search(r"at most (\d+) rounds?", ps["fixer"]).group(1))
     k = int(re.search(r"at most (\d+) repair rounds", ps["verifier"]).group(1))
+    start = [("status_start", 1, 30)] if STATUS_FIRST in ps["fixer"] else []
     return {"setup": ([("install", 2, 30)], 5),
             "locator": ([("locate", 1, 30), ("view", 3, 30), ("grep", 2, 30), ("repro", 2, 350), ("run", 1, 30)], 250),
-            "fixer": ([("view", 3 + (r - 1), 30), ("edit", 3 + (r - 1), 400), ("verify", r, 30)], 100),
+            "fixer": (start + [("view", 3 + (r - 1), 30), ("edit", 3 + (r - 1), 400), ("verify", r, 30)], 100),
             "verifier": ([("status", 1, 30), ("verify", 1 + k, 30), ("view", k, 30), ("edit", k, 400),
                           ("finalize", 2, 30), ("submit", 1, 30)], 20),
             "submitter": ([("finalize", 2, 30), ("edit", 1, 400), ("submit", 1, 30)], 5)}
@@ -292,18 +297,30 @@ def prompt_size(text):
     return len(body.split()), len(body)
 
 
+R91_LIMITS = {"locator": (460, 2850), "fixer": (410, 2600)} if V102 else {}     # SPEC_v10_2 3.1
+
+
 def test_prompt_sizes():
-    """R91: at most 370 words and 2,600 chars per prompt excluding placeholders; submitter at most 1,300 chars;
-    setup at most 600; the measurement reproduces the SPEC section 3 table."""
+    """R91: at most 370 words and 2,600 chars per prompt excluding placeholders (v10.2: locator 460 / 2,850, fixer
+    410 / 2,600); submitter at most 1,300 chars; setup at most 600; the measurement reproduces the SPEC section 3
+    table (v10.2: SPEC_v10_2 3.1's column, 'unchanged' meaning SPEC's)."""
     sizes = {s: prompt_size(t) for s, t in prompts().items()}
     for s, (words, chars) in sizes.items():
-        assert words <= 370 and chars <= 2600, (s, words, chars)
+        lim = R91_LIMITS.get(s, (370, 2600))
+        assert words <= lim[0] and chars <= lim[1], (s, words, chars)
     assert sizes["submitter"][1] <= 1300 and sizes["setup"][1] <= 600, sizes
     spec = spec_text()
+    v102 = SPEC_V102.read_text(encoding="utf-8") if V102 else ""
     for s in STAGES:
         m = re.search(r"^\s*\| %s \| (\d+) \| ([\d,]+) \|" % s, spec, re.M)
         assert m, s
-        assert sizes[s] == (int(m.group(1)), int(m.group(2).replace(",", ""))), (s, sizes[s])
+        want = (int(m.group(1)), int(m.group(2).replace(",", "")))
+        if V102:
+            m2 = re.search(r"^\| %s \| [\d,]+ / [\d,]+ \| (?:(\d+) / ([\d,]+)|unchanged) \|" % s, v102, re.M)
+            assert m2, s
+            if m2.group(1):
+                want = (int(m2.group(1)), int(m2.group(2).replace(",", "")))
+        assert sizes[s] == want, (s, sizes[s], want)
 
 
 # ---------------------------------------------------------------- R92 commands and flags
@@ -669,6 +686,8 @@ def helper_caps():
     for k, v in (consts.get("CAPS") or {}).items():
         if k in caps and isinstance(v, int):
             caps[k] = max(caps[k], v)   # a helper cap above the SPEC table must still fit the budget
+    if isinstance(consts.get("STATUS_START_CAP"), int):            # v10.2: the phase-start status form
+        caps["status_start"] = max(caps["status_start"], consts["STATUS_START_CAP"])
     return caps
 
 
@@ -793,7 +812,10 @@ def test_context_meter_does_not_cut_a_normal_first_round():
 
     def est(calls):
         return sum(n * (HELPER_OUT[h][0] / 3.0 + o + per_call) for h, n, o in calls)
-    fixer_round1 = est([("view", 3, 30), ("edit", 3, EDIT_TOKENS_P90), ("verify", 1, 30)])
+    if STATUS_FIRST in prompts()["fixer"]:     # v10.2 (SPEC_v10_2 6): status first, then the measured first round
+        fixer_round1 = est([("status_start", 1, 30), ("view", 3, 30), ("edit", 2, EDIT_TOKENS_P90), ("verify", 1, 30)])
+    else:
+        fixer_round1 = est([("view", 3, 30), ("edit", 3, EDIT_TOKENS_P90), ("verify", 1, 30)])
     verifier_pass = est([("status", 1, 30), ("verify", 2, 30), ("view", 1, 30), ("edit", 1, EDIT_TOKENS_P90),
                          ("finalize", 1, 30)])
     assert fixer_round1 < thr and verifier_pass < thr, (fixer_round1, verifier_pass, thr)
@@ -811,7 +833,10 @@ def test_budget_model_unit():
     assert stage_peak("fixer", 0, True) > stage_peak("fixer", 0, False)
     assert stage_peak("fixer", 0, True, TOOL_P10) > stage_peak("fixer", 0, True)
     assert all(helper_caps()[k] >= v[1] for k, v in HELPER_OUT.items())
-    assert dict((h, n) for h, n, _ in calls) == {"view": 4, "edit": 4, "verify": 2}      # 2 rounds (fixer.md)
+    if V102:     # v10.2 (R145): status first and 1 repair round (fixer.md)
+        assert dict((h, n) for h, n, _ in calls) == {"status_start": 1, "view": 3, "edit": 3, "verify": 1}
+    else:
+        assert dict((h, n) for h, n, _ in calls) == {"view": 4, "edit": 4, "verify": 2}      # 2 rounds (fixer.md)
     assert dict((h, n) for h, n, _ in mix["verifier"][0])["verify"] == 3                  # 2 repair rounds
     for st in STAGES:
         assert guarded_peak(st, 0, TOOL_P10) <= stage_peak(st, 0, True, TOOL_P10) + 1e-9
@@ -844,6 +869,13 @@ RULES = {
     "submitter": ["1. Run python3 /tmp/swe/finalize.py", "Only if it says EMPTY", "Call submit_patch after READY",
                   "The patch has not been submitted yet", "{problem_description}"],
 }
+if V102:        # SPEC_v10_2 7, R144: the phrases v10.2's locator adds, and the fixer's repair budget of 1 round
+    RULES["locator"] += ["the helpers stop answering after 14 calls or at t=90s", "(at most 3 runs before your plan)",
+                         "never ask for more information", "reply FILES: none", "ALSO:", "(no reasoning inside it)",
+                         "if it passes again use REPRO: none", "every use of a name you rename or remove"]
+    RULES["fixer"] = [r for r in RULES["fixer"] if r != "at most 2 rounds"] + [
+        "at most 1 round", "1. Run python3 /tmp/swe/status.py first", "LOCATOR DIGEST", "the plan was lost",
+        "Change an ALSO place only if verify still fails"]
 ORDER = {"locator": ["python3 /tmp/swe/locate.py", "python3 /tmp/swe/view.py", "python3 /tmp/swe/verify.py --repro-only",
                      "Stop and reply with the plan"],
          "fixer": ["View the plan's FILES", "smallest COMPLETE change", "Run python3 /tmp/swe/verify.py",

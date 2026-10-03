@@ -1,0 +1,226 @@
+##### p1_v10 fastapi_14458 resolved=True dur=152.47
+GOLD FILES: fastapi/dependencies/models.py
+GOLD FUNCS: is_gen_callable, is_async_gen_callable, is_coroutine_callable
+FILES NAMED 1/1  FUNCS NAMED 3/3  calls=9 t_end=41
+ISSUE (592 chars):
+🐛 Fix using class (not instance) dependency that has `__call__` method
+
+As reported in https://github.com/fastapi/fastapi/discussions/14452, FastAPI 0.123.6 introduced a regression - if we use class (not instance) as dependency and this class has `__call__` method that is coroutine or generator, it is mistakenly treated as coroutine\generator (actually class is not coroutine\generator, instance of this class is).
+
+
+So, to fix this we need to check if the callable is class before inspecting its `dunder_call` in `is_coroutine_callable`, `is_async_gen_callable`, and `is_gen_callable`.
+
+----- LOCATOR TOOL USES
+[1] t=6 out_tok=44 run_command: python3 /tmp/swe/locate.py "is_coroutine_callable is_async_gen_callable is_gen_callable"
+    OUT: LOCATE: 5047 symbols in 1206 files
+    LAYOUT: packages fastapi (workspace) | tests tests/ | layout flat
+    1. fastapi/dependencies/models.py  score=201.0
+         def Dependant.is_async_gen_callable  L129-151
+         def Dependant.is_gen_callable  L105-127
+         def Dependant.is_coroutine_callable  L153-180
+    2. fastapi/dependencies/utils.py  score=52.4
+         async def _solve_generator  L567-575
+         def get_dependant  L256-330
+         def get_parameterless_sub_dependant  L124-136
+    3. tests/test_dependency_partial.py [test]  score=28.8
+         async def get_partial_async_callable_gen_dependency  L137-148
+         async def get_partial_callable_gen_dependency  L115-122
+         class AsyncCallableGenDependency  L43-45
+    4. fastapi/routing.py  score=28.6
+         def request_response  L84-121
+         def websocket_session  L126-147
+         def get_websocket_app  L435-459
+    5. tests/test_dependency_class.py [test]  score=28.3
+         async def get_async_callable_gen_dependency  L68-72
+         async def get_callable_gen_dependency  L56-58
+         class AsyncCallableGenDependency  L25-27
+    6. fastapi/applications.py  score=27.6
+         def FastAPI.middleware  L4582-4626
+         def FastAPI.websocket_route  L4544-4551
+         def FastAPI.exception_handler  L4628-4673
+    7. fastapi/encoders.py  score=24.1
+    8. fastapi/datastructures.py  score=23.3
+    RELATED TESTS: none found (no test file names the top symbols)
+    [t=6s]
+    
+[2] t=8 out_tok=35 run_command: python3 /tmp/swe/view.py fastapi/dependencies/models.py
+    OUT: fastapi/dependencies/models.py: 188 lines, 13 defs/classes (outline)
+      def _unwrapped_call  L18-22
+      def _impartial  L25-28
+      class Dependant  L31-188
+      def Dependant.oauth_scopes  L53-60
+      def Dependant.cache_key  L62-71
+      def Dependant._uses_scopes  L73-84
+      def Dependant._is_security_scheme  L86-91
+      def Dependant._security_scheme  L94-98
+      def 
+[3] t=10 out_tok=39 run_command: python3 /tmp/swe/view.py fastapi/dependencies/models.py 105-180
+    OUT: fastapi/dependencies/models.py lines 105-148 of 188
+      105|     @cached_property
+      106|     def is_gen_callable(self) -> bool:
+      107|         if self.call is None:
+      108|             return False  # pragma: no cover
+      109|         if inspect.isgeneratorfunction(
+      110|             _impartial(self.call)
+      111|         ) or inspect.isgeneratorfunction
+[4] t=11 out_tok=39 run_command: python3 /tmp/swe/view.py fastapi/dependencies/models.py 149-180
+    OUT: fastapi/dependencies/models.py lines 149-180 of 188
+      149|         ) or inspect.isasyncgenfunction(_unwrapped_call(dunder_unwrapped_call)):
+      150|             return True
+      151|         return False
+      152| 
+      153|     @cached_property
+      154|     def is_coroutine_callable(self) -> bool:
+      155|         if self.call is None:
+      156|             return 
+[5] t=17 out_tok=153 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+import inspect
+
+app = FastAPI()
+
+class AsyncCallableDependency:
+    async def __call__(self):
+        return "success"
+
+@app.get("/")
+async def root(dep=Depends(AsyncCallableDependency)):
+    return dep()
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with async __call__ should work
+response = client.get("/")
+assert response.status_code == 200
+EOF
+
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 TypeError: object AsyncCallableDependency can't be used in 'await' expression
+      claim 1 FAIL: TypeError: object AsyncCallableDependency can't be used in 'await' expression
+    [t=17s]
+    
+[6] t=23 out_tok=152 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+import inspect
+
+app = FastAPI()
+
+class AsyncCallableDependency:
+    async def __call__(self):
+        return "success"
+
+@app.get("/")
+async def root(dep=Depends(AsyncCallableDependency)):
+    return dep
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with async __call__ should work
+response = client.get("/")
+assert response.status_code == 200
+EOF
+
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 TypeError: object AsyncCallableDependency can't be used in 'await' expression
+      claim 1 FAIL: TypeError: object AsyncCallableDependency can't be used in 'await' expression
+    [t=23s]
+    
+[7] t=30 out_tok=146 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+
+app = FastAPI()
+
+class GenDependency:
+    def __call__(self):
+        yield "success"
+
+@app.get("/")
+async def root(dep=Depends(GenDependency)):
+    return dep
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with gen __call__ should work
+response = client.get("/")
+assert response.status_code == 200
+EOF
+
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AttributeError: 'GenDependency' object has no attribute 'throw'
+      claim 1 FAIL: AttributeError: 'GenDependency' object has no attribute 'throw'
+    [t=30s]
+    
+[8] t=35 out_tok=146 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+
+app = FastAPI()
+
+class AsyncGenDependency:
+    async def __call__(self):
+        yield "success"
+
+@app.get("/")
+async def root(dep=Depends(AsyncGenDependency)):
+    return dep
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with async gen __call__ should work
+response = client.get("/")
+assert response.status_code == 200
+EOF
+
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 TypeError: 'AsyncGenDependency' object is not an async iterator
+      claim 1 FAIL: TypeError: 'AsyncGenDependency' object is not an async iterator
+    [t=35s]
+    
+[9] t=41 out_tok=147 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+
+app = FastAPI()
+
+class AsyncCallableDependency:
+    async def __call__(self):
+        return "success"
+
+@app.get("/")
+async def root(dep=Depends(AsyncCallableDependency)):
+    return dep
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with async __call__ should work
+response = client.get("/")
+assert response.json() == "success"
+EOF
+
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 TypeError: object AsyncCallableDependency can't be used in 'await' expression
+      claim 1 FAIL: TypeError: object AsyncCallableDependency can't be used in 'await' expression
+    [t=41s]
+    
+----- REPLY:
+FILES: fastapi/dependencies/models.py:105-180
+
+CAUSE: The `is_gen_callable`, `is_async_gen_callable`, and `is_coroutine_callable` properties of `Dependant` mistakenly identify a class as a generator/coroutine if the class itself has a `__call__` method that is a generator/coroutine, because they inspect `__call__` on the class without checking if the object is a class first.
+
+FIX: In `is_gen_callable`, `is_async_gen_callable`, and `is_coroutine_callable`, add a check to ensure `self.call` (and its unwrapped/impartial versions) is not a class before inspecting its `__call__` method for coroutine or generator properties.
+
+REPRO:
+```python
+from fastapi import FastAPI, Depends
+from fastapi.testclient import TestClient
+
+app = FastAPI()
+
+class AsyncCallableDependency:
+    async def __call__(self):
+        return "success"
+
+@app.get("/")
+async def root(dep=Depends(AsyncCallableDependency)):
+    return dep
+
+client = TestClient(app)
+# CLAIM 1: using class as dependency with async __call__ should work
+response = client.get("/")
+assert response.json() == "success"
+```
+
+TESTS: tests/test_dependency_class.py

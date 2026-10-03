@@ -13,6 +13,7 @@ VBIN = str(pathlib.Path(sys.executable).parent)
 MODS = ("_swe_common", "_swe_gate", "_swe_ckpt", "_swe_index")
 
 from v10_support.repo import no_orphans  # noqa: F401  (R120: the orphan-process guard, autouse)
+from v10_support.compat import V102, later_stage  # noqa: E402,F401  (G4_BUNDLE may be v10.2)
 
 pytestmark = pytest.mark.skipif(not (SRC / "_swe_common.py").exists() or not (SRC / "finalize.py").exists(),
                                 reason="helpers not built")
@@ -81,6 +82,7 @@ def env_for(ws, t=100):
     tmp = pathlib.Path(ws).parent / "sbx_tmp"
     tmp.mkdir(exist_ok=True)
     e = {k: v for k, v in os.environ.items() if not k.startswith(("SWE_", "PYTHON", "TEST_TMPDIR"))}
+    later_stage(tmp / "swe")    # v10.2: verify and finalize run in later stages (the locator budget does not apply)
     e.update(SWE_WS=str(ws), SWE_DIR=str(tmp / "swe"), TMPDIR=str(tmp), HOME=str(tmp), SWE_DUAL="0",
              SWE_DOCKER_TMP_FOR_TESTS=str(tmp / "docker_tmp"), PYTHONDONTWRITEBYTECODE="1", LANG="C.UTF-8",
              PYTHONPATH=str(ws), PATH=VBIN + os.pathsep + os.environ.get("PATH", ""))

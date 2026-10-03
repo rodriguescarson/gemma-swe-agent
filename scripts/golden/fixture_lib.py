@@ -586,13 +586,32 @@ def entry_text(e: dict) -> str:
     return f"{e['file']}:{e['start']}-{e['end']} ({e['qualname'] or 'module level'})"
 
 
-def files_line(entries: list, keep: int = FILES_MAX) -> str:
+def files_line(entries: list, keep: int = FILES_MAX, name_rest=()) -> str:
+    """FILES: the first `keep` entries, then 'and N more places in <files>', plus ' (<qualnames>)' for `name_rest`."""
     shown = [entry_text(e) for e in entries[:keep]]
     rest = entries[keep:]
     if rest:
         files = list(dict.fromkeys(e["file"] for e in rest))
-        shown.append(f"and {len(rest)} more places in {', '.join(files)}")
+        shown.append(f"and {len(rest)} more places in {', '.join(files)}"
+                     + (f" ({', '.join(name_rest)})" if name_rest else ""))
     return "FILES: " + ", ".join(shown)
+
+
+def named(name: str, text: str) -> bool:
+    """`name` occurs as a whole word in `text` (the l_gold_functions_named and oracle plan-check rule)."""
+    return re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", text) is not None
+
+
+def unnamed_rest(entries: list, keep: int, plan: str) -> list:
+    """Qualnames of the entries cut from FILES (after the first `keep`) whose function name the plan does not name
+    anywhere. Regression 2026-09-30: the 6-entry cap dropped gold functions from the golden plan (fastapi_14306,
+    fastapi_15800, rich_3061, rich_3930), so the oracle L control failed its 'functions' check."""
+    out = []
+    for e in entries[keep:]:
+        q = e.get("qualname")
+        if q and not e.get("new_file") and not named(q.rsplit(".", 1)[-1], plan) and q not in out:
+            out.append(q)
+    return out
 
 
 def gold_functions(entries: list) -> list:
@@ -661,7 +680,8 @@ def plan_words(plan: str) -> int:
 
 def make_plan(entries: list, root_cause: str, fix: str, reproducible: bool, tests: str, override: dict | None = None):
     """-> (plan, info). CAUSE = first sentence of root_cause cut to 35 words (20 when the plan is over 120 words);
-    FIX = one_line_solution; an override replaces CAUSE and/or FIX. FILES collapses to 3, then 1 entry when needed."""
+    FIX = one_line_solution; an override replaces CAUSE and/or FIX. FILES collapses to 3, then 1 entry when needed; the
+    functions of the entries it cuts are named in its tail when the plan does not name them elsewhere."""
     ov = override or {}
     cause_full = " ".join(str(ov["CAUSE"]).split()) if ov.get("CAUSE") else first_sentence(root_cause)
     fix = " ".join(str(ov["FIX"] if ov.get("FIX") else fix).split())
@@ -669,6 +689,10 @@ def make_plan(entries: list, root_cause: str, fix: str, reproducible: bool, test
     for cw, keep in ((CAUSE_WORDS, FILES_MAX), (CAUSE_WORDS_SHORT, FILES_MAX), (CAUSE_WORDS_SHORT, 3),
                      (CAUSE_WORDS_SHORT, 1)):
         plan = render_plan(files_line(entries, keep), cut_words(cause_full, cw), fix, reproducible, tests)
+        missing = unnamed_rest(entries, keep, plan)          # a cut entry's function must still be named
+        if missing:
+            plan = render_plan(files_line(entries, keep, missing), cut_words(cause_full, cw), fix, reproducible,
+                               tests)
         info = {"cause_words": cw, "files_keep": keep}
         if plan_words(plan) <= PLAN_WORDS_MAX:
             break

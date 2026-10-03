@@ -23,7 +23,18 @@ REQUESTS_PINS=(requests==2.33.0 urllib3 idna charset-normalizer certifi pysocks)
 FASTAPI_PINS=(pytest==8.4.2 pydantic==2.12.3 pydantic-core==2.41.4 starlette==0.52.1 anyio==4.13.0 httpx==0.28.1
   python-multipart==0.0.26 email-validator==2.3.0 PyYAML==6.0.3 SQLAlchemy==2.0.49 orjson==3.11.8 ujson==5.13.0
   Flask==3.1.3 Jinja2==3.1.6 typing-inspection==0.4.2 PyJWT==2.12.1 typing_extensions==4.15.0 annotated-types==0.7.0
-  Pygments==2.20.0)
+  Pygments==2.20.0 annotated-doc==0.0.4
+  typer==0.24.2 click==8.3.3 rich==13.9.4 shellingham==1.5.4 markdown-it-py==4.0.0 mdurl==0.1.2
+  pydantic-settings==2.14.0 python-dotenv==1.2.2 uvicorn==0.46.0 h11==0.16.0
+  httpcore==1.0.9 certifi==2026.4.22 idna==3.13 blinker==1.9.0 itsdangerous==2.2.0 MarkupSafe==3.0.3 Werkzeug==3.1.8
+  dnspython==2.8.0 iniconfig==2.3.0 packaging==26.1 pluggy==1.6.0)
+# 2026-09-30, after all 31 fastapi snapshots were fetched (every version is the Kaggle freeze's):
+# - annotated-doc: fastapi trees from 0.121 on (28 of the 31 tasks) import annotated_doc at module level; without it
+#   `import fastapi` fails there and gold looks ungradable (pytest exit 2).
+# - typer and its closure (click, rich, shellingham, markdown-it-py, mdurl): fastapi_15661's hidden test imports
+#   scripts/prepare_release.py, which imports typer.
+# - pydantic-settings, python-dotenv, uvicorn, h11: imported by docs_src and tests the agent's verify runs can reach.
+# - the rest pins every transitive dependency, so the venv holds exactly these 41 distributions at Kaggle's versions.
 
 die() { echo "build_kpar: $*" >&2; exit 2; }
 targets=("$@")

@@ -1,0 +1,234 @@
+##### p1_v10 fastapi_5077 resolved=True dur=150.52
+GOLD FILES: fastapi/dependencies/utils.py
+GOLD FUNCS: get_typed_signature, get_typed_return_annotation
+FILES NAMED 1/1  FUNCS NAMED 1/2  calls=12 t_end=80
+ISSUE (2680 chars):
+✨ Add support for wrapped functions (e.g. `@functools.wraps()`) used with forward references
+
+Fixes #5065 where the `globalns` computation in `get_typed_signature` misses an edge case handled by `typing.get_type_hints`. This PR makes the logic similar to `get_type_hints`.
+
+## Background
+
+`functools.wraps` updates the annotations and type signature to match the wrapped function. However, it copies the `__annotations__` dict verbatim, including forward references (strings). `get_type_hints` handles this by [dereferencing the `__wrapped__` attribute](https://github.com/python/cpython/blob/576dd901170af30fc50b0a7f07a388b38fd724a9/Lib/typing.py#L2314-L2315) until it gets to the original function, then uses the `__globals__` of _that_ function.
+
+## Testing
+
+I added a test case which reproduced the `NameError` seen in #5065. The test passes after my commit updating the implementation of `get_typed_signature`:
+
+```
+tests/test_wrapped_method_forward_reference.py:24:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+fastapi/routing.py:617: in decorator
+    self.add_api_route(
+fastapi/routing.py:556: in add_api_route
+    route = route_class(
+fastapi/routing.py:425: in __init__
+    self.dependant = get_dependant(path=self.path_format, call=self.endpoint)
+fastapi/dependencies/utils.py:279: in get_dependant
+    endpoint_signature = get_typed_signature(call)
+fastapi/depen
+----- LOCATOR TOOL USES
+[1] t=? out_tok=40 run_command: python3 /tmp/swe/locator.py "get_typed_signature get_typed_annotation evaluate_forwardref"
+    OUT: {"status": "error", "error_type": "CommandError", "error_message": "python3: can't open file '/tmp/swegemma_sandbox_1e4bb103-b41_809q3vq9/tmp/swe/locator.py': [Errno 2] No such file or directory\n", "details": {"stdout": "", "stderr": "python3: can't open file '/tmp/swegemma_sandbox_1e4bb103-b41_809q3vq9/tmp/swe/locator.py': [Errno 2] No such file 
+[2] t=8 out_tok=35 run_command: python3 /tmp/swe/grep.py "get_typed_signature"
+    OUT: GREP: 2 hits in 1 files (shown 2)
+    fastapi/dependencies/utils.py
+      (in def get_typed_signature L193-206)
+      193| def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
+      (in def get_dependant L229-308)
+      250|     endpoint_signature = get_typed_signature(call)
+    [t=8s]
+    
+[3] t=9 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py:193-268
+    OUT: fastapi/dependencies/utils.py lines 193-250 of 1035
+      193| def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
+      194|     signature = inspect.signature(call)
+      195|     globalns = getattr(call, "__globals__", {})
+      196|     typed_params = [
+      197|         inspect.Parameter(
+      198|             name=param.name,
+      199|             
+[4] t=30 out_tok=755 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+from typing import ForwardRef, get_type_hints
+from fastapi.dependencies.utils import get_typed_signature
+import inspect
+
+# Setup for reproduction
+class A:
+    def __init__(self, x: 'B'):
+        self.x = x
+
+class B:
+    pass
+
+def wrapped_func(x: 'A'):
+    return x
+
+@functools.wraps(wrapped_func)
+def decorator(f):
+    return f
+
+# Apply wrap
+decorated = decorator(wrapped_func)
+
+# In a real scenario, 'A' might be defined in a differen
+    OUT: REPRO: claim 1 passes on original - it misses the bug; rewrite it once with another input shape.
+      claim 1 PASS
+    [t=30s]
+    
+[5] t=39 out_tok=291 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+from fastapi.dependencies.utils import get_typed_signature
+import inspect
+
+# We need a case where the wrapped function's globals are different from the wrapper's
+# and the forward ref is only available in the wrapped function's globals.
+
+def create_module_env():
+    # This simulates a different module
+    class Target:
+        pass
+    
+    def original_func(x: 'Target'):
+        return x
+        
+    return original_func, Target
+
+
+    OUT: REPRO: claim 1 passes on original - it misses the bug; rewrite it once with another input shape.
+      claim 1 PASS
+    [t=39s]
+    
+[6] t=40 out_tok=39 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py:193-206
+    OUT: fastapi/dependencies/utils.py lines 193-206 of 1035
+      193| def get_typed_signature(call: Callable[..., Any]) -> inspect.Signature:
+      194|     signature = inspect.signature(call)
+      195|     globalns = getattr(call, "__globals__", {})
+      196|     typed_params = [
+      197|         inspect.Parameter(
+      198|             name=param.name,
+      199|             
+[7] t=48 out_tok=241 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+from fastapi.dependencies.utils import get_typed_signature
+import inspect
+
+# Simulation of another module
+def get_original():
+    class Target:
+        pass
+    def original_func(x: 'Target'):
+        return x
+    return original_func
+
+original = get_original()
+
+# Wrap it
+@functools.wraps(original)
+def wrapper(x):
+    return original(x)
+
+# The forward ref 'Target' is in original.__globals__
+# wrapper.__globals__ is the current modu
+    OUT: REPRO: claim 1 passes on original - it misses the bug; rewrite it once with another input shape.
+      claim 1 PASS
+    [t=48s]
+    
+[8] t=55 out_tok=234 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+from fastapi.dependencies.utils import get_typed_signature
+import inspect
+
+def create_module_sim():
+    class Target:
+        pass
+    def original_func(x: 'Target'):
+        return x
+    return original_func, Target
+
+original, Target = create_module_sim()
+
+@functools.wraps(original)
+def wrapper(x):
+    return original(x)
+
+# Check that the forward ref is still a string in __annotations__
+# Because functools.wraps copies __annotatio
+    OUT: REPRO: claim 1 passes on original - it misses the bug; rewrite it once with another input shape.
+      claim 1 PASS
+    [t=55s]
+    
+[9] t=57 out_tok=39 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py:209-215
+    OUT: fastapi/dependencies/utils.py lines 209-215 of 1035
+      209| def get_typed_annotation(annotation: Any, globalns: Dict[str, Any]) -> Any:
+      210|     if isinstance(annotation, str):
+      211|         annotation = ForwardRef(annotation)
+      212|         annotation = evaluate_forwardref(annotation, globalns, globalns)
+      213|         if annotation is type(None
+[10] t=58 out_tok=30 run_command: python3 /tmp/swe/grep.py "evaluate_forwardref"
+    OUT: GREP: 8 hits in 5 files (shown 8)
+    fastapi/_compat/__init__.py
+      (module level)
+       17| from .main import evaluate_forwardref as evaluate_forwardref
+    fastapi/_compat/main.py
+      (module level)
+       29|     from .v2 import evaluate_forwardref as evaluate_forwardref
+       45|     from .v1 import evaluate_forwardref as evaluate_forwardref
+    fastapi/_compat/v1.py
+    
+[11] t=69 out_tok=323 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+from fastapi.dependencies.utils import get_typed_signature
+from typing import ForwardRef
+
+# We need the forward ref to be something that is NOT in current globals
+# but IS in the wrapped function's globals.
+
+def create_original():
+    class Target:
+        pass
+    def original_func(x: 'Target'):
+        return x
+    return original_func
+
+# Create the original function in its own scope
+original = create_original()
+
+# We want the wr
+    OUT: REPRO: claim 1 passes on original - it misses the bug; rewrite it once with another input shape.
+      claim 1 PASS
+    [t=69s]
+    
+[12] t=80 out_tok=250 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import functools
+import inspect
+from fastapi.dependencies.utils import get_typed_signature
+
+def create_module():
+    class Target:
+        pass
+    def original_func(x: 'Target'):
+        return x
+    return original_func
+
+# Simulate a function coming from another module
+original = create_module()
+
+# Wrap it in this module
+@functools.wraps(original)
+def wrapper(x):
+    return original(x)
+
+# Target is NOT in wrapper.__globals__ (which is this module
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError
+      claim 1 FAIL: AssertionError
+    LOCATOR: 75s used. Locator: stop and reply with your plan now. Other stages: ignore this line.
+    [t=80s]
+    
+----- REPLY:
+FILES: fastapi/dependencies/utils.py:195-195
+CAUSE: `get_typed_signature` uses `call.__globals__` to resolve forward references, but for functions wrapped with `@functools.wraps`, the necessary globals may reside in the original function accessible via `__wrapped__`.
+FIX: Update `get_typed_signature` to dereference `__wrapped__` recursively to find the innermost function's `__globals__`, matching the behavior of `typing.get_type_hints`.
+REPRO: fails on original
+TESTS: none (new test suggested: `tests/test_wrapped_method_forward_reference.py`)

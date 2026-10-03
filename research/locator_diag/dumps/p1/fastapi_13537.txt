@@ -1,0 +1,194 @@
+##### p1_v10 fastapi_13537 resolved=True dur=73.2
+GOLD FILES: fastapi/dependencies/utils.py
+GOLD FUNCS: process_fn
+FILES NAMED 1/1  FUNCS NAMED 0/1  calls=13 t_end=54
+ISSUE (1651 chars):
+🐛 Fix support for form values with empty strings interpreted as missing (`None` if that's the default), for compatibility with HTML forms
+
+There was a bug in the validation of form data for optional params with None default value. This is a regression that was introduced by https://github.com/fastapi/fastapi/pull/12134.
+
+## Explaination:
+The `_get_multidict_value` uses `None` to represent both the absence a value in the dict, and a default value of `None` for that field. When the values are collected in `_extract_form_body`, they are only added to the values if they are not `None`. Later (#12134), some code was added that attempted to complement the model values with values not explicitely in the model, if values for those fields were not already processed earlier. The issue is that since we didn't add values to the initial value dict if they were none, we attempted to add them again in that second iteration. This generally wasn't an issue, except for the fast that a form field set to the empty string (`""`) is interpreted as the absence of that field. This resulted in `_get_multidict_value` picking the default value, that would happen to be `None`, so it wasn't added to the values dict in the first iteration. In the second iteration, we would find that value in the request params again, but set to `""`, and add that to the initial value dict. Later, validation would choke on that empty string.
+
+The fix is to keep track of already visited field, rather that relying on th
+----- LOCATOR TOOL USES
+[1] t=7 out_tok=63 run_command: python3 /tmp/swe/grep.py "_get_multidict_value"
+    OUT: GREP: 4 hits in 1 files (shown 4)
+    fastapi/dependencies/utils.py
+      (in def _get_multidict_value L723-744)
+      723| def _get_multidict_value(
+      (in def request_params_to_args L747-823)
+      788|         value = _get_multidict_value(field, received_params, alias=alias)
+      810|         value = _get_multidict_value(field, received_params)
+      (in async def _ext
+[2] t=7 out_tok=None run_command: python3 /tmp/swe/grep.py "_extract_form_body"
+    OUT: GREP: 4 hits in 1 files (shown 4)
+    fastapi/dependencies/utils.py
+      (in def _get_multidict_value L723-744)
+      723| def _get_multidict_value(
+      (in def request_params_to_args L747-823)
+      788|         value = _get_multidict_value(field, received_params, alias=alias)
+      810|         value = _get_multidict_value(field, received_params)
+      (in async def _ext
+[3] t=8 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py 723-908
+    OUT: fastapi/dependencies/utils.py lines 723-777 of 1024
+      723| def _get_multidict_value(
+      724|     field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None
+      725| ) -> Any:
+      726|     alias = alias or field.alias
+      727|     if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict, Headers)):
+      728|         value = val
+[4] t=10 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py 869-908
+    OUT: fastapi/dependencies/utils.py lines 869-908 of 1024
+      869| async def _extract_form_body(
+      870|     body_fields: List[ModelField],
+      871|     received_body: FormData,
+      872| ) -> Dict[str, Any]:
+      873|     values = {}
+      874| 
+      875|     for field in body_fields:
+      876|         value = _get_multidict_value(field, received_body)
+      877|         field_
+[5] t=11 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py 869-908
+    OUT: fastapi/dependencies/utils.py lines 869-908 of 1024
+      869| async def _extract_form_body(
+      870|     body_fields: List[ModelField],
+      871|     received_body: FormData,
+      872| ) -> Dict[str, Any]:
+      873|     values = {}
+      874| 
+      875|     for field in body_fields:
+      876|         value = _get_multidict_value(field, received_body)
+      877|         field_
+[6] t=17 out_tok=192 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import pytest
+from fastapi import FastAPI, Form
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+from typing import Optional
+
+app = FastAPI()
+
+@app.post("/test")
+async def test_endpoint(name: Optional[str] = Form(None)):
+    return {"name": name}
+
+client = TestClient(app)
+
+# CLAIM 1: form field set to empty string should be interpreted as missing (None) if default is None
+# Instead of passing the empty string to validation w
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError: {'name': ''}
+      claim 1 FAIL: AssertionError: {'name': ''}
+    [t=17s]
+    
+[7] t=31 out_tok=372 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import pytest
+from fastapi import FastAPI, Form
+from fastapi.testclient import TestClient
+from pydantic import Field, BaseModel
+from typing import Optional
+
+app = FastAPI()
+
+class Item(BaseModel):
+    name: Optional[str] = None
+
+@app.post("/test")
+async def test_endpoint(item: Item = Form(...)):
+    return {"item": item}
+
+client = TestClient(app)
+
+# The issue description says: "Later, validation would choke on that empty string."
+# If the model is 
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError
+      claim 1 FAIL: AssertionError
+    [t=31s]
+    
+[8] t=? out_tok=216 run_command: python3 /tmp/swe/run.py --timeout 20 "python3 /tmp/swe/verify.py --repro-only <<'EOF'
+import pytest
+from fastapi import FastAPI, Form
+from fastapi.testclient import TestClient
+from typing import Optional
+
+app = FastAPI()
+
+@app.post("/test")
+async def test_endpoint(age: Optional[int] = Form(None)):
+    return {"age": age}
+
+client = TestClient(app)
+
+# CLAIM 1: sending empty string for Optional[int] with default None should result in None, not a validation error
+response = client.post("/test", data
+    OUT: {"status": "error", "error_type": "CommandError", "error_message": "/bin/bash: -c: line 18: unexpected EOF while looking for matching `\"'\n/bin/bash: -c: line 20: syntax error: unexpected end of file\n", "details": {"stdout": "", "stderr": "/bin/bash: -c: line 18: unexpected EOF while looking for matching `\"'\n/bin/bash: -c: line 20: syntax error
+[9] t=? out_tok=181 run_command: python3 /tmp/swe/run.py --timeout 20 "python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Form
+from fastapi.testclient import TestClient
+from typing import Optional
+
+app = FastAPI()
+
+@app.post("/test")
+async def test_endpoint(age: Optional[int] = Form(None)):
+    return {'age': age}
+
+client = TestClient(app)
+
+response = client.post('/test', data={'age': ''})
+assert response.status_code == 200, f'Got {response.status_code}: {response.text}'
+assert response.json() == {'age
+    OUT: {"status": "error", "error_type": "CommandError", "error_message": "/bin/bash: -c: line 8: unexpected EOF while looking for matching `\"'\n/bin/bash: -c: line 18: syntax error: unexpected end of file\n", "details": {"stdout": "", "stderr": "/bin/bash: -c: line 8: unexpected EOF while looking for matching `\"'\n/bin/bash: -c: line 18: syntax error: 
+[10] t=49 out_tok=186 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from fastapi import FastAPI, Form
+from fastapi.testclient import TestClient
+from typing import Optional
+
+app = FastAPI()
+
+@app.post("/test")
+async def test_endpoint(age: Optional[int] = Form(None)):
+    return {"age": age}
+
+client = TestClient(app)
+
+# CLAIM 1: sending empty string for Optional[int] with default None should result in None
+response = client.post("/test", data={"age": ""})
+assert response.status_code == 200, f"Got {response.status_cod
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError: Got 422: {"detail":[{"type":"int_parsing","loc":["body","age"],"msg":"Input should be a valid integer...
+      claim 1 FAIL: AssertionError: Got 422: {"detail":[{"type":"int_parsing","loc":["body","age"],"msg":"Input should be a valid integer, unable to parse string as an integer","input
+[11] t=51 out_tok=40 run_command: python3 /tmp/swe/grep.py "processed_keys" fastapi/dependencies/utils.py
+    OUT: GREP: 4 hits in 1 files (shown 4)
+    fastapi/dependencies/utils.py
+      (in def request_params_to_args L747-823)
+      772|     processed_keys = set()
+      791|         processed_keys.add(alias or field.alias)
+      792|         processed_keys.add(field.name)
+      795|         if key not in processed_keys:
+    [t=51s]
+    
+[12] t=52 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py 869-908
+    OUT: fastapi/dependencies/utils.py lines 869-908 of 1024
+      869| async def _extract_form_body(
+      870|     body_fields: List[ModelField],
+      871|     received_body: FormData,
+      872| ) -> Dict[str, Any]:
+      873|     values = {}
+      874| 
+      875|     for field in body_fields:
+      876|         value = _get_multidict_value(field, received_body)
+      877|         field_
+[13] t=54 out_tok=43 run_command: python3 /tmp/swe/view.py fastapi/dependencies/utils.py 723-744
+    OUT: fastapi/dependencies/utils.py lines 723-744 of 1024
+      723| def _get_multidict_value(
+      724|     field: ModelField, values: Mapping[str, Any], alias: Union[str, None] = None
+      725| ) -> Any:
+      726|     alias = alias or field.alias
+      727|     if is_sequence_field(field) and isinstance(values, (ImmutableMultiDict, Headers)):
+      728|         value = val
+----- REPLY:
+FILES: fastapi/dependencies/utils.py:873-908
+CAUSE: `_extract_form_body` uses `values` dict to track processed fields. If `_get_multidict_value` returns `None` (because the value was an empty string and the default was `None`), the field isn't added to `values`, so the second loop over `received_body` adds the empty string back, causing validation to fail.
+FIX: Introduce a `processed_keys` set in `_extract_form_body` to track visited fields regardless of whether their value was added to the `values` dictionary.
+REPRO: fails on original
+TESTS: none provided, but repro confirms failure on original

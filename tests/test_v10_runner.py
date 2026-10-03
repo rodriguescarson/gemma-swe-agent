@@ -19,6 +19,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from v10_support.compat import VERSION  # noqa: E402  (G4_BUNDLE may be v10.2)
 try:
     from v10_support.repo import no_orphans  # noqa: F401  (autouse, R120)
 except ImportError:  # core's support module not present: same contract, minimal form
@@ -208,7 +209,7 @@ def test_clock_scale_lands_in_real_sandbox_tmp(tmp_path, harness_restored, monke
             shutil.copytree(scripts, wrap / "scripts", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
             r = m.exec(sid, "git init -q && git -c user.email=a@b -c user.name=t commit -q --allow-empty -m b && "
                             f"git tag _swegemma_baseline && cd {wrap} && python3 scripts/install.py")
-            assert r.stdout.startswith("swe-tools v10.1 ready in /tmp/swe"), r.stdout + r.stderr
+            assert r.stdout.startswith("swe-tools %s ready in /tmp/swe" % VERSION), r.stdout + r.stderr
             assert f.read_text() == "1.7\n"
             code = ("import sys,time; sys.path.insert(0, '/tmp/swe'); import _swe_common as C; a = C.clock(); "
                     "time.sleep(1.0); print(C.clock() - a)")
@@ -541,8 +542,9 @@ def test_linux_test_script_v10_mode_static():
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "linux_test.sh")]).returncode == 0
     v10 = s[s.index('if [ "${V10_ONLY:-0}" = 1 ]'):s.index('bash -c "$V10_SCRIPT"')]
     for needle in ("--cpus 2", "--memory 4g", "-e TEST_TMPDIR=/tmp", "unset TMPDIR", "tests/test_v10_*.py",
-                   "python:3.12-slim", "G4_NIGHTLY", "harness/wheels"):
+                   '"python:${PY}-slim"', "G4_NIGHTLY", "harness/wheels"):
         assert needle in v10, needle
+    assert 'PY="${PY:-3.12}"' in s             # 3.12 by default; PY=3.13 is the scorer's Python (SPEC_v10_2 E6)
     assert "exit $rc" in v10                      # pytest's status is the script's status
 
 

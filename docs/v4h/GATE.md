@@ -183,3 +183,18 @@ as g4-l4-v4h2-p312. Pass, all required:
 3. non-timeout crash rows <= v4h2's; 0 helper-unreachable calls;
 4. tasks ending on a failing existing test with > 60 s unused: fewer than v4h2's (the mechanism the change claims).
 FAIL on 2 -> the loop bound drops to 2 rounds and re-runs; FAIL on 1 with 2-4 passing -> v4h3 is not a slot candidate.
+
+## sub9 read + sub10 pre-registration (2026-10-03 17:05 IST, before arming)
+
+sub9 (v4h2, submitted 03:06 UTC) = **0.10 public = 6/58**, one read. Pre-registered bands (slot record above): >= 9 gain,
+7-8 noise, <= 6 regression. Read: v4h2 is not better than v4 on the hidden public split; whether it is worse is not
+decidable from one read against v4's two OLD-scorer reads (0.12 x2 before the Sep-30 rebuild; v10.1's 0.08 x2 are the
+only new-scorer reads). The L4 sequence tonight (g4-l4-v4h2-p312 vs g4-l4-v4-wh28-p312, same 74, same wheelhouse)
+gives the paired faithful comparison.
+
+sub10 (00:01 UTC 2026-10-04 = 05:31 IST): **v4 control on the rebuilt scorer** (kernel g4agent-sub3 v1, the exact sub3/
+sub5 artefact). Why before v4h2's second read: every future read is interpreted against v4, and v4 has no read on the
+scorer that is actually running. Reading: 0.12 -> scorer unchanged for v4, v4h2's 0.10 is noise-or-regression (second
+v4h2 read decides, sub11); 0.10 -> the rebuild cost v4 a task too, v4h2 == v4 within noise; <= 0.08 -> the scorer
+drift is the story, not the bundles. No new candidate ships until the L4 pair is read (rule: full population first).
+submit_at waits while our own GPU kernels run (the sequence may still be on v4h3/think at 05:31) and submits after.

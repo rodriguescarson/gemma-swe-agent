@@ -20,6 +20,15 @@ carries it (``cost_source: billed``), else tokens x prices (reasoning tokens cou
 vLLM is free per token: its token-price figure is logged as ``est_usd_at_proxy_prices`` and ``cost_usd`` stays 0. A
 shared budget refuses before forwarding once ``spent >= cap - 0.01`` (HTTP 500 ``golden budget exhausted``). The API key
 lives only in this process: it is never logged, never written, never put in a child environment (gotcha 14).
+
+L4 model clock (docs/v10/SPEC_v10_2.md E1, ``l4_clock="model"``; the default ``wall`` is the behaviour every earlier run
+had, byte for byte). After each forwarded live call, and each summariser call while the live stage-run is on, the
+router computes the modelled L4 time ``m = 0.102 + 0.02815 c + 0.000921 u`` (time_model sect. 2; ``u`` = prompt tokens
+for the stage-run's first live call and for a summariser call, else ``max(0, p - p_prev - c_prev)``, as
+research/locator_diag/l4time.py), sets ``excess = latency - m`` (a failed or refused call models to m = 0), moves the
+case's ``$SWE/t0`` forward by ``excess`` (atomic replace, ``<sbx>/*/tmp/swe/t0``) and adds it to the route's
+``excess_s``. The live cap then fires when ``now - t_live0 - excess_s >= (300 - t0) / scale``, so the helper clock reads
+``scale x (tool wall + sum of m)``: 429 back-off and slow proxy calls no longer move it.
 """
 from __future__ import annotations
 
@@ -65,6 +74,39 @@ RETRY_STATUS = (429, 502, 503)
 BUDGET_MSG = "golden budget exhausted"
 SUMMARY_TEXT = "Summary: earlier steps ran helper scripts; continue from status.py."
 DONE = {"text": "done"}
+L4_CLOCKS = ("wall", "model")
+# research/time_model.md sect. 2 (the L4 latency fit): seconds = A + B x completion tokens + C x uncached prompt tokens
+L4_A, L4_B, L4_C = 0.102, 0.02815, 0.000921
+
+
+def l4_model_s(completion: int, uncached: int) -> float:
+    """Modelled Kaggle-L4 seconds of one LLM call (time_model sect. 2)."""
+    return L4_A + L4_B * max(0, int(completion or 0)) + L4_C * max(0, int(uncached or 0))
+
+
+def find_t0_files(sbx: Path | None) -> list:
+    """The case's helper clock files: <sbx>/*/tmp/swe/t0 (the subprocess sandbox rewrites /tmp), else any deeper one."""
+    if sbx is None:
+        return []
+    sbx = Path(sbx)
+    hits = sorted(sbx.glob("*/tmp/swe/t0"))
+    return hits or sorted(p for p in sbx.rglob("t0") if p.parent.name == "swe" and p.parent.parent.name == "tmp")
+
+
+def shift_t0(path: Path, delta: float) -> bool:
+    """Move the epoch in a $SWE/t0 file forward by delta seconds (atomic replace). False when unreadable."""
+    path = Path(path)
+    try:
+        v = float(path.read_text().strip())
+    except (OSError, ValueError):
+        return False
+    tmp = path.with_name(path.name + ".l4tmp")
+    try:
+        tmp.write_text(repr(v + float(delta)))
+        os.replace(tmp, path)
+    except OSError:
+        return False
+    return True
 
 
 def _text_of(content: Any) -> str:
@@ -267,17 +309,27 @@ class Route:
     records: list = field(default_factory=list)
     upstream_failed_last: bool = False
     fail_since: float | None = None
+    l4_clock: str = "wall"
+    sbx: Path | None = None
+    excess_s: float = 0.0
+    model_s: float = 0.0
+    live_prev: tuple | None = None       # (prompt, completion) of the previous forwarded live call (model clock)
+    t0_missing: int = 0
     clock: Callable[[], float] = field(default=time.monotonic, repr=False)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def state(self) -> dict:
         with self.lock:
-            return {"t_first": self.t_first, "t_live0": self.t_live0, "infra": list(dict.fromkeys(self.infra)),
-                    "upstream_failed_last": self.upstream_failed_last, "requests": self.i,
-                    "fail_streak_s": None if self.fail_since is None else round(self.clock() - self.fail_since, 3),
-                    "pre_stage_s": (None if self.t_live0 is None or self.t_first is None
-                                    else round(self.t_live0 - self.t_first, 3)),
-                    "capped": any(r.get("served") == "cap" for r in self.records)}
+            out = {"t_first": self.t_first, "t_live0": self.t_live0, "infra": list(dict.fromkeys(self.infra)),
+                   "upstream_failed_last": self.upstream_failed_last, "requests": self.i,
+                   "fail_streak_s": None if self.fail_since is None else round(self.clock() - self.fail_since, 3),
+                   "pre_stage_s": (None if self.t_live0 is None or self.t_first is None
+                                   else round(self.t_live0 - self.t_first, 3)),
+                   "capped": any(r.get("served") == "cap" for r in self.records)}
+            if self.l4_clock == "model":
+                out.update(l4_clock="model", excess_s=round(self.excess_s, 3), model_s=round(self.model_s, 3),
+                           t0_missing=self.t0_missing)
+            return out
 
 
 def render_step(step: dict, body: dict) -> tuple:
@@ -305,7 +357,10 @@ class StageRouter:
     """``with StageRouter(endpoint, budget) as r: base = r.add_route(...)``; ``r.answer(key, body)`` without HTTP."""
 
     def __init__(self, endpoint: Endpoint, budget: Budget | None = None, *, clock: Callable[[], float] = time.monotonic,
-                 log_bodies: bool = False):
+                 log_bodies: bool = False, l4_clock: str = "wall"):
+        if l4_clock not in L4_CLOCKS:
+            raise ValueError(f"l4_clock must be one of {L4_CLOCKS}, got {l4_clock!r}")
+        self.l4_clock = l4_clock
         self.endpoint = endpoint
         self.budget = budget or Budget(None)
         self.clock = clock
@@ -378,10 +433,11 @@ class StageRouter:
         return f"http://127.0.0.1:{self.port}/r/{key}/v1"
 
     def add_route(self, key: str, case_id: str, live_agent: str, scripts: dict, live_script: list, cap_s: float, *,
-                  log_path: Path | None = None, bodies_path: Path | None = None) -> str | None:
+                  log_path: Path | None = None, bodies_path: Path | None = None, sbx: Path | None = None) -> str | None:
         r = Route(key=key, case_id=case_id, live_agent=live_agent, scripts={k: list(v) for k, v in scripts.items()},
                   live_script=list(live_script or []), cap_s=float(cap_s), log_path=log_path,
-                  bodies_path=bodies_path if self.log_bodies else None, t_start=self.clock(), clock=self.clock)
+                  bodies_path=bodies_path if self.log_bodies else None, t_start=self.clock(), clock=self.clock,
+                  l4_clock=self.l4_clock, sbx=Path(sbx) if sbx is not None else None)
         for p in (r.log_path, r.bodies_path):
             if p is not None:
                 Path(p).parent.mkdir(parents=True, exist_ok=True)
@@ -426,6 +482,8 @@ class StageRouter:
         status, resp = 200, None
         if decision == "forward":
             status, resp = self._forward(route, body, rec)
+            if route.l4_clock == "model" and (rec["live"] or (kind == "summarizer" and self._live_on(route))):
+                self._model_clock(route, rec, status, self.clock() - now)
         else:
             if callable(step):
                 step = step(Request(route.key, agent, idx, body))
@@ -457,7 +515,7 @@ class StageRouter:
                 return "done_after_end", DONE, 0
             if route.t_live0 is None:
                 route.t_live0 = now
-            elif now - route.t_live0 >= route.cap_s:
+            elif now - route.t_live0 - (route.excess_s if route.l4_clock == "model" else 0.0) >= route.cap_s:
                 return "cap", DONE, 0
             if self.endpoint.live:
                 return "forward", None, 0
@@ -476,6 +534,37 @@ class StageRouter:
         if idx < len(steps):
             return "script", steps[idx], idx
         return "exhausted", DONE, idx
+
+    @staticmethod
+    def _live_on(route: Route) -> bool:
+        """The live agent's first stage-run has started and no other agent has spoken since."""
+        with route.lock:
+            return route.t_live0 is not None and not route.other_after_live
+
+    def _model_clock(self, route: Route, rec: dict, status: int, latency: float) -> None:
+        """E1: charge the modelled L4 time m for this call instead of its proxy latency (see the module doc)."""
+        ok = status == 200 and rec.get("served") == "upstream"
+        with route.lock:
+            if not ok:
+                m = 0.0
+            else:
+                p, c = int(rec.get("prompt_tokens") or 0), int(rec.get("completion_tokens") or 0)
+                if rec["live"]:
+                    u = p if route.live_prev is None else max(0, p - route.live_prev[0] - route.live_prev[1])
+                    route.live_prev = (p, c)
+                else:
+                    u = p                    # a summariser request is a fresh prompt
+                m = l4_model_s(c, u)
+                rec["l4_uncached"] = u
+            excess = latency - m
+            route.excess_s += excess
+            route.model_s += m
+            rec.update(l4_m=round(m, 4), l4_excess=round(excess, 4), l4_excess_total=round(route.excess_s, 4))
+            files = find_t0_files(route.sbx)
+            moved = sum(shift_t0(f, excess) for f in files)
+            if not moved:
+                route.t0_missing += 1
+            rec["l4_t0_files"] = moved
 
     def _forward(self, route: Route, body: dict, rec: dict) -> tuple:
         ep = self.endpoint

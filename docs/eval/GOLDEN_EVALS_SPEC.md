@@ -144,7 +144,9 @@ TESTS: <an existing test file> | none
   from `ast` of the original file (`Class.method`), `module level` when none. Several hunks in one function merge into
   one entry. A gold file that does not exist yet: `<path> (new file)`. When the snapshot is absent, the function comes
   from the hunk header context (`@@ ... @@ def name(`), and the task records `plan_basis: "hunk_header"`. More than 6
-  entries: the first 6, then `and N more places in <files>`.
+  entries: the first 6, then `and N more places in <files>`, then ` (<qualnames>)` naming the functions of the cut
+  entries that the plan does not name anywhere else (2026-09-30: without it the golden plans of fastapi_14306,
+  fastapi_15800, rich_3061 and rich_3930 missed gold functions and the oracle L check failed).
 - CAUSE: the first sentence of `root_cause`, cut to 35 words at a word boundary.
 - FIX: `one_line_solution`.
 - REPRO: `fails on original` when a validated golden repro exists (4.2) and the scripted locator's run of it printed
@@ -598,6 +600,9 @@ INVALID when either run has more than 5 % `infra_error` cases.
 ### 7.2 Metric registry (constants live in the library: `CAP_S=300`, `L_T_MAX=90`, `L_CALLS_MAX=12`, `PLAN_WORDS_MAX=120`,
 `NOTES_WORDS_MAX=60`, `F_FIRST_EDIT_T=150`, `COMPACTION_LINE=14336`, `RUNAWAY_FRAC=0.95`)
 
+64 metrics: the 59 of the original spec plus five added on 2026-09-30 by docs/v10/SPEC_v10_2.md section 8 (E2
+`l_l4_s`, `f_l4_s`, `v_l4_s`; E3 `l_files_named_n`, `l_gold_files_in_files_line`).
+
 X (all suites, live events and live calls only):
 
 | name | kind | definition |
@@ -632,6 +637,9 @@ L (live agent `locator`; `plan` = its final reply):
 | `l_t_end` / `l_within_time` | numeric / binary | last footer t of the stage-run; <= 90 |
 | `l_calls` / `l_within_calls` | count / binary | tool calls in the stage-run; <= 12 |
 | `l_llm_calls`, `l_prompt_tokens` | count | from live calls |
+| `l_l4_s` | numeric, lower | modelled L4 seconds of the live stage-run: sum over its answered live calls of `0.102 + 0.02815 c + 0.000921 u` (u = uncached prompt tokens) plus the tool gaps between them; `applicable: false` without an answered live call (added by SPEC_v10_2 E2) |
+| `l_files_named_n` | count, lower | distinct `.py`/`.pyi` path tokens in the plan; descriptive, guards the headline against file lists; `applicable: false` without a reply (SPEC_v10_2 E3) |
+| `l_gold_files_in_files_line` | binary | every gold file is named in the plan's `FILES:` section (up to the next ALSO, CAUSE, FIX, REPRO or TESTS line; ALSO excluded) (SPEC_v10_2 E3) |
 
 F (live agent `fixer`; gradable cases only, else `applicable: false`):
 
@@ -647,6 +655,7 @@ F (live agent `fixer`; gradable cases only, else `applicable: false`):
 | `f_first_edit_t` / `f_first_edit_in_time` | numeric / binary | footer t of the first edit.py result starting `OK`; <= 150; `applicable: false` when no edit succeeded |
 | `f_verify_rounds` | count | fixer run_commands running `/tmp/swe/verify.py` without `--repro-only` |
 | `f_t_end`, `f_calls`, `f_llm_calls`, `f_prompt_tokens` | numeric / count | as L |
+| `f_l4_s` | numeric, lower | as `l_l4_s` (SPEC_v10_2 E2) |
 
 V (live agent `verifier`; gradable cases only):
 
@@ -660,6 +669,7 @@ V (live agent `verifier`; gradable cases only):
 | `v_finalize_before_submit` | binary | a `/tmp/swe/finalize.py` run precedes the verifier's first `submit_patch`; `applicable: false` if it never submitted |
 | `v_no_protected`, `v_no_scratch`, `v_ended_by_text` | binary | as F |
 | `v_t_end`, `v_calls`, `v_llm_calls`, `v_prompt_tokens` | numeric / count | as L |
+| `v_l4_s` | numeric, lower | as `l_l4_s` (SPEC_v10_2 E2) |
 
 ## 8. Summary and comparison (component c, `scripts/golden/summary.py`)
 
@@ -752,7 +762,7 @@ about $1 per F dev run) and report the population every time.
 5. A compaction summary during the live stage summarises scripted events, not a real locator's.
 6. The golden plan is better than a real locator's by construction; F measures the fixer's ceiling, not the pipeline.
 7. Race-2 repros came from v10.0 helpers; they are re-validated with the v10.1 bundle helpers at build time.
-8. fastapi (31 tasks) is not runnable until its snapshots and venv exist; every number states its population.
+8. fastapi is runnable since 2026-09-30 (all 74 snapshots local; its kpar venv is the 41-package Kaggle-freeze closure, built online once). Runs made before that date cover rich and requests only: compare them on the cases both have (summary.py compare pairs by case id). (Was: fastapi (31 tasks) is not runnable until its snapshots and venv exist.)
 9. The live stage ends at helper t=300 by the router's cap (at its next LLM request), not by the harness killing the
    task mid-call; after the cap the scripted next stage calls `submit_patch`, which runs `git add -N .` and so includes
    new files, while a real timeout takes the harness fallback diff, which omits untracked files

@@ -39,6 +39,10 @@ NOTES_WORDS_MAX = 60
 F_FIRST_EDIT_T = 150
 COMPACTION_LINE = 14336
 RUNAWAY_FRAC = 0.95
+# research/time_model.md sect. 2 (scripts/golden/router.py l4_model_s, SPEC_v10_2 E1/E2): modelled L4 seconds per call
+L4_A, L4_B, L4_C = 0.102, 0.02815, 0.000921
+PY_PATH = re.compile(r"(?<![\w./-])(?:\./|/workspace/)?([A-Za-z0-9_][\w./-]*\.pyi?)(?![\w/])")
+PLAN_KEY = re.compile(r"(?m)^[ \t]*(?:[-*][ \t]*)?(FILES|ALSO|CAUSE|FIX|REPRO|TESTS)\b[ \t]*:?")
 
 # Copied from scripts/replay_l4.py: a metric file cannot import it (tests assert these still equal the originals).
 TOOLS = frozenset(("run_command", "read_file", "edit_file", "write_file", "get_status", "get_code_neighbors",
@@ -48,8 +52,8 @@ HELPER_NAMES = ("install", "locate", "grep", "view", "edit", "run", "verify", "f
 TOOLCALL_TEXT = re.compile(r"<\|tool_call>\s*call:([^{<\n]*)")
 HELPER_SHELL = re.compile(r"^\s*(?:%s)\.py(?![\w.])" % "|".join(HELPER_NAMES))
 FOOT_T = re.compile(r"\[t=(\d+)s\]")
-SCRATCH_ROOT = re.compile(r"^(repro|reproduce|scratch|debug|tmp|temp|try|demo)[^/]*$|^test_[^/]*\.py$|^[^/]*_test\.py$",
-                          re.I)
+SCRATCH_ROOT = re.compile(r"^(?:repro|reproduce|scratch|debug|tmp|temp|try|demo)(?:[-_.0-9][^/]*)?$|^test_[^/]*\.py$|"
+                          r"^[^/]*_test\.py$", re.I)       # v10.2 (R2 / E5): the separator rule, as in replay_l4
 SCRATCH_ANY = re.compile(r"\.(log|orig|rej|bak|swp)$|(^|/)\.coverage$")
 VENDORED = re.compile(r"(^|/)(site-packages|_pytest|[^/]+\.dist-info)(/|$)")
 
@@ -145,6 +149,15 @@ METRICS = {
                     "doc": "live LLM calls of the locator"},
     "l_prompt_tokens": {"suites": "L", "kind": "count", "better": "lower", "headline": False,
                         "doc": "sum of prompt tokens over the live calls"},
+    "l_l4_s": {"suites": "L", "kind": "numeric", "better": "lower", "headline": False,
+               "doc": "modelled L4 seconds of the live stage-run: sum over its answered live calls of 0.102 + "
+                      "0.02815 c + 0.000921 u (u uncached prompt tokens) plus the tool gaps between them"},
+    "l_files_named_n": {"suites": "L", "kind": "count", "better": "lower", "headline": False,
+                        "doc": "distinct .py/.pyi path tokens in the plan (descriptive; guards the headline against "
+                               "file lists; inapplicable when there is no reply)"},
+    "l_gold_files_in_files_line": {"suites": "L", "kind": "binary", "better": "higher", "headline": False,
+                                   "doc": "every gold file is named in the plan's FILES: section (up to the next "
+                                          "ALSO, CAUSE, FIX, REPRO or TESTS line; ALSO excluded)"},
     # F: fixer given a golden plan (gradable cases only)
     "f_hidden_pass": {"suites": "F", "kind": "binary", "better": "higher", "headline": True,
                       "doc": "the fixer's patch passes the hidden tests (pass@1 given a perfect plan)"},
@@ -180,6 +193,8 @@ METRICS = {
                     "doc": "live LLM calls of the fixer"},
     "f_prompt_tokens": {"suites": "F", "kind": "count", "better": "lower", "headline": False,
                         "doc": "sum of prompt tokens over the live calls"},
+    "f_l4_s": {"suites": "F", "kind": "numeric", "better": "lower", "headline": False,
+               "doc": "modelled L4 seconds of the live stage-run (l_l4_s rule)"},
     # V: verifier on a gold, wrong or empty tree (gradable cases only)
     "v_variant_goal": {"suites": "V", "kind": "binary", "better": "higher", "headline": True,
                        "doc": "gold and wrong: the final patch passes the hidden tests; empty: it is non-empty "
@@ -209,6 +224,8 @@ METRICS = {
                     "doc": "live LLM calls of the verifier"},
     "v_prompt_tokens": {"suites": "V", "kind": "count", "better": "lower", "headline": False,
                         "doc": "sum of prompt tokens over the live calls"},
+    "v_l4_s": {"suites": "V", "kind": "numeric", "better": "lower", "headline": False,
+               "doc": "modelled L4 seconds of the live stage-run (l_l4_s rule)"},
 }
 
 
@@ -775,6 +792,52 @@ def _b_prompt_tokens(c):
     return _res(sum(_int(r.get("prompt_tokens")) or 0 for r in calls), True, {"calls": len(calls)})
 
 
+def _b_l4_s(c):
+    """Modelled L4 seconds of the live stage-run (research/locator_diag/l4time.py, SPEC_v10_2 E2): answered live calls
+    of the stage agent in order; u is the first call's prompt tokens, then p - p_prev - c_prev (floored at 0); a
+    failed call (HTTP status not 200) models to 0 s and does not reset u; the tool gap is t_in - previous t_out."""
+    if not c["has_calls"]:
+        return _na("no llm_calls in the golden block")
+    calls = [r for r in _ordered(_live_calls(c, c["stage_agent"])) if not _is_summ(r)]
+    ok = [r for r in calls if (_int(r.get("http_status")) or 200) == 200]
+    if not ok:
+        return _na("no answered live call")
+    llm = tool = 0.0
+    prev = prev_out = None
+    for r in calls:
+        t_in, t_out = _num(r.get("t_in")), _num(r.get("t_out"))
+        if prev_out is not None and t_in is not None:
+            tool += max(0.0, t_in - prev_out)
+        if t_out is not None:
+            prev_out = t_out
+        if (_int(r.get("http_status")) or 200) != 200:
+            continue
+        p, cc = _int(r.get("prompt_tokens")) or 0, _int(r.get("completion_tokens")) or 0
+        u = p if prev is None else max(0, p - prev[0] - prev[1])
+        llm += L4_A + L4_B * cc + L4_C * u
+        prev = (p, cc)
+    return _res(round(llm + tool, 3), True, {"llm_s": round(llm, 3), "tool_s": round(tool, 3), "calls": len(ok)})
+
+
+def _plan_paths(text):
+    out = []
+    for m in PY_PATH.finditer(text or ""):
+        p = m.group(1)
+        if p not in out:
+            out.append(p)
+    return out
+
+
+def _files_section(text):
+    """The plan's FILES: section: from the first FILES line to the next ALSO/CAUSE/FIX/REPRO/TESTS line ('' if none)."""
+    keys = list(PLAN_KEY.finditer(text or ""))
+    for k, m in enumerate(keys):
+        if m.group(1) == "FILES":
+            end = keys[k + 1].start() if k + 1 < len(keys) else len(text)
+            return text[m.end():end]
+    return ""
+
+
 def _b_hidden_pass(c):
     if c["status"] == "model_error":
         return _res(0, True, "model_error counts as a failure")
@@ -1100,6 +1163,35 @@ def m_l_prompt_tokens(instance, _c=None):
     return _metric("l_prompt_tokens", instance, _c, _b_prompt_tokens)
 
 
+def _lb_files_n(c):
+    t = _reply(c)
+    if not t.strip():
+        return _na("no reply")
+    paths = _plan_paths(t)
+    return _res(len(paths), True, {"paths": paths[:12]})
+
+
+def _lb_files_line(c):
+    gold = _gold_files(c)
+    if not gold:
+        return _na("no gold_files")
+    sec = _files_section(_reply(c))
+    missing = [f for f in gold if not _path_named(sec, f)]
+    return _res(0 if missing else 1, True, {"missing": missing[:10], "gold": len(gold), "files_line": bool(sec)})
+
+
+def m_l_l4_s(instance, _c=None):
+    return _metric("l_l4_s", instance, _c, _b_l4_s)
+
+
+def m_l_files_named_n(instance, _c=None):
+    return _metric("l_files_named_n", instance, _c, _lb_files_n)
+
+
+def m_l_gold_files_in_files_line(instance, _c=None):
+    return _metric("l_gold_files_in_files_line", instance, _c, _lb_files_line)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # F metrics (live agent: fixer; gradable cases only)
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1228,6 +1320,10 @@ def m_f_prompt_tokens(instance, _c=None):
     return _metric("f_prompt_tokens", instance, _c, _b_prompt_tokens)
 
 
+def m_f_l4_s(instance, _c=None):
+    return _metric("f_l4_s", instance, _c, _b_l4_s)
+
+
 # ---------------------------------------------------------------------------------------------------------------------
 # V metrics (live agent: verifier; gradable cases only)
 # ---------------------------------------------------------------------------------------------------------------------
@@ -1333,6 +1429,10 @@ def m_v_llm_calls(instance, _c=None):
 
 def m_v_prompt_tokens(instance, _c=None):
     return _metric("v_prompt_tokens", instance, _c, _b_prompt_tokens)
+
+
+def m_v_l4_s(instance, _c=None):
+    return _metric("v_l4_s", instance, _c, _b_l4_s)
 
 
 def evaluate(instance):

@@ -31,6 +31,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from v10_support.repo import (no_orphans, make_repo, copy_helpers, helper_env, run_helper, run_py, git,  # noqa: F401,E402
                               cli_scripts, SCRIPTS_SRC, ROOT, TAG)
 from test_v10_bundle import BUNDLE, LIB_SCRIPTS, CLI_SCRIPTS, prompts  # noqa: E402
+from v10_support.compat import V102, later_stage  # noqa: E402  (G4_BUNDLE may be v10.2)
 
 pytestmark = pytest.mark.skipif(not (SCRIPTS_SRC / "_swe_common.py").exists(), reason="helpers not built")
 
@@ -249,7 +250,10 @@ def test_helper_output_runtime_clean(tmp_path):
     assert re.search(r"VERIFY: (GREEN|AMBER)", h("verify", t=180))
     for _ in range(3):
         h("run", ["echo same"], t=181)
-    assert "NOTE: same command, same output 3 times" in outs[-1][2]
+    if V102:        # v10.2 (SPEC_v10_2 5.5): the third identical run on the same tree is refused (SAME RUN)
+        assert outs[-1][2].startswith("SAME RUN: this command already ran twice on this tree")
+    else:
+        assert "NOTE: same command, same output 3 times" in outs[-1][2]
     assert "FINISH: t>=210s" in h("view", ["pkg/mod.py", "1", "2"], t=215)
     (ws / "tests/test_mod.py").write_text("def test_other():\n    pass\n")
     assert "PROTECTED" in h("status", t=220)
@@ -333,6 +337,7 @@ def test_view_accepts_l_ranges(tmp_path):
     """diag 1 N6 (fastapi_14851 step 10, fastapi_5624 step 6): the L1191-1433 spans locate.py and grep.py print are
     accepted as ranges, also as FILE:L2-3 and as two words; a NAME still works."""
     ws, swe, sc = task(tmp_path)
+    later_stage(swe)                                   # v10.2: t=100 is past the locator's close
     for args in (["pkg/mod.py", "L2-3"], ["pkg/mod.py:L2-3"], ["pkg/mod.py", "L2", "L3"], ["pkg/mod.py", "l2..3"]):
         out = helper(sc, "view", args, ws=ws, swe=swe)
         assert out.startswith("pkg/mod.py lines 2-3 of"), (args, out)
@@ -343,6 +348,7 @@ def test_status_lists_viewed_ranges(tmp_path):
     """diag 4 5.4 (rich_4079: three compactions, each losing the locator's plan): status prints the source ranges
     viewed last, newest first, at most 4, test files left out."""
     ws, swe, sc = task(tmp_path)
+    later_stage(swe)                                   # v10.2: the v10.1 form is the status of a later stage
     for i, (a, b) in enumerate(((1, 2), (4, 6), (1, 3), (2, 5), (1, 6))):
         helper(sc, "view", ["pkg/mod.py", str(a), str(b)], ws=ws, swe=swe, t=10 + i)
     helper(sc, "view", ["tests/test_mod.py", "1", "2"], ws=ws, swe=swe, t=40)
@@ -409,6 +415,7 @@ def test_finalize_empty_text_and_edit_target(tmp_path):
     the time left and that an empty patch always fails, and shows the code last viewed (or the region of an undone
     edit) as numbered lines with the --lines recipe; nothing viewed means no EDIT TARGET; test files are never offered."""
     ws, swe, sc = task(tmp_path)
+    later_stage(swe)                                   # v10.2: t=160 is past the locator's close
     out = helper(sc, "finalize", ws=ws, swe=swe, t=160)
     assert out.startswith("NOT READY: EMPTY at t=160s (140s left) - no source change. Do not submit an empty patch: "
                           "it always fails.") and "EDIT TARGET" not in out, out

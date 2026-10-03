@@ -39,6 +39,8 @@ except ImportError:  # pragma: no cover - only while helpers-core's test support
         assert not left, left
 
 pytestmark = pytest.mark.skipif(not (SRC / "_swe_common.py").exists(), reason="helpers-core (_swe_common.py) not built")
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from v10_support.compat import V102, later_stage  # noqa: E402  (G4_BUNDLE may be v10.2)
 
 SEP_CHARS = ["\f", "\x0b", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"]
 
@@ -89,6 +91,7 @@ def mkrepo(tmp, files, name="ws", symlinks=()):
 def env_for(ws, t=20, swe=None, pythonpath=True, extra=None):
     tmp = pathlib.Path(swe).parent if swe else ws.parent / ("sbx_" + ws.name)
     tmp.mkdir(exist_ok=True)
+    later_stage(swe or tmp / "swe")    # v10.2: these contracts hold outside the locator budget (14 calls, t=90s)
     e = {k: v for k, v in os.environ.items() if not k.startswith(("SWE_", "PYTHON", "TEST_TMPDIR"))}
     e.update(SWE_WS=str(ws), SWE_DIR=str(swe or tmp / "swe"), TMPDIR=str(tmp), HOME=str(tmp), SWE_DUAL="0",
              PYTHONDONTWRITEBYTECODE="1", LANG="C.UTF-8")
@@ -442,7 +445,8 @@ def test_locate_ranking_rules(tmp_path, scripts):
             "- [ ] padding width\nSee https://en.wikipedia.org/wiki/wikipedia_entry and #123, gh-12, GH-7.\n"
             "At deadbeef1234567 and a1b2c3d4e5f60718293a4b5c6d7e8f9012345678.")
     j = run(scripts, "locate", [junk], ws, env)
-    assert ranked(j.out) == [] and "no matches" in j.out, j.out
+    # v10.2 (SPEC_v10_2 5.6): a query with no searchable words is refused before the index is built
+    assert ranked(j.out) == [] and ("no searchable words" if V102 else "no matches") in j.out, j.out
 
 
 # =============================================================================================================== R32

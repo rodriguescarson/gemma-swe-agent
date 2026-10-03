@@ -61,12 +61,22 @@ KPAR_PINS = {
     "requests": ("pytest", "Pygments", "markdown-it-py", "mdurl", "typing_extensions", "attrs"),
     "fastapi": ("pytest", "pydantic", "pydantic_core", "starlette", "anyio", "httpx", "python-multipart",
                 "email-validator", "PyYAML", "SQLAlchemy", "orjson", "ujson", "Flask", "Jinja2", "typing-inspection",
-                "PyJWT", "typing_extensions", "annotated-types", "Pygments"),
+                "PyJWT", "typing_extensions", "annotated-types", "Pygments", "annotated-doc",
+                "typer", "click", "rich", "shellingham", "markdown-it-py", "mdurl",            # 2026-09-30: see
+                "pydantic-settings", "python-dotenv", "uvicorn", "h11",                         # build_kpar.sh
+                "httpcore", "certifi", "idna", "blinker", "itsdangerous", "MarkupSafe", "Werkzeug",
+                "dnspython", "iniconfig", "packaging", "pluggy"),
 }
 KPAR_FORBIDDEN = ("dirty-equals", "inline-snapshot")     # Kaggle has neither (test_plan section 2)
 
 # Known, documented exceptions (SPEC R98, R102, R104, R105; test_plan appendix A).
-KNOWN_LOCATE_MISS = frozenset({"rich_3953", "rich_3944", "rich_3468", "rich_3105", "rich_3067", "rich_3063"})
+KNOWN_LOCATE_MISS = frozenset({"rich_3953", "rich_3944", "rich_3468", "rich_3105", "rich_3067", "rich_3063",
+                               # 2026-09-30, first run with all 74 snapshots (v10 locate.py, gold file not in the top 8)
+                               "rich_4076", "fastapi_14487", "fastapi_15661", "fastapi_9555"})
+# The 40 tasks whose snapshots were local when the R98 bars (21/28/34 of 40) were set; fastapi and rich_4076/4077/4079
+# were fetched on 2026-09-30.
+R98_POPULATION = frozenset(t for t in TASK_IDS
+                           if not t.startswith("fastapi_") and t not in ("rich_4076", "rich_4077", "rich_4079"))
 KNOWN_BEHAVIOUR_CHANGE = frozenset({"rich_3942", "rich_3935", "rich_3470", "rich_3105", "rich_3043", "rich_3061"})
 KNOWN_EMPTY_HANG = frozenset({"rich_4006", "rich_3772", "rich_3480"})
 KNOWN_FREE = frozenset({"requests_6644"})       # the empty patch resolves in parity: tests import site-packages (F10)
@@ -278,7 +288,10 @@ def patch_files(text: str) -> list:
 
 # --------------------------------------------------------------------------------------- snapshots and venvs
 def has_snapshot(tid: str) -> bool:
-    return (SNAP_DIR / f"{tid}.tgz").is_file()
+    """A COMPLETE local snapshot. The Kaggle CLI streams into the final name and keeps a <name>.kaggle-partial sidecar
+    until the download ends, so a .tgz with that sidecar is still downloading or was interrupted (2026-09-30)."""
+    p = SNAP_DIR / f"{tid}.tgz"
+    return p.is_file() and not (SNAP_DIR / f"{tid}.tgz.kaggle-partial").exists()
 
 
 def fetch_cmd(tid: str) -> str:

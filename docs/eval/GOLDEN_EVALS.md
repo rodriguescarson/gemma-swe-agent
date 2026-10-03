@@ -64,6 +64,9 @@ library pasted whole plus a two-line `evaluate`, because agents-cli cannot impor
 | `l_within_calls` | binary | higher | at most 12 tool calls |
 | `l_llm_calls` | count | lower | live LLM calls of the locator |
 | `l_prompt_tokens` | count | lower | sum of prompt tokens over the live calls |
+| `l_l4_s` | numeric | lower | modelled L4 seconds of the live stage-run: sum over its answered live calls of 0.102 + 0.02815 c + 0.000921 u (u uncached prompt tokens) plus the tool gaps between them |
+| `l_files_named_n` | count | lower | distinct .py/.pyi path tokens in the plan (descriptive; guards the headline against file lists; inapplicable when there is no reply) |
+| `l_gold_files_in_files_line` | binary | higher | every gold file is named in the plan's FILES: section (up to the next ALSO, CAUSE, FIX, REPRO or TESTS line; ALSO excluded) |
 
 | F metric | kind | better | definition |
 |---|---|---|---|
@@ -84,6 +87,7 @@ library pasted whole plus a two-line `evaluate`, because agents-cli cannot impor
 | `f_calls` | count | lower | tool calls in the stage-run |
 | `f_llm_calls` | count | lower | live LLM calls of the fixer |
 | `f_prompt_tokens` | count | lower | sum of prompt tokens over the live calls |
+| `f_l4_s` | numeric | lower | modelled L4 seconds of the live stage-run (l_l4_s rule) |
 
 | V metric | kind | better | definition |
 |---|---|---|---|
@@ -100,6 +104,7 @@ library pasted whole plus a two-line `evaluate`, because agents-cli cannot impor
 | `v_calls` | count | lower | tool calls in the stage-run |
 | `v_llm_calls` | count | lower | live LLM calls of the verifier |
 | `v_prompt_tokens` | count | lower | sum of prompt tokens over the live calls |
+| `v_l4_s` | numeric | lower | modelled L4 seconds of the live stage-run (l_l4_s rule) |
 
 Where the library is stricter than a one-line reading of spec 7.2, on purpose:
 
@@ -118,8 +123,9 @@ Where the library is stricter than a one-line reading of spec 7.2, on purpose:
 
 ```bash
 cd /Users/carson/Projects/gemma-swe-agent
-# 0. once: kpar venvs rich + requests exist (scripts/build_kpar.sh). fastapi needs network (Carson's go):
-#    snapshots: see tasks.fetch_cmd(tid); venv: G4_KPAR_ONLINE=1 scripts/build_kpar.sh fastapi
+# 0. once: all 74 snapshots are local and the three kpar venvs exist (2026-09-30). On a fresh machine:
+#    snapshots: tasks.fetch_cmd(tid) (one downloader at a time: FETCH_THREADS=1); venvs: scripts/build_kpar.sh, and
+#    fastapi once with the network: G4_KPAR_ONLINE=1 scripts/build_kpar.sh fastapi (offline afterwards, from ~/.cache/uv)
 # 1. fixtures (cold about 10 min at -j 6, warm seconds), then prove they are reproducible
 .venv/bin/python scripts/golden/build_fixtures.py -j 6
 .venv/bin/python scripts/golden/build_fixtures.py --check
@@ -158,7 +164,10 @@ agents-cli eval compare eval/golden/runs/F_dev_v10_or_s1/grade/results_<ts>.json
 FAITHFUL or CONTROL), model, providers, bundle sha, cost, wall time, the mean live-call latency next to the Kaggle
 4xL4 reference, the number of holdout looks, and the population, for example:
 
-> F dev: 29 gradable of 30 runnable of 55 tasks (rich 28, requests 1); fastapi 0 of 24 runnable: snapshots missing
+> F dev: 52 gradable of 55 runnable of 55 tasks (rich 31, fastapi 21)
+
+(This guide's example before fastapi became runnable on 2026-09-30: `F dev: 29 gradable of 30 runnable of 55 tasks
+(rich 28, requests 1); fastapi 0 of 24 runnable: snapshots missing`.)
 
 Always quote that sentence with the number: a rate without its population is not a result.
 
@@ -426,7 +435,7 @@ Re-checked 2026-09-30, second pass, still $0 spent (the request was again "did w
 5. A compaction during the live stage summarises scripted events, not a real stage's.
 6. The golden plan is better than a real locator's: F measures the fixer's ceiling, not the pipeline.
 7. Race-2 repros came from v10.0 helpers and are re-validated with the v10.1 helpers.
-8. fastapi (31 tasks) is not runnable until its snapshots and venv exist; every number states its population.
+8. fastapi is runnable since 2026-09-30 (all 74 snapshots local; its kpar venv is the 41-package Kaggle-freeze closure, built online once). Runs made before that date cover rich and requests only: compare them on the cases both have (summary.py compare pairs by case id).
 9. The live stage ends at helper t=300 by the router's cap; the scripted submit then includes new files (a real
    timeout's fallback diff would not).
 10. Hidden tests run in the kpar venv (Kaggle pip freeze), not the full Kaggle image; `requests_6644` differs.

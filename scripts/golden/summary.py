@@ -1,7 +1,7 @@
 """Golden-eval run summary and paired comparison (docs/eval/GOLDEN_EVALS_SPEC.md v1.1 section 8).
 
     .venv/bin/python scripts/golden/summary.py RUN_DIR [--out DIR] [--holdout-log PATH] [--no-l4-ref]
-    .venv/bin/python scripts/golden/summary.py compare BASE_RUN CAND_RUN [--allow-mixed] [--out DIR]
+    .venv/bin/python scripts/golden/summary.py compare BASE_RUN CAND_RUN [--allow-mixed] [--pair-by-task] [--out DIR]
     .venv/bin/python scripts/golden/summary.py ablation A0_RUN B2_RUN A0P_RUN [--allow-unscaled] [--out DIR]
 
 summary: loads RUN_DIR/traces/*.json (grading-input EvaluationDatasets, spec 6.2) and RUN_DIR/cases/*.json (flat
@@ -17,8 +17,11 @@ compare: pairs two runs by dataset_case_id and, per metric, counts wins, losses 
 the 2x2 transition table (1->1, 0->1, 1->0, 0->0, with the flipped case ids), because ties lump 1->1 and 0->0
 together; it also evaluates the pre-registered decision rule. It
 refuses (exit 2) mismatched suites or splits; mismatched labels, models or providers seen unless --allow-mixed; an
-interrupted run; and any run with more than 5 % infra_error cases. `agents-cli eval compare` is only a key-level JSON
-diff (no pairing, no statistics).
+interrupted run; any run with more than 5 % infra_error cases; and runs made on different L4 clocks (run.json l4_clock,
+missing = wall; SPEC_v10_2 E1). A case whose fixture differs between the runs is dropped, except with --pair-by-task
+(SPEC_v10_2 E4, the L-to-F chain: each arm's F case carries its own locator's plan, so the fixtures differ by design):
+the cases are then paired by case id, both shas are listed, and the result is labelled CHAIN. `agents-cli eval
+compare` is only a key-level JSON diff (no pairing, no statistics).
 
 ablation: the repair ablation of docs/eval/ABLATION_REPAIR.md (addendum 2026-09-30). It intersects the three F dev runs'
 paired cases first (applicable f_hidden_pass, every sample present, same fixture in all three), takes each case's
@@ -60,7 +63,8 @@ ABL_MAX_DAMAGE = 1
 ABL_CAL_NET = 3                  # identical arms showing |net| >= 3 at one-sided p <= 0.10 fail calibration
 ABL_COMPLIANCE_MAX = 0.10        # A0 case samples that edit after their first verify.py, as a share
 ABL_SETTINGS = ("suite", "split", "label", "endpoint", "upstream_model", "or_provider", "upstream_extra", "l4_scale",
-                "seed_mode", "samples", "dataset_sha", "task_filter", "agent_env", "faithful_env", "harness_verify")
+                "seed_mode", "samples", "dataset_sha", "task_filter", "agent_env", "faithful_env", "harness_verify",
+                "l4_clock")
 L4_STEP_S, L4_TOKEN_S = 1.4, 0.035   # research/time_model.md: about 1.4 s per step plus 35 ms per output token
 HOLDOUT_LOG = os.path.join(ROOT, "eval", "golden", "holdout_log.jsonl")
 L4_TRACE_DIRS = (os.path.join(ROOT, "eval", "kaggle", "g4-l4-v4", "results", "traces"),
@@ -79,7 +83,9 @@ DEVIATIONS = (
     "A compaction during the live stage summarises scripted events, not a real stage's.",
     "The golden plan is better than a real locator's: F measures the fixer's ceiling, not the pipeline.",
     "Race-2 repros came from v10.0 helpers and were re-validated with the v10.1 helpers.",
-    "fastapi (31 tasks) is not runnable until its snapshots and venv exist; every number states its population.",
+    "fastapi is runnable since 2026-09-30 (all 74 snapshots local; its kpar venv is the 41-package Kaggle-freeze "
+    "closure, built online once). Runs made before that date cover rich and requests only: compare them on the cases "
+    "both have (summary.py compare pairs by case id).",
     "The live stage ends at helper t=300 by the router cap; the scripted submit then includes new files (a real "
     "timeout's fallback diff would not).",
     "Hidden tests run in the kpar venv (Kaggle pip freeze), not the full Kaggle image; requests_6644 differs.",
@@ -571,9 +577,17 @@ def cmd_summary(a):
 # ---------------------------------------------------------------------------------------------------------------------
 # compare
 # ---------------------------------------------------------------------------------------------------------------------
+def l4_clock_of(R):
+    """run.json l4_clock; runs made before SPEC_v10_2 E1 ran on the wall clock."""
+    return R["run"].get("l4_clock") or "wall"
+
+
 def refusals(A, B, allow_mixed=False):
     ma, mb = run_meta(A), run_meta(B)
     why = []
+    if l4_clock_of(A) != l4_clock_of(B):
+        why.append("L4 clocks differ: %s vs %s (run_suite.py --l4-clock): time metrics and caps are not comparable"
+                   % (l4_clock_of(A), l4_clock_of(B)))
     if ma["suite"] != mb["suite"]:
         why.append("suites differ: %s vs %s" % (ma["suite"], mb["suite"]))
     if ma["split"] != mb["split"]:
@@ -624,8 +638,9 @@ def transitions(pa, pb, ids):
     return collections.OrderedDict([("counts", counts), ("flips", flips)])
 
 
-def compare(base_dir, cand_dir, allow_mixed=False):
-    """-> (refusal reasons, result). The result pairs the runs by dataset_case_id."""
+def compare(base_dir, cand_dir, allow_mixed=False, pair_by_task=False):
+    """-> (refusal reasons, result). The result pairs the runs by dataset_case_id; a case whose fixture differs is
+    dropped unless pair_by_task (the L-to-F chain, labelled CHAIN)."""
     A, B = load_run(base_dir), load_run(cand_dir)
     why = refusals(A, B, allow_mixed)
     if why:
@@ -640,6 +655,11 @@ def compare(base_dir, cand_dir, allow_mixed=False):
         fb[r["dataset_case_id"]].add(r["fixture_sha"])
     common = sorted(set(fa) & set(fb))
     changed = [i for i in common if fa[i] != fb[i]]
+    chain_shas = collections.OrderedDict()
+    if pair_by_task:
+        chain_shas = collections.OrderedDict((i, [sorted(x or "" for x in fa[i]), sorted(x or "" for x in fb[i])])
+                                             for i in common)
+        changed = []
     keep = set(common) - set(changed)
     ra = [r for r in ra if r["dataset_case_id"] in keep]
     rb = [r for r in rb if r["dataset_case_id"] in keep]
@@ -699,7 +719,9 @@ def compare(base_dir, cand_dir, allow_mixed=False):
         ("mixed_providers", providers_of(A) != providers_of(B)),
         ("paired_cases", len(keep)), ("only_in_base", sorted(set(fa) - set(fb))),
         ("only_in_candidate", sorted(set(fb) - set(fa))), ("fixture_changed_dropped", changed),
-        ("samples_gt_1", multi), ("metrics", rows), ("decision_rule", rule),
+        ("samples_gt_1", multi), ("pairing", "CHAIN: paired by case id, fixture shas differ by design"
+                                  if pair_by_task else "by dataset_case_id and fixture sha"),
+        ("fixture_shas", chain_shas), ("metrics", rows), ("decision_rule", rule),
         ("note", "agents-cli eval compare is a key-level JSON diff with no pairing or statistics; decisions use this "
                  "file."),
     ])
@@ -725,7 +747,8 @@ def transition_md(name, tr):
 
 def compare_md(C):
     b, c, rule = C["base"], C["candidate"], C["decision_rule"]
-    lines = ["# Golden eval comparison: %s -> %s" % (b["run_id"], c["run_id"]), "",
+    chain = str(C.get("pairing") or "").startswith("CHAIN")
+    lines = ["# Golden eval comparison%s: %s -> %s" % (" (CHAIN)" if chain else "", b["run_id"], c["run_id"]), "",
              "Suite %s, split %s, labels %s -> %s%s. Paired cases: %d (only in base %d, only in candidate %d, fixture "
              "changed and dropped %d%s)." % (
                  b["suite"], b["split"], b["label"], c["label"], " (MIXED)" if C["mixed_labels"] else "",
@@ -742,6 +765,12 @@ def compare_md(C):
              "Other suites: %s. Then: %s." % (rule["other_suites"], rule["next"]), "",
              "The verdict column uses two-sided p <= 0.05; the pre-registered rule uses one-sided p <= 0.10 with "
              "wins - losses >= 3, so a change can be eligible while its verdict reads 'no evidence'.", ""]
+    if chain:
+        lines += ["CHAIN pairing: each arm's F cases carry that arm's own locator plan, so the fixtures differ by design "
+                  "and the cases are paired by case id. Fixture shas (base / candidate):", ""]
+        lines += ["- %s: %s / %s" % (i, ",".join(x[:12] for x in v[0]), ",".join(x[:12] for x in v[1]))
+                  for i, v in (C.get("fixture_shas") or {}).items()]
+        lines += [""]
     lines += transition_md(rule["headline"], (C["metrics"].get(rule["headline"]) or {}).get("transitions"))
     lines += ["| metric | better | n | base | cand | diff | W | L | T | p one-sided | p two-sided | verdict |",
               "|---|---|---|---|---|---|---|---|---|---|---|---|"]
@@ -755,7 +784,7 @@ def compare_md(C):
 
 def cmd_compare(a):
     try:
-        why, C = compare(a.base, a.cand, a.allow_mixed)
+        why, C = compare(a.base, a.cand, a.allow_mixed, getattr(a, "pair_by_task", False))
     except ValueError as e:
         print("compare: %s" % e, file=sys.stderr)
         return 2
@@ -925,6 +954,8 @@ def ablation_refusals(runs, allow_unscaled=False):
         for k in ABL_SETTINGS:
             a_v = base.get(k) if k != "label" else run_meta(runs[0][1])["label"]
             b_v = R["run"].get(k) if k != "label" else run_meta(R)["label"]
+            if k == "l4_clock":
+                a_v, b_v = a_v or "wall", b_v or "wall"
             if a_v != b_v:
                 why.append("%s differs from A0 in %s: %r vs %r (every arm pins the same settings)" % (name, k, b_v, a_v))
         if providers_of(R) != providers_of(runs[0][1]):
@@ -1089,6 +1120,8 @@ def main(argv=None):
         ap.add_argument("base")
         ap.add_argument("cand")
         ap.add_argument("--allow-mixed", action="store_true", help="compare runs with different labels")
+        ap.add_argument("--pair-by-task", action="store_true",
+                        help="pair by case id although fixture shas differ (the L-to-F chain; labelled CHAIN)")
         ap.add_argument("--out", help="directory for compare.json and compare.md (default: CAND_RUN)")
         return cmd_compare(ap.parse_args(argv[1:]))
     if argv and argv[0] == "ablation":

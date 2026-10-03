@@ -20,6 +20,11 @@ Money and state (review 2026-09-30):
   dataset, filters, environment) than the run.json it continues. It keeps every re-run case's earlier attempt under
   <run>/attempts/<case>.attempt<N>/, counts their spend in spent_usd, and seeds the budget with it, so --max-usd caps the
   run's total. Each case's meta.json carries the endpoint and label that served it.
+- --l4-clock model (docs/v10/SPEC_v10_2.md E1; default wall) runs the helper clock and the t=300 live cap on the L4
+  latency model plus tool wall time (router.py module doc): proxy latency and 429 back-off stop moving it. The harness
+  budget and the child deadline then get MODEL_CLOCK_SLACK_S of real time on top, since real time runs ahead of the
+  modelled clock; the router's cap still ends the live stage at modelled t=300. run.json records l4_clock; --resume
+  refuses another value (a run.json without the key counts as wall).
 - Ctrl-C or SIGTERM stops launching, cancels queued cases, kills the live children, writes the partial run with status
   "interrupted" (graded, resumable) and exits 130.
 """
@@ -66,6 +71,7 @@ AGENTS_CLI = Path(os.environ.get("G4_AGENTS_CLI") or "/Users/carson/.local/bin/a
 SUMMARY = HERE / "summary.py"
 CHILD = HERE / "stage_child.py"
 CHILD_GRACE_S = 240
+MODEL_CLOCK_SLACK_S = 1200     # --l4-clock model: extra real seconds for the harness budget and the child deadline
 UPSTREAM_DEAD_S = 120          # kill a child whose upstream has failed continuously this long (infra_error upstream_http)
 LIVE_SERVED = ("upstream", "oracle", "null")
 SMOKE_CAP = 0.40
@@ -77,7 +83,7 @@ EST_TOKENS = {"L": (107590, 1557), "F": (121158, 1419), "V": (69666, 632)}
 # run.json settings a --resume must match (the bundle is checked by sha in prepare)
 RESUME_KEYS = ("suite", "split", "endpoint", "upstream_base", "upstream_model", "or_provider", "upstream_extra",
                "seed_mode", "samples", "l4_scale", "dataset_sha", "task_filter", "variant_filter", "agent_env",
-               "faithful_env", "harness_verify")
+               "faithful_env", "harness_verify", "l4_clock")
 
 
 class UsageError(Exception):
@@ -292,6 +298,11 @@ def child_env(base_url: str, sbx: Path, *, scale: float, faithful: bool, plain_c
     return env
 
 
+def l4_clock_of(a: argparse.Namespace) -> str:
+    """--l4-clock (wall when the namespace predates it)."""
+    return getattr(a, "l4_clock", None) or "wall"
+
+
 def harness_minutes(t0: float, pre_s: float, scale: float) -> float:
     """--max-time-minutes M = ((300 - t0) + pre_s * scale) / 60; run_eval divides it by scale (5.5)."""
     return round(((SS.CAP_S - t0) + pre_s * scale) / 60.0, 6)
@@ -372,8 +383,9 @@ class Runner:
         self.old_run = read_json(self.run_dir / "run.json") if a.resume else None
         if self.old_run:
             new = json.loads(json.dumps(self.settings()))
-            diff = [f"{k}: {self.old_run[k]!r} -> {new[k]!r}" for k in RESUME_KEYS
-                    if k in self.old_run and self.old_run[k] != new[k]]
+            old = dict(self.old_run)
+            old.setdefault("l4_clock", "wall")            # runs made before E1 ran on the wall clock
+            diff = [f"{k}: {old[k]!r} -> {new[k]!r}" for k in RESUME_KEYS if k in old and old[k] != new[k]]
             if diff:
                 raise UsageError(f"--resume of {self.run_dir} with other settings than its run.json ("
                                  + "; ".join(diff) + "): its cases would be mixed and relabelled; use a new --run-id")
@@ -415,7 +427,8 @@ class Runner:
                 "upstream_extra": pub["upstream_extra"], "seed_mode": pub["seed_mode"], "samples": a.samples,
                 "l4_scale": a.l4_scale, "dataset_sha": sha256_file(self.dataset_path), "task_filter": self.task_filter,
                 "variant_filter": self.variant_filter if a.suite == "V" else None, "agent_env": a.agent_env,
-                "faithful_env": bool(a.faithful_env), "harness_verify": bool(a.harness_verify)}
+                "faithful_env": bool(a.faithful_env), "harness_verify": bool(a.harness_verify),
+                "l4_clock": l4_clock_of(a)}
 
     def skip_reason(self, case: dict) -> str:
         """Why a case is recorded as skipped instead of launched ('' when it runs)."""
@@ -455,7 +468,7 @@ class Runner:
              "fixture_manifest_sha": sha256_file(MANIFEST), "task_filter": self.task_filter,
              "variant_filter": self.variant_filter if a.suite == "V" else None, "dataset_tasks": self.dataset_tasks,
              **ep.public(), "providers_seen": [],
-             "l4_scale": a.l4_scale, "agent_env": a.agent_env, "samples": a.samples, "bundle_path": str(self.bundle_src),
+             "l4_scale": a.l4_scale, "l4_clock": l4_clock_of(a), "agent_env": a.agent_env, "samples": a.samples, "bundle_path": str(self.bundle_src),
              "bundle_copy": str(self.bundle), "bundle_sha": self.bundle_sha, "versions": versions(),
              "t0": t0s[0] if len(t0s) == 1 else t0s, "budget_usd": self.cap, "est_usd": self.est_usd,
              "spent_usd": 0.0, "est_usd_at_proxy_prices": 0.0, "prior_spent_usd": round(self.prior_spent, 6),
@@ -530,9 +543,10 @@ class Runner:
             scripts, live_script = self.script_hook(case, k, scripts, live_script)
         cap_s = cap_seconds(t0, scale)
         base = router.add_route(cid, cid, live, scripts, live_script, cap_s, log_path=cdir / "router.jsonl",
-                                bodies_path=cdir / "router_bodies.jsonl")
-        minutes = harness_minutes(t0, pre_s, scale)
-        budget_s = cap_s + pre_s
+                                bodies_path=cdir / "router_bodies.jsonl", sbx=sbx)
+        slack = MODEL_CLOCK_SLACK_S if router.l4_clock == "model" else 0.0
+        minutes = harness_minutes(t0, pre_s, scale) + (round(slack * scale / 60.0, 6) if slack else 0)
+        budget_s = cap_s + pre_s + slack
         key_ok = CK.kpar_key(tid, g)
         agent_env = a.agent_env
         site = None
@@ -633,7 +647,7 @@ class Runner:
         budget = RT.Budget(self.cap)
         budget.spent = self.prior_spent          # --max-usd caps the run's total across --resume invocations
         err: BaseException | None = None
-        with RT.StageRouter(ep, budget, clock=self.clock, log_bodies=a.log_bodies) as router:
+        with RT.StageRouter(ep, budget, clock=self.clock, log_bodies=a.log_bodies, l4_clock=l4_clock_of(a)) as router:
             ex = cf.ThreadPoolExecutor(max(1, a.j))
             trap = _trap_sigterm()
             try:
@@ -823,6 +837,8 @@ def assemble(run_dir: Path, cid: str, *, checks: bool = True, nodes: bool | None
         "exec_checks": exec_checks,
     }
     run_info = {k2: run.get(k2) for k2 in ("run_id", "bundle_sha", "l4_scale")}
+    if run.get("l4_clock"):
+        run_info["l4_clock"] = run["l4_clock"]
     run_info.update(served_by)
     run_info["max_output_tokens"] = TW.max_output_tokens(bundle) if (bundle and bundle.is_dir()) else {}
     trace = TW.build_case(case=case, sample=k, case_id=cid, agents=agents, atif=atif, extra_golden={
@@ -1128,6 +1144,8 @@ def _endpoint_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--seed-mode", choices=("off", "case"), default="off")
     p.add_argument("-j", type=int, default=int(_env("G4_GOLDEN_J", 6)))
     p.add_argument("--l4-scale", type=float, default=1.0)
+    p.add_argument("--l4-clock", choices=RT.L4_CLOCKS, default="wall",
+                   help="model: helper clock and live cap on the L4 latency model plus tool wall time (SPEC E1)")
     p.add_argument("--agent-env", choices=("kpar", "host"), default="kpar")
     p.add_argument("--harness-verify", action="store_true")
     p.add_argument("--faithful-env", action="store_true")

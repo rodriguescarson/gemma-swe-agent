@@ -1,0 +1,103 @@
+##### p1_v10 fastapi_14448 resolved=False dur=104.92
+GOLD FILES: fastapi/dependencies/models.py, fastapi/dependencies/utils.py
+GOLD FUNCS: _uses_scopes, is_gen_callable, is_async_gen_callable, is_coroutine_callable, _solve_generator
+FILES NAMED 0/2  FUNCS NAMED 0/5  calls=6 t_end=17
+ISSUE (1227 chars):
+🐛 Fix support for functools wraps and partial combined, for async and regular functions and classes in path operations and dependencies
+
+🐛 Fix support for functools wraps and partial combined, for async and regular functions and classes in path operations and dependencies
+
+This also uses and extends the tests created by @YuriiMotov :raised_hands: 
+
+Should fix / related to: https://github.com/fastapi/fastapi/issues/14444
+
+The new tests simulate the multiple combinations of how decorators could affect dependencies and path operation functions (endpoints).
+
+The logic to analyze if a function is an async, generator, async generator,  callable instance, etc. now also checks and unwraps and extracts partials in all those levels.
+
+The main case is when the callable is an _async_ something (function, generator, etc) because then it needs to be awaited.
+
+But the original function could be async or not, the wrapper could be async or not. if either is async, then it has to be awaited, no matter if the other is not async. So, analyzing only the last point in the chain is not enough, it's necessary to analyze the function but also the wrapper.
+
+This PR implements and tests all that, all those combinations.
+
+----- LOCATOR TOOL USES
+[1] t=7 out_tok=31 run_command: python3 /tmp/swe/locate.py "functools wraps partial async"
+    OUT: LOCATE: 4961 symbols in 1203 files
+    LAYOUT: packages fastapi (workspace) | tests tests/ | layout flat
+    1. fastapi/routing.py  score=25.2
+         def request_response  L84-121
+         async def websocket_session.app.app  L137-142
+         async def websocket_session.app  L134-145
+    2. scripts/notify_translations.py  score=24.9
+         class PartialGitHubEvent  L194-195
+         class PartialGitHubEventIssue  L190-191
+         def main  L306-428
+    3. fastapi/dependencies/models.py  score=20.0
+         def Dependant._unwrapped_call  L78-85
+         class Dependant  L24-116
+         def Dependant.is_async_gen_callable  L94-99
+    4. tests/test_wrapped_method_forward_reference.py [test]  score=18.3
+         def passthrough  L9-14
+         def test_wrapped_method_type_inference  L17-31
+    5. tests/test_dependency_partial.py [test]  score=17.0
+         async def get_partial_async_function_dependency  L78-87
+         async def get_partial_async_gen_dependency  L97-103
+         async def get_partial_async_callable_dependency  L125-134
+    6. tests/test_ws_router.py [test]  score=16.7
+         def websocket_middleware.middleware_constructor  L193-205
+         def websocket_middleware  L188-207
+         async def ws_dependency  L58-59
+    7. tests/test_callable_endpoint.py [test]  score=13.2
+    8. tests/test_dependency_wrapped.py [test]  score=13.1
+    RELATED TESTS: tests/test_ws_router.py tests/test_dependency_yield_scope_websockets.py tests/test_tutorial/test_websockets/test_t
+[2] t=9 out_tok=37 run_command: python3 /tmp/swe/grep.py "is_async_gen_callable"
+    OUT: GREP: 5 hits in 2 files (shown 5)
+    fastapi/dependencies/models.py
+      (in def Dependant.is_async_gen_callable L94-99)
+       95|     def is_async_gen_callable(self) -> bool:
+      (in def Dependant.computed_scope L110-116)
+      114|         if self.is_gen_callable or self.is_async_gen_callable:
+    fastapi/dependencies/utils.py
+      (in def get_dependant L231-310)
+      27
+[3] t=11 out_tok=37 run_command: python3 /tmp/swe/view.py fastapi/dependencies/models.py Dependant
+    OUT: fastapi/dependencies/models.py lines 24-71 of 116 (class Dependant)
+       24| @dataclass
+       25| class Dependant:
+       26|     path_params: List[ModelField] = field(default_factory=list)
+       27|     query_params: List[ModelField] = field(default_factory=list)
+       28|     header_params: List[ModelField] = field(default_factory=list)
+       29|     cookie_params
+[4] t=14 out_tok=42 run_command: python3 /tmp/swe/view.py fastapi/dependencies/models.py 72 116
+    OUT: fastapi/dependencies/models.py lines 72-116 of 116
+       72|             return True
+       73|         for sub_dep in self.dependencies:
+       74|             if sub_dep._uses_scopes:
+       75|                 return True
+       76|         return False
+       77| 
+       78|     @cached_property
+       79|     def _unwrapped_call(self) -> Any:
+       80|         if self.call is 
+[5] t=15 out_tok=36 run_command: python3 /tmp/swe/view.py fastapi/routing.py request_response
+    OUT: fastapi/routing.py lines 84-121 of 4517 (def request_response)
+       84| def request_response(
+       85|     func: Callable[[Request], Union[Awaitable[Response], Response]],
+       86| ) -> ASGIApp:
+       87|     """
+       88|     Takes a function or coroutine `func(request) -> response`,
+       89|     and returns an ASGI application.
+       90|     """
+       91|     f: Cal
+[6] t=17 out_tok=31 run_command: python3 /tmp/swe/grep.py "is_async_callable"
+    OUT: GREP: 2 hits in 1 files (shown 2)
+    fastapi/routing.py
+      (module level)
+       65| from starlette._utils import is_async_callable
+      (in def request_response L84-121)
+       92|         func if is_async_callable(func) else functools.partial(run_in_threadpool, func)  # type:ignore
+    [t=17s]
+    
+----- REPLY:
+<|tool_call>call:run_command{command:<|"|>python3 /tmp/swe/run_command { "command": "cat <<'EOF' > repro.py\nimport asyncio\nimport functools\nfrom fastapi import FastAPI, Depends\nfrom fastapi.testclient import TestClient\nfrom functools import partial\n\napp = FastAPI()\n\n# Case 1: Regular function wrapped by @wraps, then partial\ndef sync_dep():\n    return \"sync\"\n\ndef wrapper(func):\n    @functools.wraps(func)\n    def wrapped(*args, **kwargs):\n        return func(*args, **kwargs)\n    return wrapped\n\nwrapped_sync_dep = wrapper(sync_dep)\npartial_sync_dep = partial(wrapped_sync_dep)\n\n@app.get(\"/sync\")\nasync def get_sync(dep=Depends(partial_sync_dep)):\n    return {\"dep\": dep}\n\n# Case 2: Async function wrapped by @wraps, then partial\nasync def async_dep():\n    return \"async\"\n\ndef wrapper_async(func):\n    @functools.wraps(func)\n    async def wrapped(*args, **kwargs):\n        return await func(*args, **kwargs)\n    return wrapped\n\nwrapped_async_dep = wrapper_async(async_dep)\npartial_async_dep = partial(wrapped_async_dep)\n\n@app.get(\"/async\")\nasync def get_async(dep=Depends(partial_async_dep)):\n    return {\"dep\": dep}\n\n# Case 3: Sync wrapper around async function (partial)\nasync def async_dep2():\n    return \"async2\"\n\ndef sync_wrapper(func):\n    @functools.wraps(func)\n    def wrapped(*args, **kwargs):\n        return func(*args, **kwargs)\n    return wrapped\n\nwrapped_async_dep2 = sync_wrapper(async_dep2)\npartial_async_dep2 = partial(wrapped_async_dep2)\n\n@app.get(\"/async2\")\nasync def get_async2(dep=Depends(partial_async_dep2)):\n    return {\"dep\": dep}\n\nclient = TestClient(app)\n\ndef test_repro():\n    # Case 1: Should work\n    res = client.get(\"/sync\")\n    assert res.status_code == 200\n    assert res.json() == {\"dep\": \"sync\"}\n\n    # Case 2: Should work\n    res = client.get(\"/async\")\n    assert res.status_code == 200\n    assert res.json() == {\"dep\": \"async\"}\n\n    # Case 3: This is the tricky one. If the wrapper is sync but the wrapped is async,\n    # it might fail if it's not detected as async.\n    res = client.get(\"/async2\")\n    assert res.status_code == 200\n    assert res.json() == {\"dep\": \"async2\"}\n\nif __name__ == \"__main__\":\n    try:\n        test_repro()\

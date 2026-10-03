@@ -23,6 +23,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v10_support import sandbox as S  # noqa: E402
+from v10_support.compat import VERSION  # noqa: E402  (G4_BUNDLE may be v10.2)
 from v10_support.mock_llm import (MockLLM, cmd, heredoc, last_result_has, skill, submit, text,  # noqa: E402
                                   when, COMPACTION_LINE)
 
@@ -190,7 +191,8 @@ def check_a(flows):
     assert requests(log, "submitter") == []                                   # the submitter never runs
     assert [e["agent"] for e in log if e["kind"] == "agent"][-1] == "verifier"
     obs = " ".join(o for _, _, o in observations(run))
-    for want in ("swe-tools v10.1 ready", "LOCATE:", "REPRO: fails on original", "OK (exact)", "VERIFY: GREEN", "READY:"):
+    for want in ("swe-tools %s ready" % VERSION, "LOCATE:", "REPRO: fails on original", "OK (exact)", "VERIFY: GREEN",
+                 "READY:"):
         assert want in obs, want
     assert "can't open file" not in obs
     assert run.secs < 240
@@ -210,7 +212,7 @@ def check_c(flows):
     common_checks(run, log)
     loc = observations(run, "locator")
     assert "can't open file" in loc[0][2], loc[0]
-    assert loc[1][1] == "run_skill_script" and "swe-tools v10.1 ready" in loc[1][2], loc[1]
+    assert loc[1][1] == "run_skill_script" and "swe-tools %s ready" % VERSION in loc[1][2], loc[1]
     assert "LOCATE:" in loc[2][2]
     assert requests(log, "setup")[0]["step"] == {"text": "READY"}
 

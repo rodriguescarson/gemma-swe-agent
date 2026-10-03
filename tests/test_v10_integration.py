@@ -22,6 +22,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v10_support import sandbox as S  # noqa: E402
+from v10_support.compat import VERSION  # noqa: E402  (G4_BUNDLE may be v10.2)
 from v10_support.repo import no_orphans  # noqa: F401,E402  (autouse, R120)
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,7 +69,7 @@ def out(r):
 #   prepare: None, "fixed" (the fix written straight to the workspace), "repro" (a saved repro, tree unchanged) or
 #   "fixed+repro"
 PARITY = {
-    "install": (None, "python3 /tmp/swe/install.py", "install.py", None, None, "swe-tools v10.1 ready in /tmp/swe"),
+    "install": (None, "python3 /tmp/swe/install.py", "install.py", None, None, "swe-tools %s ready in /tmp/swe" % VERSION),
     "locate": (None, 'python3 /tmp/swe/locate.py "add numbers"', "locate.py", {"query": "add numbers"}, None,
                "LOCATE:"),
     "grep": (None, 'python3 /tmp/swe/grep.py "def add"', "grep.py", {"regex": "def add"}, None, "GREP: 1 hits"),

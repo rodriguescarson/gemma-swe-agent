@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from v10_support.repo import (no_orphans, make_repo, copy_helpers, helper_env, run_helper, run_py, run_as_skill,  # noqa: F401,E402
                               skill_args, git, find_orphans, kill_processes, unique_sleep, SCRIPTS_SRC, PY, TAG)
+from v10_support.compat import V102, VERSION_RE, later_stage  # noqa: E402  (G4_BUNDLE may be v10.2)
 
 pytestmark = pytest.mark.skipif(not (SCRIPTS_SRC / "run.py").exists() or not (SCRIPTS_SRC / "status.py").exists(),
                                 reason="run.py/status.py not built")
@@ -35,6 +36,7 @@ def swe(tmp_path):
 
 @pytest.fixture
 def env(ws, swe):
+    later_stage(swe)            # v10.2: these contracts are a later stage's (no locator probe limit, the v10.1 status form)
     return helper_env(ws, swe)
 
 
@@ -130,9 +132,12 @@ def test_run_output_cap_summary_collapse_and_log(tmp_path, scripts, ws, swe, env
               ws, env)
     assert lines(out)[0] == "exit=1" and DISABLED_NOTE in out
     # the third identical (command, output) gets the repeat note, not the first two
-    notes = ["NOTE: same command, same output 3 times; change something." in run(scripts, ["echo same"], ws, env)
-             for _ in range(3)]
-    assert notes == [False, False, True]
+    outs = [run(scripts, ["echo same"], ws, env) for _ in range(3)]
+    notes = ["NOTE: same command, same output 3 times; change something." in o for o in outs]
+    if V102:        # v10.2 (SPEC_v10_2 5.5): the third identical run on the same tree is refused instead
+        assert notes == [False, False, False] and outs[2].startswith("SAME RUN: this command already ran twice")
+    else:
+        assert notes == [False, False, True]
     assert "change something" not in run(scripts, ["echo different"], ws, env)
     # the journal records runs for status.py
     js = [json.loads(x) for x in (swe / "journal.jsonl").read_text().splitlines()]
@@ -194,7 +199,7 @@ def status(scripts, ws, env, *args):
 
 def test_status_contract(tmp_path, scripts, ws, swe, env):
     out = status(scripts, ws, env)
-    assert re.match(r"^STATUS \[t=\d+s\] helpers v10\.1 \| repro: none \| checkpoints: 0\n", out)
+    assert re.match(r"^STATUS \[t=\d+s\] helpers %s \| repro: none \| checkpoints: 0\n" % VERSION_RE, out)
     assert "JOURNAL: empty" in out and "DIFF: no source change" in out and lines(out)[-1].startswith("[t=")
     # journal tail of 8, diffstat, bounded diff, repro and checkpoint summaries
     code = ("for i in range(10):\n    C.journal({'h': 'run', 'msg': 'run echo %d: exit=0' % i, 't': 10 + i})\n"

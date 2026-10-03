@@ -19,12 +19,17 @@
            REGRESSIONS go straight to finalize (its step 4, finalize's NOT READY fix, is not a verify round and stays).
            Prompt text only: verify.py's own RED lines still say "fix the code, then run verify again", which is why
            summary.py ablation measures compliance (edits after the first verify) per arm.  [ablation arm A0]
+  --cap M  v10.2 bundles only (docs/v10/SPEC_v10_2.md 4 and 5.11, R6): the per-task cap as M minutes, 5 < M <= 6:
+           eval_config.yaml max_time_minutes M and _swe_common.BUDGET_SCALE = 300 / (60 M), so every helper threshold
+           (LOCATOR 75, close 90, EDIT NOW 150, FINISH 210, TIME 250, finalize 285, cap 300) keeps its meaning in helper
+           time and the prompts stay unchanged. Built only when sub6's submit-to-COMPLETE time T6 allows it (speed.md 7.3;
+           PATH_TO_020 C11); golden evals cannot see the cap.                                        [the 5.5-minute arm]
 A v10 bundle (scripts/_swe_common.py) carries its own install/bootstrap: the v9 $TMPDIR fix and the v9 levers are
 never applied to it (they would overwrite v10's install.py with helpers_v9/install.py); asking for a v9 lever exits 2.
 Every v10 lever is an exact-once text patch: if the base no longer contains the text it patches, make_variant exits 2
 and leaves no output dir (tests/test_make_variant_v10.py rebuilds the committed arms and compares them byte for byte).
 Usage: python scripts/make_variant.py <base_bundle> <out_dir> [--edit] [--output] [--gate] [--work-temp T] [--flip] [--sweep]
-       [--repair-rounds N]"""
+       [--repair-rounds N] [--cap M]"""
 import argparse, os, re, shutil, sys
 
 SC_REL = "skills/swe-tools/scripts"
@@ -332,6 +337,22 @@ def repair_patches(n):
                                       % (n, word))])]
 
 
+# ------------------------------------------------------------------------------------------------------- --cap M (R6)
+CAP_BASE, CAP_MAX = 5.0, 6.0
+CAP_EVAL = "  max_time_minutes: 5\n"
+CAP_SCALE = ("BUDGET_SCALE = 1.0          # 300/330 only in the make_variant --cap 5.5 variant (R6): helper time = real "
+             "time x this\n")
+
+
+def cap_patches(minutes):
+    """The exact-once patches of --cap M: the scorer's cap in eval_config.yaml and the helper clock's BUDGET_SCALE."""
+    real = 60.0 * minutes
+    return [("eval_config.yaml", [(CAP_EVAL, "  max_time_minutes: %g\n" % minutes)]),
+            ("%s/_swe_common.py" % SC_REL,
+             [(CAP_SCALE, "BUDGET_SCALE = 300.0 / %g    # make_variant --cap %g (R6): helper time = real time x this, so "
+                          "t=300 is %g real s\n" % (real, minutes, real))])]
+
+
 V10_LEVERS = {
     "flip": [("%s/_swe_common.py" % SC_REL, FLIP_COMMON), ("%s/_swe_gate.py" % SC_REL, FLIP_GATE),
              ("prompts/fixer.md", FLIP_FIXER)],
@@ -369,6 +390,8 @@ def main(argv=None):
     ap.add_argument("--work-temp", type=float, default=None, help="v10 only: temperature of the locator, fixer and verifier")
     ap.add_argument("--repair-rounds", type=int, default=None,
                     help="v10 only: repair rounds after verify.py in the fixer and verifier prompts (0 = ablation arm A0)")
+    ap.add_argument("--cap", type=float, default=None,
+                    help="v10.2 only: the per-task cap in minutes (5 < M <= 6) with the helper clock scaled to match")
     a = ap.parse_args(argv)
     H = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "helpers_v9")
     V10 = os.path.isfile(os.path.join(a.base, SC_REL, "_swe_common.py"))
@@ -387,6 +410,14 @@ def main(argv=None):
             ap.exit(2, "make_variant: --repair-rounds %d is the base itself (use it unchanged as arm B2)\n" % REPAIR_BASE)
         if a.repair_rounds == 0 and a.flip:
             ap.exit(2, "make_variant: --repair-rounds 0 replaces the fixer step that --flip extends; build them apart\n")
+    if a.cap is not None:
+        common = os.path.join(a.base, SC_REL, "_swe_common.py")
+        if not V10 or CAP_SCALE not in open(common, encoding="utf-8").read():
+            ap.exit(2, "make_variant: --cap needs a v10.2 bundle (its _swe_common.py has BUDGET_SCALE = 1.0); %s has "
+                       "none\n" % a.base)
+        if not CAP_BASE < a.cap <= CAP_MAX:
+            ap.exit(2, "make_variant: --cap needs %g < M <= %g minutes (%g is the base itself)\n" % (CAP_BASE, CAP_MAX,
+                                                                                                 CAP_BASE))
     if os.path.abspath(a.out) == os.path.abspath(a.base):
         ap.exit(2, "make_variant: the output dir is the base bundle\n")
     if os.path.exists(a.out): shutil.rmtree(a.out)
@@ -434,13 +465,16 @@ def main(argv=None):
                 apply_patches(a.out, lever, V10_LEVERS[lever])
         if a.repair_rounds is not None:
             apply_patches(a.out, "repair-rounds", repair_patches(a.repair_rounds))
+        if a.cap is not None:
+            apply_patches(a.out, "cap", cap_patches(a.cap))
         if usage:
             edit("skills/swe-tools/SKILL.md", lambda s: s.rstrip("\n") + "\n" + "\n".join(f"- `{u}`" for u in usage) + "\n")
     except LeverError as e:
         shutil.rmtree(a.out, ignore_errors=True)
         ap.exit(2, "make_variant: %s\n" % e)
     print(a.out, "tmpfix:", "n/a (v10)" if V10 else not a.keep_tmp_bug, "work_temp:", a.work_temp,
-          "repair_rounds:", a.repair_rounds, "levers:", [f for f in ("edit", "output", "gate", "flip", "sweep") if getattr(a, f)])
+          "repair_rounds:", a.repair_rounds, "cap:", a.cap,
+          "levers:", [f for f in ("edit", "output", "gate", "flip", "sweep") if getattr(a, f)])
     return 0
 
 

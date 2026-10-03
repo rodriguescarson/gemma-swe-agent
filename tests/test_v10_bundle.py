@@ -16,6 +16,7 @@ except Exception:  # built in parallel by the core component; absent until it la
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BUNDLE = ROOT / (os.environ.get("G4_BUNDLE") or "submissions/v10")   # G4_BUNDLE: run the v10 suite on a variant arm
 SPEC = ROOT / "docs" / "v10" / "SPEC.md"
+SPEC_V102 = ROOT / "docs" / "v10" / "SPEC_v10_2.md"      # v10.2's locator and fixer prompts (sections 3.2 and 3.3)
 SCRIPTS = BUNDLE / "skills" / "swe-tools" / "scripts"
 PACK = ROOT / "scripts" / "pack_bundle.py"
 MODEL = "gemma-4-31b-it-qat-w4a16-ct"
@@ -43,6 +44,8 @@ FROZEN = {  # R84: tree sha256 (os.walk, dirs and files sorted; skip __pycache__
     # fix 26dd7b9 (13:21, "gate: import/collection crash and missing pytest were reported as PASS", regression tests in
     # tests/test_gate_false_pass.py). The shipped copy of gate.py lives in submissions/v9_eog, whose pin is unchanged.
     "helpers_v9": "c40b410b58d0fca3c26708c01032c8716683bc49e5b88b2ef5a877e97bdd4157",
+    # R148 (SPEC_v10_2 7): v10.1 as submitted in sub6 (computed 2026-09-30 with tree_sha256); v10.2 lives in v10_2
+    "submissions/v10": "4b8fa33eb41996b29bc81f34290abf8410908600a1a9005e7a300762ec5396fd",
 }
 FROZEN_GIT = {"helpers_v9": "26dd7b9"}   # the pin equals this commit's tree (checked below)
 # Timeout constants of _swe_common (SPEC 4.1.1). Clock thresholds (CAP_S, T_*) are times, not deadlines.
@@ -90,6 +93,33 @@ def render_prompt(template, blocks):
         key = line.strip()
         out.append(blocks[key[1:-1]] if key[:1] == "<" and key[-1:] == ">" and key[1:-1] in blocks else line)
     return "\n".join(out) + "\n"
+
+
+def bundle_version(bundle=None):
+    """The helper VERSION of a bundle (v10.1 when unreadable)."""
+    p = pathlib.Path(bundle or BUNDLE) / "skills" / "swe-tools" / "scripts" / "_swe_common.py"
+    try:
+        m = re.search(r'^VERSION = "(v[\d.]+)"', p.read_text(encoding="utf-8"), re.M)
+    except OSError:
+        m = None
+    return m.group(1) if m else "v10.1"
+
+
+def is_v102(bundle=None):
+    return tuple(int(x) for x in re.findall(r"\d+", bundle_version(bundle))) >= (10, 2)
+
+
+def spec_files_v102(spec):
+    """SPEC section 2 and 3 files with v10.2's locator and fixer prompts (SPEC_v10_2.md 3.2, 3.3: the v10.1 shared
+    blocks, everything else v10.1's)."""
+    files = spec_files(spec)
+    text = SPEC_V102.read_text(encoding="utf-8")
+    blocks = spec_blocks(spec)
+    for stage, sec in (("locator", "3.2"), ("fixer", "3.3")):
+        m = re.search(r"^### %s `prompts/%s\.md` \(full text\)\n" % (re.escape(sec), stage), text, re.M)
+        assert m, f"SPEC_v10_2.md: no section for prompts/{stage}.md"
+        files[f"prompts/{stage}.md"] = render_prompt(_fence_after(text, m.end()), blocks)
+    return files
 
 
 def spec_files(spec):
@@ -229,8 +259,10 @@ def const_eval(node, env):
             else:
                 raise NotConstant("format spec")
         return "".join(parts)
-    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mult, ast.Sub)):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Mult, ast.Sub, ast.Div)):
         left, right = const_eval(node.left, env), const_eval(node.right, env)
+        if isinstance(node.op, ast.Div):         # v10.2: BUDGET_SCALE = 300.0 / 330 in a make_variant --cap arm
+            return left / right
         return left + right if isinstance(node.op, ast.Add) else left * right if isinstance(node.op, ast.Mult) \
             else left - right
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
@@ -436,8 +468,9 @@ def stage_tools_yaml(stage):
 
 # ================================================================ tests
 def test_bundle_files_equal_spec():
-    """Brief: every file of SPEC sections 2 and 3 byte-exactly (LF, one trailing newline, UTF-8)."""
-    want = spec_files(spec_text())
+    """Brief: every file of SPEC sections 2 and 3 byte-exactly (LF, one trailing newline, UTF-8). A v10.2 bundle takes
+    its locator and fixer prompts from SPEC_v10_2.md sections 3.2 and 3.3 instead."""
+    want = spec_files_v102(spec_text()) if is_v102() else spec_files(spec_text())
     assert sorted(want) == sorted(CONFIG_FILES)
     for rel, text in want.items():
         got = (BUNDLE / rel).read_bytes()
@@ -662,7 +695,8 @@ def test_pack_excludes_junk_and_refuses_bad_bundles(tmp_path):
 
 
 def test_frozen_unchanged():
-    """R84: the shipped v9_eog and v4 bundles and helpers_v9 are byte-identical to their pinned tree hashes."""
+    """R84: the shipped v9_eog and v4 bundles, helpers_v9 and (R148) v10.1 are byte-identical to their pinned tree
+    hashes."""
     t0 = time.monotonic()
     changed = {rel: tree_sha256(ROOT / rel) for rel in FROZEN}
     elapsed = time.monotonic() - t0

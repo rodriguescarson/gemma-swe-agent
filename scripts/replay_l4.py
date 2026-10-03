@@ -79,15 +79,22 @@ CRASH = {
     "key_error": re.compile(r"KeyError|Context variable not found"),
     "post_invocation": re.compile(r"No LlmAgent model available"),
 }
-SCRATCH_ROOT = re.compile(r"^(repro|reproduce|scratch|debug|tmp|temp|try|demo)[^/]*$|^test_[^/]*\.py$|^[^/]*_test\.py$", re.I)
+# v10.2 (SPEC_v10_2 R2 / E5): a scratch prefix needs a separator, as in the bundle's _KPI_SCRATCH_ROOT (template.py,
+# templates_engine.py, tmpl.py are real modules; repro.py, tmp_check.py, debug_out.log are scratch)
+SCRATCH_ROOT = re.compile(r"^(?:repro|reproduce|scratch|debug|tmp|temp|try|demo)(?:[-_.0-9][^/]*)?$|^test_[^/]*\.py$|"
+                          r"^[^/]*_test\.py$", re.I)
 SCRATCH_ANY = re.compile(r"\.(log|orig|rej|bak|swp)$|(^|/)\.coverage$")
 VENDORED = re.compile(r"(^|/)(site-packages|_pytest|[^/]+\.dist-info)(/|$)")
 VERDICT = re.compile(r"VERIFY: (GREEN|AMBER|RED|UNKNOWN)")
 # The v10 footer hints (_swe_common: LOCATOR_HINT, EDIT_NOW_HINT, CONTEXT_HINT, FINISH_HINT, TIME_HINT). Review round 2:
 # the time projection assumed the stages obey them; race 2 measures how often they do (reported, no threshold).
+# v10.2 (SPEC_v10_2 E5): the helpers' refusals are counted the same way (LOCATOR CLOSED, PROBE LIMIT, REPRO LIMIT: the
+# locator replies, a later stage runs status.py first; SAME RUN: the next step is not the same command).
 HINTS = (("LOCATOR", "LOCATOR: 75s used"), ("EDIT NOW", "EDIT NOW: no source file changed"),
          ("CONTEXT", "CONTEXT: this stage's context is nearly full"), ("FINISH", "FINISH: t>=210s"),
-         ("TIME", "TIME: t>=250s"))
+         ("TIME", "TIME: t>=250s"), ("LOCATOR CLOSED", "LOCATOR CLOSED"), ("PROBE LIMIT", "PROBE LIMIT: "),
+         ("REPRO LIMIT", "REPRO LIMIT: "), ("SAME RUN", "SAME RUN: this command already ran twice"))
+V102_HINTS = ("LOCATOR CLOSED", "PROBE LIMIT", "REPRO LIMIT", "SAME RUN")
 
 
 def resolve(run, runs_dir=RUNS_DIR):
@@ -321,7 +328,7 @@ def scratch_files(files):
                                                or VENDORED.search(p))]
 
 
-def _obeyed(hint, author, nxt):
+def _obeyed(hint, author, nxt, prev=None):
     """Did the author's next steps (at most 2) do what `hint` asks of that stage? None when it does not address the
     stage. Locator: reply (text). Fixer: EDIT NOW -> an edit.py call; CONTEXT -> reply within 2 steps (one missing edit
     allowed); FINISH/TIME -> reply. Verifier and submitter: EDIT NOW -> an edit; CONTEXT/FINISH/TIME -> finalize.py or
@@ -330,6 +337,10 @@ def _obeyed(hint, author, nxt):
     edit = lambda x: "edit.py" in x["args"]
     fin = lambda x: "finalize.py" in x["args"] or x["fn"] == "submit_patch"
     first = nxt[:1]
+    if hint == "SAME RUN":
+        return None if prev is None else not any(x["args"] == prev["args"] for x in first)
+    if hint in V102_HINTS and author != "locator":
+        return any("status.py" in x["args"] for x in first) if hint == "LOCATOR CLOSED" else None
     if author == "locator":
         return any(text(x) for x in first)
     if author == "fixer":
@@ -364,7 +375,7 @@ def footer_obedience(steps):
                 continue
             seen.add((s["author"], hint))
             nxt = [x for x in steps[i + 1:] if x["author"] == s["author"]][:2]
-            ok = _obeyed(hint, s["author"], nxt) if nxt else None
+            ok = _obeyed(hint, s["author"], nxt, s) if nxt else None
             if ok is None:
                 continue
             c = out.setdefault(hint, [0, 0])

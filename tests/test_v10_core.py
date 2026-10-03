@@ -8,6 +8,7 @@ import ast, importlib.util, json, os, pathlib, pty, re, shutil, subprocess, sys,
 import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from v10_support.compat import VERSION, VERSION_RE, later_stage  # noqa: E402  (G4_BUNDLE may be v10.2)
 from v10_support.repo import (no_orphans, make_repo, copy_helpers, helper_env, run_helper, run_py, run_as_skill,  # noqa: F401,E402
                               skill_args, cli_scripts, git, commit_all, find_orphans, kill_processes, unique_sleep,
                               SCRIPTS_SRC,
@@ -35,8 +36,8 @@ import _swe_common as C
 # How each known helper is called for a "normal" run: (argv, skill dict args, first-line regex).
 EDIT_TEXT = "def other(y):\n    return y + 2\n"
 CALLS = {
-    "install": ([], {}, r"^swe-tools v10\.1 ready in /tmp/swe \(\d+ helpers\)"),
-    "status": ([], {}, r"^STATUS \[t=\d+s\] helpers v10\.1"),
+    "install": ([], {}, r"^swe-tools %s ready in /tmp/swe \(\d+ helpers\)" % VERSION_RE),
+    "status": ([], {}, r"^STATUS \[t=\d+s\] helpers %s" % VERSION_RE),
     "run": (["--timeout", "5", "echo hi"], {"cmd": "echo hi", "timeout": 5}, r"^exit=0$"),
     "locate": (["parse_header"], {"query": "parse_header"}, r"^LOCATE:"),
     "grep": (["parse_header"], {"regex": "parse_header"}, r"^GREP:"),
@@ -375,14 +376,15 @@ def test_install_contract(tmp_path, scripts, ws, swe, env):
     wall = time.monotonic() - t0
     out = r.stdout
     assert r.returncode == 0 and r.stderr == ""
-    assert re.match(r"^swe-tools v10\.1 ready in /tmp/swe \((\d+) helpers\)\. Next: python3 /tmp/swe/locate\.py ", out)
+    assert re.match(r"^swe-tools %s ready in /tmp/swe \((\d+) helpers\)\. Next: python3 /tmp/swe/locate\.py " % VERSION_RE,
+                    out)
     assert int(re.search(r"\((\d+) helpers\)", out).group(1)) == len(CLI)
     assert len(out.rstrip("\n")) <= 400 and out.rstrip("\n").splitlines()[-1].startswith("[t=")
     for p in scripts.glob("*.py"):
         dst = swe / p.name
         assert dst.read_bytes() == p.read_bytes(), p.name
         assert (dst.stat().st_mode & 0o777) == 0o644
-    assert (swe / "VERSION").read_text().strip() == "v10.1"
+    assert (swe / "VERSION").read_text().strip() == VERSION
     assert float((swe / "t0").read_text()) > 0
     libs = sorted(p.stem for p in scripts.glob("_*.py"))              # libraries precompiled in $SWE, never the bundle
     assert sorted(p.name.split(".")[0] for p in (swe / "__pycache__").glob("*.pyc")) == libs
@@ -450,7 +452,7 @@ def test_install_dual_target(case, tmp_path, scripts, ws):
     assert dual_written == (case == "dual"), case
     if dual_written:
         assert sorted(p.name for p in (dock / "swe").glob("*.py")) == names
-        assert (dock / "swe/VERSION").read_text().strip() == "v10.1" and (dock / "swe/t0").exists()
+        assert (dock / "swe/VERSION").read_text().strip() == VERSION and (dock / "swe/t0").exists()
 
 
 # ----------------------------------------------------------------------------------------------------------------- R09
@@ -1206,6 +1208,7 @@ def test_late_guard_hook(case, tmp_path, scripts, ws, swe):
         (scripts / "_swe_ckpt.py").unlink()
     env = helper_env(ws, swe, fake_t=100 if case == "early" else 260)
     run_helper(scripts, "install", [], ws=ws, env=env)
+    later_stage(swe)                                     # v10.2: a late stage has ended the locator phase
     if case == "ckpt_module_missing":
         (swe / "_swe_ckpt.py").unlink(missing_ok=True)
     (swe / "ckpt").mkdir(exist_ok=True)
@@ -1345,6 +1348,7 @@ def test_context_meter_through_real_helpers(scripts, ws, swe):
     body = "".join("def fn_%03d(value):\n    return value + %d  # %s\n" % (i, i, "c" * 40) for i in range(60))
     (ws / "pkg/big.py").write_text(body)
     env = helper_env(ws, swe, fake_t=100)
+    later_stage(swe)                                     # v10.2: a fixer (the locator's 14-call close aside)
     seen = []
     for i in range(12):
         r = run_helper(scripts, "view", ["pkg/big.py", str(1 + i), str(100 + i)], ws=ws, env=env)

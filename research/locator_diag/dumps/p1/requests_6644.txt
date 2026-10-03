@@ -1,0 +1,148 @@
+##### p1_v10 requests_6644 resolved=False dur=135.24
+GOLD FILES: src/requests/adapters.py
+GOLD FUNCS: request_url
+FILES NAMED 0/1  FUNCS NAMED 0/1  calls=9 t_end=33
+ISSUE (296 chars):
+Trim excess leading path separators
+
+A URL with excess leading / (path-separator)s would cause urllib3 to attempt to reparse the request-uri as a full URI with a host and port. This bypasses that logic in ConnectionPool.urlopen by replacing these leading /s with just a single /.
+
+Closes #6643
+
+----- LOCATOR TOOL USES
+[1] t=4 out_tok=30 run_command: python3 /tmp/swe/locate.py "ConnectionPool.urlopen"
+    OUT: LOCATE: 730 symbols in 36 files
+    LAYOUT: packages requests (OUTSIDE WORKSPACE: /usr/local/lib/python3.12/dist-packages/requests; tests import that copy, not your edit) | tests tests/ | layout src
+    1. src/requests/adapters.py  score=16.5
+         def HTTPAdapter.get_connection  L330-357
+         class HTTPAdapter  L100-537
+         def HTTPAdapter.send  L433-537
+    2. src/requests/models.py  score=11.2
+         def Response.close  L1021-1032
+         def Response.content  L885-902
+         def Response.iter_content.generate  L811-832
+    3. src/requests/exceptions.py  score=7.4
+         class ConnectionError  L59-60
+         class ProxyError  L63-64
+         class SSLError  L67-68
+    4. src/requests/sessions.py  score=6.8
+         def Session.get_adapter  L781-792
+         def SessionRedirectMixin.resolve_redirects  L159-280
+         def Session.mount  L799-808
+    5. tests/test_requests.py [test]  score=5.4
+         def test_urllib3_pool_connection_closed  L2636-2643
+         def TestRequests.test_unconsumed_session_response_closes_connection  L2077-2084
+         def TestRequests.test_entry_points  L81-91
+    6. src/requests/utils.py  score=4.9
+         def default_headers  L895-906
+    7. src/requests/auth.py  score=4.0
+    8. tests/testserver/server.py [test]  score=2.3
+    RELATED TESTS: tests/test_utils.py tests/test_requests.py tests/test_lowlevel.py
+    [t=4s]
+    
+[2] t=5 out_tok=31 run_command: python3 /tmp/swe/grep.py "urlopen"
+    OUT: GREP: 1 hits in 1 files (shown 1)
+    src/requests/adapters.py
+      (in def HTTPAdapter.send L433-537)
+      485|             resp = conn.urlopen(
+    [t=5s]
+    
+[3] t=6 out_tok=35 run_command: python3 /tmp/swe/view.py src/requests/adapters.py
+    OUT: src/requests/adapters.py: 537 lines, 19 defs/classes (outline)
+      def SOCKSProxyManager  L60-61
+      class BaseAdapter  L70-97
+      def BaseAdapter.__init__  L73-74
+      def BaseAdapter.send  L76-93
+      def BaseAdapter.close  L95-97
+      class HTTPAdapter  L100-537
+      def HTTPAdapter.__init__  L135-155
+      def HTTPAdapter.__getstate__  L157-158
+      def HTTPAdapter.__s
+[4] t=7 out_tok=43 run_command: python3 /tmp/swe/view.py src/requests/adapters.py 369 396
+    OUT: src/requests/adapters.py lines 369-396 of 537
+      369|     def request_url(self, request, proxies):
+      370|         """Obtain the url to use when making the final request.
+      371| 
+      372|         If the message is being sent through a HTTP proxy, the full URL has to
+      373|         be used. Otherwise, we should only use the path portion of the URL.
+      37
+[5] t=9 out_tok=33 run_command: python3 /tmp/swe/grep.py "path_url"
+    OUT: GREP: 2 hits in 2 files (shown 2)
+    src/requests/adapters.py
+      (in def HTTPAdapter.request_url L369-396)
+      392|         url = request.path_url
+    src/requests/models.py
+      (in def RequestEncodingMixin.path_url L85-104)
+       86|     def path_url(self):
+    [t=9s]
+    
+[6] t=10 out_tok=38 run_command: python3 /tmp/swe/view.py src/requests/models.py 85 104
+    OUT: src/requests/models.py lines 85-104 of 1032
+       85|     @property
+       86|     def path_url(self):
+       87|         """Build the path URL to use."""
+       88| 
+       89|         url = []
+       90| 
+       91|         p = urlsplit(self.url)
+       92| 
+       93|         path = p.path
+       94|         if not path:
+       95|             path = "/"
+       96| 
+       97|         url.append
+[7] t=24 out_tok=474 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from requests import Request
+from requests.adapters import HTTPAdapter
+from requests.sessions import Session
+
+# The issue says: "A URL with excess leading / (path-separator)s would cause urllib3 to attempt to reparse the request-uri as a full URI with a host and port."
+# This happens in ConnectionPool.urlopen, which is called via HTTPAdapter.send.
+# The logic in ConnectionPool.urlopen is in urllib3, but requests' HTTPAdapter.request_url 
+# provides
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError: Expected /foo/bar, got //foo/bar
+      claim 1 FAIL: AssertionError: Expected /foo/bar, got //foo/bar
+    [t=24s]
+    
+[8] t=31 out_tok=208 run_command: python3 /tmp/swe/verify.py --repro-only <<'EOF'
+from requests import Request
+from requests.sessions import Session
+
+s = Session()
+# Test multiple cases of excess leading slashes
+test_urls = [
+    ("http://example.com//foo", "/foo"),
+    ("http://example.com///foo", "/foo"),
+    ("http://example.com/foo", "/foo"),
+    ("http://example.com/", "/"),
+    ("http://example.com", "/"),
+]
+
+for url, expected in test_urls:
+    req = s.prepare_request(Request('GET', url))
+    # CLAIM: path_url should trim 
+    OUT: REPRO: fails on original (1 of 1 claims): claim 1 AssertionError: URL http://example.com//foo gave //foo, expected /foo
+      claim 1 FAIL: AssertionError: URL http://example.com//foo gave //foo, expected /foo
+    [t=31s]
+    
+[9] t=33 out_tok=42 run_command: python3 /tmp/swe/view.py src/requests/models.py 85 104
+    OUT: src/requests/models.py lines 85-104 of 1032
+       85|     @property
+       86|     def path_url(self):
+       87|         """Build the path URL to use."""
+       88| 
+       89|         url = []
+       90| 
+       91|         p = urlsplit(self.url)
+       92| 
+       93|         path = p.path
+       94|         if not path:
+       95|             path = "/"
+       96| 
+       97|         url.append
+----- REPLY:
+FILES: src/requests/models.py:93-97 (path_url)
+CAUSE: The `path_url` property doesn't trim excess leading slashes from the URL path, which can cause `urllib3` to incorrectly parse the request-uri as a full URI.
+FIX: Modify `path_url` in `RequestEncodingMixin` to replace multiple leading slashes with a single slash.
+REPRO: fails on original
+TESTS: tests/test_models.py (or new test case in tests/test_requests.py)
