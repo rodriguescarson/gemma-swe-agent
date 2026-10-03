@@ -349,3 +349,4 @@ Revise this file (add a row below, and update §0) when any of these happens:
 - 2026-10-04 01:40 IST: v4h2 on L4 = 25/74 (0 crashes, 159 s/task, 13 empty patches) vs v4 29/74 (old wheelhouse). Pre-registered solved rule FAIL; wheelhouse confound open until v4-wh28 (next in sequence) and sub10.
 - 2026-10-04 01:50 IST: v4h2's /tmp/swe helpers unreachable on the scorer (234 can't-open-file in 73/74 L4 tasks; the Docker screen showed 0). v4h-based kernels pulled from the queue; sub10 (v4 control) stands; next base = v4 + Kaggle-verified helper placement.
 - 2026-10-04 02:05 IST: v4h2f (all helpers in the sandbox tmp) built; CPU helper-check pushed (g4-lora-test v3); 74-task kernel built on g4-eval74-v4, pushed only on a helper-check PASS. Rules in GATE.md.
+- 2026-10-04 02:20 IST: v4h2f helper check PASS on Kaggle (all four helpers reachable); 74-task L4 run pushed (g4-eval74-v4), reads vs v4-wh28 (queued).

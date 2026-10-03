@@ -233,3 +233,8 @@ counts); (b) solved >= v4-wh28 - 2; (c) non-timeout crash rows <= v4-wh28's; (d)
 Reported: paired wins/losses vs v4-wh28 and vs v4h2 (25/74), taxonomy, test runs per task.
 PASS with solved >= v4-wh28 -> slot candidate (sub11 or sub12 depending on sub10's read); PASS with a deficit of 1-2
 -> second L4 read before any slot; FAIL on (a) -> the helper channel is still wrong, back to step 1.
+**Step 1 result 2026-10-04 02:20 IST: HELPER_CHECK PASS** on the Kaggle image (g4-lora-test v3, CPU): install put all
+five helpers in <sandbox>/tmp/swe and /tmp/swe; locate.py, test.py, check.py and a SEARCH/REPLACE through edit.py all
+ran via run_command with the literal /tmp/swe path. Step 2 (g4-l4-v4h2f-p312, 74 tasks, 4xL4) pushed 02:20 IST.
+Note for later: check.py's preflight listed pkg/__pycache__/*.pyc in its DIFF on a repo without .gitignore; real repos
+ignore __pycache__, but a cleanup of untracked .pyc before submit is cheap insurance (not part of v4h2f).
