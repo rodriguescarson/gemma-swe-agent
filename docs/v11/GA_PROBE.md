@@ -85,3 +85,6 @@ mean seconds per task <= 1.3 x the base run's; 5. long-context prompt through v1
 PASS -> the Z slot candidate is v4h2_v11a, read on the hidden split after the L4 74-task pair (v4h2_v11a vs v4h2,
 same day, same wheelhouse): ship only if solved >= v4h2 - 1 (a path test, not a gain test) and crashes <= v4h2's.
 FAIL on 2 -> the key style is wrong (try loud4, the adapter's native style) before any conclusion about the adapter.
+
+### Result 2026-10-03 22:33 IST: G-A PASS (probe sha afe55fa43a4c)
+checks {"P1_applied": true, "P2_zero_b_harmless": true, "P3_listed": true, "P4_decode_tax_le_10pct": false, "P5_long_ctx_returns": true}; P6 True; diff_vs_base {"loud": 6, "loud3": 5, "loud4": 6, "loud_all": 20, "zb": 0}; prefix plan_A -> every adapter is packaged with `train/package_adapter.py ... --key-style loud`.
