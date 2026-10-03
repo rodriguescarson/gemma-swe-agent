@@ -209,3 +209,13 @@ Confound still open: wheelhouse (the v4 read predates the Sep-30 rebuild); the s
 g4-l4-v4-wh28-p312 runs next and sub10 (v4 on the rebuilt scorer) reads at 05:31 IST. If v4-wh28 also lands ~25, the
 rebuild cost everyone 4 tasks and v4h2 == v4; if v4-wh28 lands ~29, v4h2's edit channel costs 4 tasks and the base
 for v4h3/v4h4 reverts to v4's edit_file path with the install fix only.
+
+### 2026-10-04 01:50 IST: the v4h2 helper channel is unreachable on the scorer (traces of g4-l4-v4 v4)
+`python3 /tmp/swe/edit.py` returned "can't open file" **234 times in 73 of 74 tasks** on 4xL4, after 160
+run_skill_script(install.py) calls and 242 edit attempts (edit.py errors when it did run: ERROR 39, SYNTAX 36, NO MATCH
+13, REFUSED 12, AMBIGUOUS 3). The 2026-10-02 OpenRouter/Docker screen reported 0 unreachable calls on the same 74
+tasks: the Docker emulation's subprocess sandbox resolves /tmp differently from Kaggle's, so gate rule 1a was
+measured on an unfaithful sandbox. This is the mechanism behind sub9 = 0.10 and 25/74: the fixer and verifier of
+v4h/v4h2/v4h3 have no working edit channel on the scorer. Consequences: v4h3, v4h2_v11a and v4h-think are pulled from
+the L4 queue (same helper path); the base for every next variant is v4 (edit_file) plus whatever helper placement a
+CPU helper-check kernel proves on the Kaggle image FIRST; no local sandbox result counts for reachability again.
