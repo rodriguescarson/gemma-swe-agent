@@ -27,8 +27,9 @@ while :; do
     step "rows validated ($REPORT); launching Adaption v11a"
     # shellcheck disable=SC2086
     out=$($TRAINER "$ROWS" --name v11a --launch 2>&1); st=$?
+    echo "$out" > "${LAUNCH_OUT:-eval/overnight/adaption_launch.out}"      # the whole reply (dataset id, run JSON)
     echo "$out" | tail -5 | tee -a "$LOG"
-    if [ $st -eq 0 ] && echo "$out" | grep -q LAUNCHED; then echo "$out" | grep LAUNCHED | head -1 > "$MARKER"; step "LAUNCHED; marker $MARKER"; exit 0; fi
+    if [ $st -eq 0 ] && echo "$out" | grep -q LAUNCHED; then echo "$out" | sed -n '/LAUNCHED/,$p' > "$MARKER"; step "LAUNCHED; marker $MARKER"; exit 0; fi
     step "launch FAILED (exit $st)"; exit 1
   fi
   step "$why (poll $n)"

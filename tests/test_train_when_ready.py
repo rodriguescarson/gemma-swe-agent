@@ -8,13 +8,16 @@ SCRIPT = ROOT / "scripts" / "train_when_ready.sh"
 
 def _run(tmp, report, report_age_s=0, launched_before=False):
     rep = tmp / "report.json"; rep.write_text(json.dumps(report)); os.utime(rep, (time.time() - report_age_s,) * 2)
-    fake = tmp / "trainer.sh"; fake.write_text('#!/bin/bash\necho "FAKE_TRAIN $*" >> "$CALLS"\necho "LAUNCHED job-1"\n'); fake.chmod(0o755)
+    fake = tmp / "trainer.sh"
+    # the real trainer prints a multi-line JSON after LAUNCHED; the id is NOT on the LAUNCHED line (2026-10-03: the
+    # marker kept only that line and the run id had to be recovered from the API)
+    fake.write_text('#!/bin/bash\necho "FAKE_TRAIN $*" >> "$CALLS"\necho "dataset abc processed"\necho "LAUNCHED {"\necho \' "id": "job-1",\'\necho \' "status": "running"\'\necho "}"\n'); fake.chmod(0o755)
     marker = tmp / "launched"
     if launched_before:
         marker.write_text("x")
     env = dict(os.environ, REPORT=str(rep), TRAINER=str(fake), CALLS=str(tmp / "calls"), MARKER=str(marker), ROWS=str(tmp / "rows.jsonl"),
                SINCE_EPOCH=str(int(time.time()) - 60), READY_POLL_S="0", READY_MAX_POLLS="2", MIN_ROWS="10000",
-               SEQ_LOG=str(tmp / "seq.log"))   # never the repo's progress log (a test run polluted it on 10-03)
+               SEQ_LOG=str(tmp / "seq.log"), LAUNCH_OUT=str(tmp / "launch.out"))   # never the repo's progress log (a test run polluted it on 10-03)
     r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, timeout=60)
     calls = (tmp / "calls").read_text() if (tmp / "calls").exists() else ""
     return r.returncode, calls, r.stdout + r.stderr, marker.exists()
@@ -26,6 +29,8 @@ def test_launches_once_on_a_fresh_ok_report(tmp_path):
     rc, calls, out, marker = _run(tmp_path, {"ok": True, "rows": 10400})
     assert rc == 0 and calls.count("FAKE_TRAIN") == 1 and "--launch" in calls and marker
     assert (tmp_path / "seq.log").exists() and "LAUNCHED" in (tmp_path / "seq.log").read_text()
+    assert "job-1" in (tmp_path / "launched").read_text()          # the marker carries the whole reply, id included
+    assert (tmp_path / "launch.out").exists() and "dataset abc processed" in (tmp_path / "launch.out").read_text()
     assert (real_log.read_text() if real_log.exists() else None) == before   # the test never touches the real log
 
 
