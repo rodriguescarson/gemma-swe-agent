@@ -219,3 +219,17 @@ measured on an unfaithful sandbox. This is the mechanism behind sub9 = 0.10 and 
 v4h/v4h2/v4h3 have no working edit channel on the scorer. Consequences: v4h3, v4h2_v11a and v4h-think are pulled from
 the L4 queue (same helper path); the base for every next variant is v4 (edit_file) plus whatever helper placement a
 CPU helper-check kernel proves on the Kaggle image FIRST; no local sandbox result counts for reachability again.
+
+## v4h2f pre-registration (2026-10-04 02:05 IST, before the helper-check result and before any L4 run)
+
+v4h2f = v4h2 with ONE change: install.py copies every helper (edit, locate, test, check, _ws) into every sandbox tmp
+dir, not edit.py alone (tests/test_v4h_bundle.py::test_v4h2f_install_puts_every_helper_in_the_sandbox_tmp).
+Step 1, CPU helper-check kernel on the Kaggle image (g4-hc-v4h2f-p312 on slug g4-lora-test): PASS = locate, test,
+check and edit all run through run_command with the literal /tmp/swe path (0 "can't open file"). FAIL -> no L4 run;
+find the placement on the Kaggle sandbox first.
+Step 2, 4xL4 on all 74 public tasks (g4-l4-v4h2f-p312 on slug g4-eval74-v4), read against v4-wh28 (same wheelhouse,
+same night). Pass, all required: (a) helper can't-open-file = 0 across the 74 traces (rule 1a, now measured where it
+counts); (b) solved >= v4-wh28 - 2; (c) non-timeout crash rows <= v4-wh28's; (d) mean seconds per task <= 190.
+Reported: paired wins/losses vs v4-wh28 and vs v4h2 (25/74), taxonomy, test runs per task.
+PASS with solved >= v4-wh28 -> slot candidate (sub11 or sub12 depending on sub10's read); PASS with a deficit of 1-2
+-> second L4 read before any slot; FAIL on (a) -> the helper channel is still wrong, back to step 1.
