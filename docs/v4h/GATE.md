@@ -141,3 +141,13 @@ submission has finished scoring (overnight.sh step 6), so our GPU use never over
 Reading v4h2 if chosen: >= 9/58 (0.15) means the thin-v4 direction gains on hidden tasks; 7-8/58 within noise of v4;
 <= 6/58 a regression to explain (crash class or the edit channel). Reading v4 if chosen: the new-scorer baseline for
 every later comparison (old scorer 0.12 x2).
+
+### Slot 2026-10-03: what happened (written 08:40 IST, after the fact)
+
+decide_sub9.sh fired at 05:53 IST with sample 2 at 80 tasks: heredoc crashes 1, but it counted 7 rows of
+`litellm.APIError` (provider-side failures through the OpenRouter proxy, impossible on the scorer's local vLLM) as a
+"new crash class" and chose v4; then submit_at.sh, armed at 00:23 UTC for "0001", targeted the NEXT 00:01 UTC
+(2026-10-04), so nothing went out. Deviation from the pre-registered rule, recorded here: the APIError rows are
+infrastructure, not bundle behaviour, so the rule's intent ("no new crash class in the bundle") was met; v4h2 was
+submitted by hand at 08:36 IST (03:06 UTC) as sub9. Final sample 2: 159 tasks, 18 solved, 1 heredoc crash (v4h: 10/123).
+Fixes owed in code: decide_sub9 must ignore APIError/connection rows; submit_at.sh must accept an explicit "now" target.
