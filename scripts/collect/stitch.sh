@@ -8,8 +8,10 @@ step() { echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] $*" | tee 
 PAIRS=$(.venv/bin/python scripts/collect/pairs.py)
 step "stitch: $(echo "$PAIRS" | grep -o -- '--pair' | wc -l | tr -d ' ') pairs"
 # shellcheck disable=SC2086
-.venv/bin/python train/build_sft.py $PAIRS --tasks data/pallets/harness_train/tasks.jsonl --out data/v11/rows_stitched.jsonl \
+.venv/bin/python train/build_sft.py $PAIRS --tasks data/pallets/harness_train/tasks.jsonl --out data/v11/rows_built.jsonl \
   --exclude-ids data/pallets/dev40_ids.txt --exclude-ids data/pallets/holdout_ids.txt > eval/collect/stitch.out 2>&1
+# frozen parts: rows built while verdict rows still existed that a resumed pass later truncated (coverage.log 2026-10-03 16:20)
+.venv/bin/python train/merge_rows.py data/v11/rows_built.jsonl data/v11/rows_frozen_*.jsonl --out data/v11/rows_stitched.jsonl | tee -a "$LOG"
 .venv/bin/python train/validate_rows.py data/v11/rows_stitched.jsonl --exclude-ids data/pallets/dev40_ids.txt --exclude-ids data/pallets/holdout_ids.txt \
   --min-rows 10000 --report eval/collect/rows_stitched_report.json > eval/collect/validate_stitched.out 2>&1
 st=$?
