@@ -10,8 +10,11 @@ from train import adaption_train as A  # noqa: E402
 
 def test_payload_is_the_pre_registered_recipe():
     p = A.run_payload("ds123", "v11a")
-    assert p["model"] == "google/gemma-4-31B-it" and p["training_method"] == "instruction" and p["data_format"] == "instruction"
-    assert p["column_mapping"] == {"prompt": "prompt", "completion": "completion"}
+    assert p["model"] == "google/gemma-4-31B-it" and p["training_method"] == "instruction"
+    # 2026-10-03 18:28 IST: create() with column_mapping/data_format was refused ("Selected columns 'prompt', 'completion'
+    # are not in this dataset"); the proven calls (adaption-leaderboard runs/18, 34) pass neither: the dataset carries
+    # the mapping from upload_file(column_mapping=...) on a parquet file
+    assert "column_mapping" not in p and "data_format" not in p
     hp = p["hyperparams"]
     assert hp["training_type"] == "lora" and hp["lora_r"] == 8 and hp["lora_alpha"] == 16 and hp["learning_rate"] == 1e-4 and hp["n_epochs"] == 1
     assert hp["lora_trainable_modules"] == "q_proj,k_proj,v_proj,o_proj" and hp["train_on_inputs"] is False
@@ -24,9 +27,12 @@ def test_row_floor_and_meta_stripping(tmp_path):
     rows = tmp_path / "rows.jsonl"
     rows.write_text("\n".join(json.dumps({"prompt": f"p{i}", "completion": "c", "meta": {"task": "t"}}) for i in range(3)) + "\n")
     assert A.check_rows(str(rows)) == 3
-    assert A.strip_meta(str(rows), str(tmp_path / "clean.jsonl")) == 3
-    first = json.loads((tmp_path / "clean.jsonl").read_text().splitlines()[0])
-    assert set(first) == {"prompt", "completion"}
+    assert A.strip_meta(str(rows), str(tmp_path / "clean.parquet")) == 3
+    import pandas as pd
+    df = pd.read_parquet(tmp_path / "clean.parquet")      # parquet, like every upload that trained on Adaption
+    assert list(df.columns) == ["prompt", "completion"] and len(df) == 3 and df["prompt"][0] == "p0"
+    src = (ROOT / "train" / "adaption_train.py").read_text()
+    assert '.upload.parquet' in src and '.upload.jsonl' not in src
     bad = tmp_path / "bad.jsonl"; bad.write_text(json.dumps({"prompt": "p", "completion": ""}) + "\n")
     try:
         A.check_rows(str(bad)); assert False

@@ -48,8 +48,9 @@ def client():
 def run_payload(dataset_id: str, name: str, model: str = MODEL, hyperparams: dict | None = None) -> dict:
     """The exact create() arguments; pure, so a test can pin them."""
     hp = dict(HYPERPARAMS, **(hyperparams or {}))
-    return {"dataset_id": dataset_id, "model": model, "training_method": "instruction", "data_format": "instruction",
-            "column_mapping": {"prompt": "prompt", "completion": "completion"}, "hyperparams": hp,
+    # no column_mapping / data_format here: create() refused them on 2026-10-03 ("Selected columns ... are not in this
+    # dataset"); the mapping is given to upload_file() on a parquet file, as in every run that trained (adaption-leaderboard)
+    return {"dataset_id": dataset_id, "model": model, "training_method": "instruction", "hyperparams": hp,
             "augmentation_domain_rows": 0, "augmentation_general_rows": 0, "max_iterations": 1,
             "idempotency_key": "g4-" + hashlib.sha1(f"{dataset_id}|{name}|{json.dumps(hp, sort_keys=True)}".encode()).hexdigest()[:16]}
 
@@ -66,15 +67,12 @@ def check_rows(path: str) -> int:
 
 
 def strip_meta(src: str, dst: str) -> int:
-    """Adaption only needs prompt/completion; the meta column stays local."""
-    n = 0
-    with open(dst, "w") as f:
-        for line in open(src):
-            if line.strip():
-                r = json.loads(line)
-                f.write(json.dumps({"prompt": r["prompt"], "completion": r["completion"]}, ensure_ascii=False) + "\n")
-                n += 1
-    return n
+    """Adaption only needs prompt/completion; the meta column stays local. Written as parquet: a JSONL upload came back
+    with no usable columns on 2026-10-03, every upload that trained on the platform was parquet."""
+    import pandas as pd
+    rows = [json.loads(line) for line in open(src) if line.strip()]
+    pd.DataFrame({"prompt": [r["prompt"] for r in rows], "completion": [r["completion"] for r in rows]}).to_parquet(dst, index=False)
+    return len(rows)
 
 
 def upload(c, rows_path: str, name: str) -> str:
@@ -142,7 +140,7 @@ def main():
         raise SystemExit(f"{n} rows < {MIN_ROWS}: Adaption refuses 31B training below that; pass --allow-small only for a format probe on a small base")
     ds = a.dataset_id
     if not ds:
-        clean = a.rows + ".upload.jsonl"
+        clean = a.rows + ".upload.parquet"
         strip_meta(a.rows, clean)
         ds = upload(c, clean, a.name)
         print("dataset", ds, "processed")
