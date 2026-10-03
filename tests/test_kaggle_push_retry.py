@@ -1,0 +1,29 @@
+"""scripts/kaggle_push_retry.sh <slug>: re-run kaggle_push_wait.sh while the push is refused with Kaggle's
+'Maximum batch GPU session count' message (2 GPU sessions per account), stop on any other outcome. Written first."""
+import os, pathlib, subprocess
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts" / "kaggle_push_retry.sh"
+
+
+def _run(tmp, outcomes):
+    fake = tmp / "push_wait.sh"
+    fake.write_text('#!/bin/bash\nn=$(cat "$CNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CNT"\n'
+                    'o=$(sed -n "${n}p" "$OUTCOMES")\ncase "$o" in\n'
+                    '  busy) echo "k: Kernel push error: Maximum batch GPU session count of 2 reached."; echo "k: push FAILED"; exit 1;;\n'
+                    '  ok) echo "k: COMPLETE"; exit 0;;\n  err) echo "k: KernelWorkerStatus.ERROR"; exit 1;;\nesac\n')
+    fake.chmod(0o755)
+    (tmp / "outcomes").write_text("\n".join(outcomes) + "\n")
+    env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp / "cnt"), OUTCOMES=str(tmp / "outcomes"), RETRY_S="0", RETRY_MAX="10")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
+    return r.returncode, int((tmp / "cnt").read_text()), r.stdout
+
+
+def test_retries_while_sessions_are_full_then_succeeds(tmp_path):
+    rc, n, out = _run(tmp_path, ["busy", "busy", "ok"])
+    assert rc == 0 and n == 3 and "COMPLETE" in out
+
+
+def test_other_failures_stop_immediately(tmp_path):
+    rc, n, out = _run(tmp_path, ["err", "ok"])
+    assert rc != 0 and n == 1
