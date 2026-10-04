@@ -83,3 +83,17 @@ def test_v4h3_differs_from_v4h2_only_in_the_verifier_loop_lines():
     assert "re-run once" not in v3
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(V4H3)], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
+
+
+def test_v4h2g_adds_only_the_locator_recovery_line():
+    """v4h2g = v4h2f + one locator line: on the scorer v4h2f's locate.py failed 60 of 106 calls because the locator
+    called it before its install step (GATE.md 2026-10-04 07:00)."""
+    V4H2F, V4H2G = ROOT / "submissions" / "v4h2f", ROOT / "submissions" / "v4h2g"
+    assert files(V4H2G) == files(V4H2F)
+    changed = {rel for rel in files(V4H2F) if not filecmp.cmp(V4H2F / rel, V4H2G / rel, shallow=False)}
+    assert changed == {"prompts/locator.md"}, changed
+    a, b = (V4H2F / "prompts" / "locator.md").read_text().splitlines(), (V4H2G / "prompts" / "locator.md").read_text().splitlines()
+    assert len(b) == len(a) and sum(x != y for x, y in zip(a, b)) == 1
+    assert "can't open file" in (V4H2G / "prompts" / "locator.md").read_text()
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(V4H2G)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-1500:]
