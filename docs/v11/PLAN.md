@@ -352,3 +352,4 @@ Revise this file (add a row below, and update §0) when any of these happens:
 - 2026-10-04 02:20 IST: v4h2f helper check PASS on Kaggle (all four helpers reachable); 74-task L4 run pushed (g4-eval74-v4), reads vs v4-wh28 (queued).
 - 2026-10-04 06:30 IST: v4 control on wh28 = 27/74 (3 turn-budget errors, 166 s); v4 >= v4h2 by 2 paired (noise). Old sequence accidentally pushed v4h3 (dead helpers) before being killed; it runs anyway. v4h2f (helpers fixed) running, result ~07:30.
 - 2026-10-04 07:00 IST: v4h2f on L4 = 28/74 (0 crashes, 149 s), best same-wheelhouse number; helper placement fixed (check/test 100%), locate 60 can't-open-file from ordering (install skipped first). Rule (a) FAIL by the letter; v4h2g (locator recovery line) pre-registered and queued.
+- 2026-10-04 09:30 IST: resample s5-s8 started (tmux resample58) for v11b rows; train/rebalance_rows.py written test-first; v11b recipe + pass rules pre-registered in GA_PROBE.md.

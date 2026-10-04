@@ -105,3 +105,16 @@ read_file with 50 exact repeats (fastapi_14986; control 22 calls, 1 repeat), 96 
 control 42/7), 82 of 94 with 79 repeats (fastapi_15588). The verifier gets 2 calls because the fixer eats the budget.
 The training rows over-represent read_file steps of long successful trajectories; v11b must weight the edit/reply
 transitions and drop exact-repeat calls from the rows (dedup consecutive identical calls per trajectory).
+
+## v11b pre-registration (2026-10-04 09:30 IST, before any row is reshaped or any run launched)
+
+Data: all collection samples (resample s1-s8 of the solved training tasks + coverage rounds) stitched as before, then
+`train/rebalance_rows.py --drop-repeats --max-tool-share read_file=0.15 --max-per-task 200 --holdout-tasks <5 solved
+tasks>` (tests/test_rebalance_rows.py). Floor stays 10,000 rows after reshaping (Adaption, 31B). Hyperparameters:
+r8/alpha16 q,k,v,o as v11a, lr 5e-5 (half of v11a), 1 epoch, train_on_inputs False.
+Measurement, in order, each gating the next: (1) V-2 probe = the V-1 kernel with v11b: applied (diff >= 2), zb control
+<= noise + 1, 5-task smoke solved >= the zb control's on the same 5 (>= 1) with at most 2 of 5 tasks hitting the call
+budget (v11a: 4 of 5), mean secs <= 1.3x control; (2) 74-task L4 pair v4h2f_v11b vs v4h2f (28), rule: solved >= 28,
+crash rows <= v4h2f's, mean secs <= 190; (3) only then a Z slot. A FAIL at (1) on the budget rule means the row mix is
+still wrong: next recipe halves read_file's share again before another training run; no third adapter without a
+changed recipe. The v11a numbers (0/5, 4 budget-outs, read loop) are the control for the mechanism.
