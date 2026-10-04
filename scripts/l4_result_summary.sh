@@ -6,8 +6,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 slug=${1:?slug}; log=${2:?log}
 until grep -qE "$slug: (KernelWorkerStatus\.)?(COMPLETE|FAILED|ERROR)" "$log" 2>/dev/null; do sleep 60; done
-sleep 120
-out="eval/overnight/${slug}_result.txt"
+sleep "${SUMMARY_SETTLE_S:-120}"
+out="${SUMMARY_OUT:-eval/overnight/${slug}_result.txt}"
 {
   echo "$(date '+%Y-%m-%d %H:%M IST') $slug: $(grep -E "$slug: (KernelWorkerStatus\.)?(COMPLETE|FAILED|ERROR)" "$log" | tail -1 | cut -c1-80)"
   f="eval/kaggle/$slug/results.jsonl"
@@ -25,8 +25,8 @@ for name, path in (("v4 09-29", "eval/kaggle/g4-l4-v4/results.jsonl"), ("v4h2 10
         print(f"paired vs {name}: only-this {len(w)} {w} | only-ref {len(l)} {l}")
 PY
     if [ -s "eval/kaggle/$slug/traces.tar.gz" ]; then
-      d=$(mktemp -d /private/tmp/claude-501/l4sum.XXXX); tar -xzf "eval/kaggle/$slug/traces.tar.gz" -C "$d" 2>/dev/null; ln -sf "$PWD/$f" "$d/results.jsonl"
-      .venv/bin/python scripts/analyze_failures.py "$d" --tasks data/tasks.jsonl --out "eval/kaggle/$slug/failure_taxonomy.json" 2>/dev/null | sed -n 5,12p
+      d=$(mktemp -d "${TMPDIR:-/tmp}/l4sum.XXXXXX"); tar -xzf "eval/kaggle/$slug/traces.tar.gz" -C "$d"; ln -sf "$PWD/$f" "$d/results.jsonl"
+      .venv/bin/python scripts/analyze_failures.py "$d" --tasks data/tasks.jsonl --out "eval/kaggle/$slug/failure_taxonomy.json" 2>&1 | sed -n 5,12p
       python3 - "$d" <<'PY'
 import json, glob, re, collections, sys
 cant = collections.Counter(); ok = collections.Counter()
@@ -42,4 +42,4 @@ PY
     fi
   else echo "no results.jsonl"; ls "eval/kaggle/$slug" 2>/dev/null; fi
 } > "$out" 2>&1
-echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] RESULT $slug: $(sed -n 2p "$out")" >> eval/overnight/progress.log
+echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] RESULT $slug: $(sed -n 2p "$out")" >> "${SUMMARY_PROGRESS:-eval/overnight/progress.log}"
