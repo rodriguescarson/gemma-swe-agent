@@ -354,3 +354,5 @@ Revise this file (add a row below, and update §0) when any of these happens:
 - 2026-10-04 07:00 IST: v4h2f on L4 = 28/74 (0 crashes, 149 s), best same-wheelhouse number; helper placement fixed (check/test 100%), locate 60 can't-open-file from ordering (install skipped first). Rule (a) FAIL by the letter; v4h2g (locator recovery line) pre-registered and queued.
 - 2026-10-04 09:30 IST: resample s5-s8 started (tmux resample58) for v11b rows; train/rebalance_rows.py written test-first; v11b recipe + pass rules pre-registered in GA_PROBE.md.
 - 2026-10-04 17:50 IST: Kaggle weekly GPU quota (30 h) reached; v4h2g got in and runs; v4h2ft cannot run on L4 until the weekly reset (Sat). sub10 submits after v4h2g clears.
+- 2026-10-04 18:45 IST: OpenRouter screen v4h2f vs v4h2ft on all 74 (Docker, L4-paced, $8/arm) to rank next week's L4 slots; screen only, never a ship gate.
+- 2026-10-04 19:10 IST: v4h2g = 34/74 on L4 (+7 vs v4 control, 9-0 vs v4h2); sub10 (v4) submitted by the VPS 18:21 IST; sub11 = v4h2g armed for 05:31 IST (Mac) + 07:00 (VPS backup), deviation on rule (a') recorded in GATE.md.

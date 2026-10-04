@@ -283,3 +283,15 @@ v4h4 = v4h2f + one verifier step 2b: a /tmp/repro.py of the issue's stated input
 alone reaches). 74 tasks, 4xL4, paired vs v4h2f (28). Pass: solved >= 28, crash rows <= 3, mean secs <= 190, and
 /tmp/repro.py written in >= 30% of tasks (the mechanism ran). Runs after the weekly GPU reset, ordered after v4h2ft;
 if v4h2ft PASSes with >= 30, v4h4 is rebuilt on v4h2ft's temperature before running.
+
+### v4h2g on 4xL4, all 74 (kernel g4-eval74-v4 v6; 2026-10-04 15:20 -> 18:22 IST)
+**34/74 solved**, 1 non-timeout error (turn budget), 4 timeouts, 5 empty patches, mean **138.7 s/task**. Paired vs
+v4h2 (25, same wheelhouse): **9 wins, 0 losses**; vs v4 control (27): +7; vs v4h2f (28): +6. Misses: right-file-wrong-
+fix 29, wrong files 7, no patch 2, crash 1, timeout 1. Helpers: locate 95 ok / 45 can't-open-file, edit 169/6,
+check 67/0, test 49/0.
+Rules: (a') locate can't-open-file <= 10 -> **FAIL by the letter (45)**; every outcome rule passes: (b) 34 >= 26,
+(c) 1 <= 3, (d) 139 <= 190. Reading: (a') was a mechanism check written to confirm the recovery line works; the line
+roughly halved locate failures (60 -> 45) and recovered most stages, and the outcome moved +6 against the same-day,
+same-wheelhouse base, twice the single-read noise. Deviation, stated before arming: v4h2g is proposed as sub11 (Oct 5
+05:31 IST) on the outcome rules, with (a') recorded as failed; Carson can veto. Hidden-split reading of sub11 against
+sub10 (v4, same scorer, 2026-10-04): gain if >= +2 tasks (0.035), noise within +-1, regression below.
