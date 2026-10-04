@@ -27,3 +27,14 @@ def test_retries_while_sessions_are_full_then_succeeds(tmp_path):
 def test_other_failures_stop_immediately(tmp_path):
     rc, n, out = _run(tmp_path, ["err", "ok"])
     assert rc != 0 and n == 1
+
+
+def test_weekly_quota_refusal_is_retried_too(tmp_path):
+    fake = tmp_path / "push_wait.sh"
+    fake.write_text('#!/bin/bash\nn=$(cat "$CNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CNT"\n'
+                    '[ $n -lt 3 ] && { echo "k: Kernel push error: Maximum weekly GPU quota of 30.00 hours reached."; echo "k: push FAILED"; exit 1; }\n'
+                    'echo "k: COMPLETE"; exit 0\n')
+    fake.chmod(0o755)
+    env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and (tmp_path / "cnt").read_text().strip() == "3" and "quota" in r.stdout.lower()
