@@ -338,3 +338,12 @@ def test_helper_check_commands_follow_the_helper_set(tmp_path):
         assert f"/tmp/swe/{h}" in cell, h
     assert "if h not in HELPERS_B64: continue" in cell       # probes outside the shipped set are skipped at run time
     assert "HELPER_CHECK" in cell
+
+
+def test_helper_check_probes_view_py_with_a_repeat(tmp_path):
+    """v4h6g: view.py must show lines and refuse an exact repeat on the Kaggle sandbox, not only locally."""
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
+    build(tmp_path, ROOT / "submissions" / "v4h6g", "hc6", "--ids", str(ids), "--oracle", "--helper-check",
+          str(ROOT / "submissions" / "v4h6g" / "skills" / "swe-tools" / "scripts"))
+    cell = cells(tmp_path, "hc6")[1]
+    assert cell.count("python3 /tmp/swe/view.py pkg/mod.py 1 2") >= 2 and "ALREADY SHOWN" in cell

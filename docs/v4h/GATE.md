@@ -302,3 +302,13 @@ Each: 74 tasks, 4xL4, paired vs v4h2g (34). Pass: solved >= 34, crash rows <= 3,
 /tmp/repro.py written in >= 30% of tasks). A PASS with solved >= 36 (+2, beyond the 2.3-task noise) becomes the next
 slot candidate; both PASS -> v4h2gt4 (both changes) is built and run before any slot. Order decided by the OpenRouter
 screen v4h2f vs v4h2ft (running); default order 1 then 2.
+
+## v4h6g pre-registration (2026-10-04 23:30 IST, before any L4 run): the view.py loop breaker
+v4h6g = v4h2g with the fixer reading through `python3 /tmp/swe/view.py FILE START END` (max 120 lines; an exact repeat
+of an unchanged range is refused with "ALREADY SHOWN ... edit now") and read_file removed from the fixer's tools; the
+locator and verifier keep read_file. Evidence: docs/v4h/V4H2G_MISSES.md (16/40 misses repeat one call >= 10x, 12 in
+the fixer; bound 7). Tests: tests/test_view_helper.py (4), bundle test; Kaggle helper check PASS 23:25 IST including
+the repeat refusal (g4-lora-test v4). 74 tasks, 4xL4 (kernel g4-l4-v4h6g-p312 on slug g4-eval74-v3), paired vs v4h2g
+(34). Pass: solved >= 34; misses with one call repeated >= 10x in the fixer <= 6 (v4h2g: 12); crash rows <= 3 (an
+unknown-tool crash from calling view.py as a tool name counts here); mean secs <= 190. PASS with >= 36 -> slot
+candidate. Order after the reset: V-2 probe (1 h) -> v4h6g -> v4h2gt -> v4h4g, sessions permitting.

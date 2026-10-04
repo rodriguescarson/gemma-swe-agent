@@ -291,11 +291,15 @@ ok = True
 PROBES = {"locate.py": 'python3 /tmp/swe/locate.py "parse_header"', "test.py": "python3 /tmp/swe/test.py --target tests/test_mod.py",
           "check.py": "python3 /tmp/swe/check.py --mode preflight",
           "edit.py": "python3 /tmp/swe/edit.py pkg/mod.py <<'EOF'\n<<<<<<< SEARCH\n    return x\n=======\n    return x  # edited\n>>>>>>> REPLACE\nEOF",
-          "run.py": 'python3 /tmp/swe/run.py --timeout 5 "echo hi"', "gate.py": "python3 /tmp/swe/gate.py"}
+          "run.py": 'python3 /tmp/swe/run.py --timeout 5 "echo hi"', "gate.py": "python3 /tmp/swe/gate.py",
+          "view.py": "python3 /tmp/swe/view.py pkg/mod.py 1 2"}
 for h, c in PROBES.items():
     if h not in HELPERS_B64: continue
     r = m.run_command(c); o = (r.stdout + r.stderr); bad = "can't open file" in o or "No such file" in o; ok &= not bad
     lines.append(("FAIL " if bad else "ok   ") + c.split("\n")[0] + " -> " + o.strip().replace("\n", " | ")[:200])
+if "view.py" in HELPERS_B64:   # the loop breaker must refuse an exact repeat on this sandbox too (v4h6g)
+    r = m.run_command("python3 /tmp/swe/view.py pkg/mod.py 1 2"); o = r.stdout + r.stderr; bad = "ALREADY SHOWN" not in o; ok &= not bad
+    lines.append(("FAIL " if bad else "ok   ") + "view.py repeat refused -> " + o.strip().replace("\n", " | ")[:200])
 lines.append("HELPER_CHECK " + ("PASS" if ok else "FAIL")); print("\n".join(lines)); open("/kaggle/working/helper_check.txt", "w").write("\n".join(lines) + "\n")
 '''
 

@@ -146,3 +146,17 @@ def test_v4h4g_is_v4h2g_plus_the_repro_step_only():
     for v in ("v4h2gt", "v4h4g"):
         r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(ROOT / "submissions" / v)], capture_output=True, text=True, timeout=120)
         assert r.returncode == 0, r.stderr[-800:]
+
+
+def test_v4h6g_is_v4h2g_with_the_view_loop_breaker_in_the_fixer_only():
+    A, B = ROOT / "submissions" / "v4h2g", ROOT / "submissions" / "v4h6g"
+    fa, fb = files(A), files(B)
+    assert fb - fa == {"skills/swe-tools/scripts/view.py"} and fa <= fb
+    changed = {rel for rel in fa if not filecmp.cmp(A / rel, B / rel, shallow=False)}
+    assert changed == {"prompts/fixer.md", "sub_agents/fixer.yaml"}, changed
+    y = (B / "sub_agents/fixer.yaml").read_text()
+    assert "read_file" not in y.split("tools:")[1].split("\n")[0]
+    p = (B / "prompts/fixer.md").read_text()
+    assert 'run_command(command="python3 /tmp/swe/view.py' in p and "read_file(" not in p
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-800:]
