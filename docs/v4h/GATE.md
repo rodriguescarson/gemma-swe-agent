@@ -252,3 +252,18 @@ the CLI cannot cancel a queued kernel; it runs, costs ~3.5 h of quota and delays
 UTC day). The sequence is killed; nothing else pushes from it.
 Submission reads to date on the hidden split: v4 0.12 x2 (old scorer), v10.1 0.08 x2, v4h2 0.10 x1; sub10 (v4, rebuilt
 scorer) is in the hold queue and lands today.
+
+### v4h2f on 4xL4, all 74 (kernel g4-eval74-v4 v5; 2026-10-04 03:55 -> 06:47 IST)
+**28/74 solved**, 0 non-timeout error rows, 9 timeouts, 14 empty patches, **mean 149.0 s/task** (fastest of the
+three same-wheelhouse runs). Paired: vs v4-wh28 (27) see below; vs v4h2 (25) v4h2f-only 4 (rich_4077, rich_3777,
+rich_2725, rich_3006), v4h2-only 1 (fastapi_14616); vs old v4 (29) 4 / 5. Misses: right-file-wrong-fix 23, wrong
+files 10, no patch 8, timeouts 5. Helpers on the scorer: check.py 62 ok / 0 fail, test.py 30 / 0, edit.py 193 / 13,
+**locate.py 46 / 60**, install itself 2 can't-open-file.
+Rules: (a) helper can't-open-file = 0 -> **FAIL** (60 locate + 13 edit); (b) 28 >= 27-2 PASS; (c) 0 <= 3 PASS;
+(d) 149 <= 190 PASS. Reading: placement is fixed (the stages that always install first never fail); the residual is
+the locator calling locate.py before its install step, a prompt-compliance ordering miss, so (a) as written stays
+FAIL and v4h2f is not a slot candidate under its own pre-registration. One-line follow-up, pre-registered here:
+**v4h2g** = v4h2f + one locator line ("if a helper reports can't open file, call install once and repeat the call").
+Rule for v4h2g on the same 74: (a') no helper failure left unrecovered in its stage (every can't-open-file is followed
+by install and a working repeat) AND locate can't-open-file <= 10; (b) solved >= 26; (c) crash rows <= 3; (d) mean
+secs <= 190. PASS with solved >= 27 -> slot candidate for sub11 (05:31 IST Oct 5) if sub10 reads v4 at <= 0.12.
