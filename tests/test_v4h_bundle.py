@@ -110,3 +110,19 @@ def test_v4h2ft_differs_from_v4h2f_only_in_temperature():
     assert [x for x, y in zip(a, b) if x != y] == ["temperature: 1.0"] and "temperature: 0.2" in b
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
+
+
+def test_v4h4_adds_only_the_repro_step_to_the_verifier():
+    """v4h4 = v4h2f + one verifier line: a reproduction of the issue's stated input/expected output with bare asserts
+    (no try/except, exits non-zero on failure); a failing repro goes into the fix step (docs/v4h/WRONG_FIX_EVIDENCE.md;
+    research/2026-10-04_web_papers_scan.md #1; research/2026-10-04_github_scan.md #2: a repro that cannot fail)."""
+    A, B = ROOT / "submissions" / "v4h2f", ROOT / "submissions" / "v4h4"
+    assert files(B) == files(A)
+    changed = {rel for rel in files(A) if not filecmp.cmp(A / rel, B / rel, shallow=False)}
+    assert changed == {"prompts/verifier.md"}, changed
+    a, b = (A / "prompts/verifier.md").read_text().splitlines(), (B / "prompts/verifier.md").read_text().splitlines()
+    assert len(b) == len(a) + 1
+    v = (B / "prompts/verifier.md").read_text()
+    assert "/tmp/repro.py" in v and "no try/except" in v and "bare assert" in v
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-1500:]

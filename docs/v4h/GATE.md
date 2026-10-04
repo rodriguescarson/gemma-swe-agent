@@ -276,3 +276,10 @@ v4h2ft = v4h2f with temperature 0.2 instead of 1.0, nothing else (bundle test). 
 (every scored public bundle at 0.1-0.2; Sep-28 notes: a 1.0 variant of one design 0.06 vs 0.10). 74 tasks, 4xL4, slug
 g4-l4-v9-eog, paired vs v4h2f (28/74). Pass: solved >= 28, crash rows <= 3, mean secs <= 190. PASS with solved >= 30 ->
 the next slot candidate ahead of v4h2g.
+
+## v4h4 pre-registration (2026-10-04 18:40 IST; supersedes the v4h3-based draft in WRONG_FIX_EVIDENCE.md)
+v4h4 = v4h2f + one verifier step 2b: a /tmp/repro.py of the issue's stated input/expected behaviour with a bare assert
+(no try/except), run, failures fed to the step-2 fix. Upper bound from the evidence: 6 rows (3-4 beyond what a fix loop
+alone reaches). 74 tasks, 4xL4, paired vs v4h2f (28). Pass: solved >= 28, crash rows <= 3, mean secs <= 190, and
+/tmp/repro.py written in >= 30% of tasks (the mechanism ran). Runs after the weekly GPU reset, ordered after v4h2ft;
+if v4h2ft PASSes with >= 30, v4h4 is rebuilt on v4h2ft's temperature before running.
