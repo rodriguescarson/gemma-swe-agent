@@ -273,3 +273,7 @@ the loops repeat a whole call across turns (the earlier call sits in the prompt)
 repetition_penalty (which sees the prompt) is not in the submission schema. Loops: 16 of 40 misses with one call
 repeated >= 10x (run_command 8, read_file 8; fixer 12, locator 4); e.g. fastapi_15800 repeats a read_file with a
 malformed key ('start_line"') 74 times: the tool's error is returned and the model resends the same arguments.
+Graph-leak check 2026-10-05 01:20 IST: do the shipped code graphs contain symbols only the gold patch introduces
+(which would make title-only tasks reachable through get_code_subgraph)? No: the 9 strongest candidates (e.g.
+rich_4070 is_expandable, rich_3934 set_renderable, fastapi_14616 _get_multidict_value, httpx_3672 is_keepalive) all
+already exist in the base snapshot; graphs reflect the pre-fix code. Closed.
