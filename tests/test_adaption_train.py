@@ -74,3 +74,11 @@ def test_download_unpacks_a_zstd_tarball(tmp_path, monkeypatch):
     class _C: autoscientist = _AS()
     facts = A.download(_C(), "run-1", str(tmp_path / "out"))
     assert "adapter_model.safetensors" in " ".join(facts["files"]) and facts["adapter_config"]["r"] == 8
+
+
+def test_lr_override_reaches_the_payload_and_changes_the_key():
+    p = A.run_payload("ds", "v11b", hyperparams={"learning_rate": 5e-5})
+    assert p["hyperparams"]["learning_rate"] == 5e-5 and p["hyperparams"]["lora_r"] == 8
+    assert p["idempotency_key"] != A.run_payload("ds", "v11b")["idempotency_key"]
+    src = (ROOT / "train" / "adaption_train.py").read_text()
+    assert '"--lr"' in src and "learning_rate" in src.split('"--lr"')[1][:600]

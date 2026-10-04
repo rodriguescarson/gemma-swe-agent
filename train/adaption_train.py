@@ -137,6 +137,7 @@ def main():
     ap.add_argument("--download", default=None, metavar="RUN_ID")
     ap.add_argument("--out", default="adapters/v11a")
     ap.add_argument("--allow-small", action="store_true", help="skip the 10k-row floor check (for a format probe)")
+    ap.add_argument("--lr", type=float, default=None, help="learning_rate override (v11b: 5e-5)")
     a = ap.parse_args()
     c = client()
     if a.status:
@@ -160,7 +161,7 @@ def main():
         strip_meta(a.rows, clean)
         ds = upload(c, clean, a.name)
         print("dataset", ds, "processed")
-    payload = run_payload(ds, a.name)
+    payload = run_payload(ds, a.name, hyperparams={"learning_rate": a.lr} if a.lr else None)
     print("run payload:", json.dumps(payload, indent=1))
     if not a.launch:
         print("not launched (pass --launch after Carson's go)"); return

@@ -54,7 +54,7 @@ def test_rows_success_only_dedup_and_shapes(world):
     rows, stats = B.build([str(cap)], str(tasks), [str(results)])
     assert stats["rows"] == 2 and stats["duplicate"] == 1 and stats["unsolved_or_unknown"] == 1 and stats["cut_off"] == 1 and stats["empty_reply"] == 1
     first, second = rows
-    assert first["meta"] == {"task": "t_ok", "stage": "fixer", "continuation": False, "tool": "read_file"}
+    assert {k: v for k, v in first["meta"].items() if k != "traj"} == {"task": "t_ok", "stage": "fixer", "continuation": False, "tool": "read_file"}
     assert first["prompt"].startswith("<bos>") and first["prompt"].endswith(EMPTY_THOUGHT)          # generation prompt supplies the channel
     assert first["completion"].startswith("<|tool_call>call:read_file{") and first["completion"].endswith("<|tool_response>")
     assert second["meta"]["continuation"] is True and second["completion"] == EMPTY_THOUGHT + "Changed a.py.<turn|>"
@@ -93,3 +93,11 @@ def test_pairs_judge_each_sample_by_its_own_results(world, tmp_path):
     res2.write_text(json.dumps({"instance_id": "t_ok", "resolved": False}) + "\n")
     rows, stats = B.build([], str(tasks), [], pairs=[(str(cap), [str(results)]), (str(cap2), [str(res2)])])
     assert stats["rows"] == 2 and stats["unsolved_or_unknown"] == 2 and not any("z.py" in r["completion"] for r in rows)
+
+
+def test_rows_carry_their_trajectory_id(world, tmp_path):
+    """meta.traj = <capture file name>|<task>: one sample of one task is one trajectory, so the v11b repeat filter can
+    drop repeated calls within a run without dropping the same correct call made by different runs."""
+    tmp, tasks, results, cap, stmt = world
+    rows, _ = B.build([], str(tasks), [], pairs=[(str(cap), [str(results)])])
+    assert rows and all(r["meta"]["traj"] == f"{Path(cap).name}|{r['meta']['task']}" for r in rows)

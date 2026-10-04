@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import json
 import sys
 from collections import Counter
@@ -122,7 +123,7 @@ def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_
                 continue
             seen.add(h)
             rows.append({"prompt": prompt, "completion": completion,
-                         "meta": {"task": tid, "stage": stage_of(body), "continuation": continuation,
+                         "meta": {"task": tid, "traj": f"{os.path.basename(cap)}|{tid}", "stage": stage_of(body), "continuation": continuation,
                                   "tool": (msg.get("tool_calls") or [{}])[0].get("function", {}).get("name") if msg.get("tool_calls") else None}})
             stats["rows"] += 1
     return rows, stats

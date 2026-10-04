@@ -54,3 +54,10 @@ def test_per_task_cap_and_holdout_and_determinism(tmp_path):
     assert len(t1) == 4 and any(r["meta"]["tool"] is None for r in t1)                  # cap keeps the reply row
     assert not any(r["meta"]["task"] == "t3" for r in out1) and (tmp_path / "hold.jsonl").read_text().count("\n") == 1
     assert rep1["after"]["rows"] == len(out1) and rep1["before"]["rows"] == len(rows) and rep1["after"]["tasks"] == 2
+
+
+def test_drop_unknown_tools(tmp_path):
+    """2026-10-04: one stitched row called a non-existent tool (load_skill); validate_rows refuses the set."""
+    rows = [_row("t1", "read_file", "a"), _row("t1", "load_skill", "b"), _row("t1", None, "r<turn|>", cont=False)]
+    out, rep = _run(tmp_path, _write(tmp_path, rows), "--drop-unknown-tools")
+    assert [r["meta"]["tool"] for r in out] == ["read_file", None] and rep["dropped"]["unknown_tool"] == 1

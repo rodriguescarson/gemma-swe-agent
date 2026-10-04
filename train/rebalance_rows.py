@@ -18,14 +18,19 @@ def profile(rows):
             "replies": sum(1 for r in rows if r["meta"].get("tool") is None)}
 
 
-def rebalance(rows, drop_repeats=False, tool_share=None, max_per_task=None, holdout=frozenset(), seed=1):
+def rebalance(rows, drop_repeats=False, tool_share=None, max_per_task=None, holdout=frozenset(), seed=1, drop_unknown=False):
     rng = random.Random(seed); dropped = collections.Counter()
+    if drop_unknown:
+        sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+        from validate_rows import KNOWN_TOOLS
+        n0 = len(rows); rows = [r for r in rows if r["meta"].get("tool") is None or r["meta"].get("tool") in KNOWN_TOOLS]
+        dropped["unknown_tool"] = n0 - len(rows)
     held = [r for r in rows if r["meta"]["task"] in holdout]
     rows = [r for r in rows if r["meta"]["task"] not in holdout]
     if drop_repeats:
         seen, kept = set(), []
         for r in rows:
-            key = (r["meta"]["task"], r["completion"])
+            key = (r["meta"].get("traj") or r["meta"]["task"], r["completion"])   # within one run when known
             if r["meta"].get("tool") is not None and key in seen:
                 dropped["repeats"] += 1; continue
             seen.add(key); kept.append(r)
@@ -56,6 +61,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("rows"); ap.add_argument("--out", required=True); ap.add_argument("--report", required=True)
     ap.add_argument("--seed", type=int, default=1); ap.add_argument("--drop-repeats", action="store_true")
+    ap.add_argument("--drop-unknown-tools", action="store_true")
     ap.add_argument("--max-tool-share", action="append", default=[], metavar="TOOL=SHARE")
     ap.add_argument("--max-per-task", type=int, default=None)
     ap.add_argument("--holdout-tasks", default=None); ap.add_argument("--holdout-out", default=None)
@@ -64,7 +70,7 @@ def main(argv=None):
     share = {k: float(v) for k, v in (s.split("=") for s in a.max_tool_share)}
     hold = frozenset(l.strip() for l in open(a.holdout_tasks) if l.strip()) if a.holdout_tasks else frozenset()
     before = profile(rows)
-    out, held, dropped = rebalance(rows, a.drop_repeats, share, a.max_per_task, hold, a.seed)
+    out, held, dropped = rebalance(rows, a.drop_repeats, share, a.max_per_task, hold, a.seed, a.drop_unknown_tools)
     with open(a.out, "w") as f:
         for r in out: f.write(json.dumps(r) + "\n")
     if a.holdout_out:

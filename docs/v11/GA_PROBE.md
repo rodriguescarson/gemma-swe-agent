@@ -118,3 +118,8 @@ budget (v11a: 4 of 5), mean secs <= 1.3x control; (2) 74-task L4 pair v4h2f_v11b
 crash rows <= v4h2f's, mean secs <= 190; (3) only then a Z slot. A FAIL at (1) on the budget rule means the row mix is
 still wrong: next recipe halves read_file's share again before another training run; no third adapter without a
 changed recipe. The v11a numbers (0/5, 4 budget-outs, read loop) are the control for the mechanism.
+**v11b amendment 2026-10-04 18:00 IST (before launch):** the registered cap of 200 rows/task x 44 training tasks tops
+out at 8,800 rows, below the 10k floor, so the recipe as written could not pass; cap raised to 300. Repeat filter keyed
+per trajectory (build_sft now records meta.traj = capture|task); the per-task version dropped the same correct call
+made by different runs. Result: 10,884 rows / 44 tasks (5 held out, 3,064 rows), read_file share 0.147 (v11a 0.24),
+text-reply rows 1,682 = 15.5% (v11a 7.5%), validate_rows clean. lr 5e-5 as registered.
