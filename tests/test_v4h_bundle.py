@@ -126,3 +126,23 @@ def test_v4h4_adds_only_the_repro_step_to_the_verifier():
     assert "/tmp/repro.py" in v and "no try/except" in v and "bare assert" in v
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
+
+
+def _only_change(base, var):
+    A, B = ROOT / "submissions" / base, ROOT / "submissions" / var
+    assert files(B) == files(A)
+    return {rel for rel in files(A) if not filecmp.cmp(A / rel, B / rel, shallow=False)}, A, B
+
+
+def test_v4h2gt_is_v4h2g_at_temperature_0_2():
+    changed, A, B = _only_change("v4h2g", "v4h2gt")
+    assert changed == {"configs/sampling.yaml"} and "temperature: 0.2" in (B / "configs/sampling.yaml").read_text()
+
+
+def test_v4h4g_is_v4h2g_plus_the_repro_step_only():
+    changed, A, B = _only_change("v4h2g", "v4h4g")
+    assert changed == {"prompts/verifier.md"}
+    assert (B / "prompts/verifier.md").read_text() == (ROOT / "submissions/v4h4/prompts/verifier.md").read_text()
+    for v in ("v4h2gt", "v4h4g"):
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(ROOT / "submissions" / v)], capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-800:]

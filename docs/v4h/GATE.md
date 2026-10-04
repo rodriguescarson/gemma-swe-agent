@@ -295,3 +295,10 @@ roughly halved locate failures (60 -> 45) and recovered most stages, and the out
 same-wheelhouse base, twice the single-read noise. Deviation, stated before arming: v4h2g is proposed as sub11 (Oct 5
 05:31 IST) on the outcome rules, with (a') recorded as failed; Carson can veto. Hidden-split reading of sub11 against
 sub10 (v4, same scorer, 2026-10-04): gain if >= +2 tasks (0.035), noise within +-1, regression below.
+
+## Next-week L4 queue, pre-registered 2026-10-04 19:30 IST (base = v4h2g, 34/74)
+1. v4h2gt = v4h2g at temperature 0.2 (bundle test). 2. v4h4g = v4h2g + verifier repro step (bundle test).
+Each: 74 tasks, 4xL4, paired vs v4h2g (34). Pass: solved >= 34, crash rows <= 3, mean secs <= 190 (v4h4g also:
+/tmp/repro.py written in >= 30% of tasks). A PASS with solved >= 36 (+2, beyond the 2.3-task noise) becomes the next
+slot candidate; both PASS -> v4h2gt4 (both changes) is built and run before any slot. Order decided by the OpenRouter
+screen v4h2f vs v4h2ft (running); default order 1 then 2.
