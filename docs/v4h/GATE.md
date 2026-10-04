@@ -267,3 +267,6 @@ FAIL and v4h2f is not a slot candidate under its own pre-registration. One-line 
 Rule for v4h2g on the same 74: (a') no helper failure left unrecovered in its stage (every can't-open-file is followed
 by install and a working repeat) AND locate can't-open-file <= 10; (b) solved >= 26; (c) crash rows <= 3; (d) mean
 secs <= 190. PASS with solved >= 27 -> slot candidate for sub11 (05:31 IST Oct 5) if sub10 reads v4 at <= 0.12.
+Ordering evidence (v4h2f traces): helper can't-open-file BEFORE any install in the same stage: locate 59, edit 3;
+AFTER an install: edit 10, locate 1. 53 locator stages never recovered (no install at all), 12 stages recovered later.
+v4h2g (one locator line) pushed 07:05 IST as g4-eval74-v4 v6, behind the accidental v4h3 in the GPU queue.
