@@ -238,3 +238,17 @@ five helpers in <sandbox>/tmp/swe and /tmp/swe; locate.py, test.py, check.py and
 ran via run_command with the literal /tmp/swe path. Step 2 (g4-l4-v4h2f-p312, 74 tasks, 4xL4) pushed 02:20 IST.
 Note for later: check.py's preflight listed pkg/__pycache__/*.pyc in its DIFF on a repo without .gitignore; real repos
 ignore __pycache__, but a cleanup of untracked .pyc before submit is cheap insurance (not part of v4h2f).
+
+### v4 control on the Sep-30 wheelhouse (g4-l4-v4-wh28-p312, kernel g4-l4-v4 v5, 4xL4; 2026-10-04 02:45 -> 06:25 IST)
+**27/74 solved**, 3 non-timeout error rows (all "Agent exceeded turns budget (150 turns)"), 11 timeouts, 13 empty
+patches, mean 166.4 s/task. Paired vs v4 on the old wheelhouse (29/74): v4-wh28-only 6, old-only 8 (the rebuild
+reshuffled ~7 tasks each way and cost ~2 net). Paired vs v4h2 (25/74, same wheelhouse, previous night): v4-only 7,
+v4h2-only 5: **v4 >= v4h2 by 2, inside single-read noise (+-3)**; with v4h2's locate/test/check dead on the scorer
+this is the floor of the helper line, not its value. The reading that matters next: v4h2f (running, all helpers
+reachable per the Kaggle helper check) against this 27.
+Accident, recorded: the original sequence (left alive to stop on the held v11a dir) reached v4h3 first and pushed it
+(kernel g4-l4-v4 v6, queued). v4h3 carries v4h2's dead helper channel, so its run measures nothing pre-registered;
+the CLI cannot cancel a queued kernel; it runs, costs ~3.5 h of quota and delays sub10 by that time (still the same
+UTC day). The sequence is killed; nothing else pushes from it.
+Submission reads to date on the hidden split: v4 0.12 x2 (old scorer), v10.1 0.08 x2, v4h2 0.10 x1; sub10 (v4, rebuilt
+scorer) is in the hold queue and lands today.
