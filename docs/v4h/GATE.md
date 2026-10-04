@@ -270,3 +270,9 @@ secs <= 190. PASS with solved >= 27 -> slot candidate for sub11 (05:31 IST Oct 5
 Ordering evidence (v4h2f traces): helper can't-open-file BEFORE any install in the same stage: locate 59, edit 3;
 AFTER an install: edit 10, locate 1. 53 locator stages never recovered (no install at all), 12 stages recovered later.
 v4h2g (one locator line) pushed 07:05 IST as g4-eval74-v4 v6, behind the accidental v4h3 in the GPU queue.
+
+## v4h2ft pre-registration (2026-10-04 13:30 IST, before any run)
+v4h2ft = v4h2f with temperature 0.2 instead of 1.0, nothing else (bundle test). Evidence: research/2026-10-04_kaggle_scan.md
+(every scored public bundle at 0.1-0.2; Sep-28 notes: a 1.0 variant of one design 0.06 vs 0.10). 74 tasks, 4xL4, slug
+g4-l4-v9-eog, paired vs v4h2f (28/74). Pass: solved >= 28, crash rows <= 3, mean secs <= 190. PASS with solved >= 30 ->
+the next slot candidate ahead of v4h2g.

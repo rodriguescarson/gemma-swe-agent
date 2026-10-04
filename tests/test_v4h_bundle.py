@@ -97,3 +97,16 @@ def test_v4h2g_adds_only_the_locator_recovery_line():
     assert "can't open file" in (V4H2G / "prompts" / "locator.md").read_text()
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(V4H2G)], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
+
+
+def test_v4h2ft_differs_from_v4h2f_only_in_temperature():
+    """v4h2ft = v4h2f with temperature 0.2 (research/2026-10-04_kaggle_scan.md: every scored public bundle uses
+    0.1-0.2; ours ran 1.0). One variable."""
+    A, B = ROOT / "submissions" / "v4h2f", ROOT / "submissions" / "v4h2ft"
+    assert files(B) == files(A)
+    changed = {rel for rel in files(A) if not filecmp.cmp(A / rel, B / rel, shallow=False)}
+    assert changed == {"configs/sampling.yaml"}, changed
+    a, b = (A / "configs/sampling.yaml").read_text().splitlines(), (B / "configs/sampling.yaml").read_text().splitlines()
+    assert [x for x, y in zip(a, b) if x != y] == ["temperature: 1.0"] and "temperature: 0.2" in b
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-1500:]
