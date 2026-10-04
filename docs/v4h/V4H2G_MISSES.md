@@ -267,3 +267,9 @@ L4 run): (1) fixer without read_file, reading through a /tmp/swe/view.py helper 
 sandbox tmp and answers an exact repeat with "already shown above (lines X-Y); edit now" instead of the content;
 (2) a lower per-stage budget by splitting the fixer into two stages with fresh context (include_contents: none), so a
 loop in the first half cannot eat the second. Bound for either: 7 (rows in the table above).
+Penalties checked 2026-10-04 20:25 IST: presence_penalty/frequency_penalty are allowed (swegemma GenerationConstraints
+allowed_fields=None) and forwarded by ADK LiteLlm, but vLLM applies them to the tokens generated in one completion;
+the loops repeat a whole call across turns (the earlier call sits in the prompt), so penalties cannot break them.
+repetition_penalty (which sees the prompt) is not in the submission schema. Loops: 16 of 40 misses with one call
+repeated >= 10x (run_command 8, read_file 8; fixer 12, locator 4); e.g. fastapi_15800 repeats a read_file with a
+malformed key ('start_line"') 74 times: the tool's error is returned and the model resends the same arguments.
