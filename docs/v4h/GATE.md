@@ -312,3 +312,11 @@ the repeat refusal (g4-lora-test v4). 74 tasks, 4xL4 (kernel g4-l4-v4h6g-p312 on
 (34). Pass: solved >= 34; misses with one call repeated >= 10x in the fixer <= 6 (v4h2g: 12); crash rows <= 3 (an
 unknown-tool crash from calling view.py as a tool name counts here); mean secs <= 190. PASS with >= 36 -> slot
 candidate. Order after the reset: V-2 probe (1 h) -> v4h6g -> v4h2gt -> v4h4g, sessions permitting.
+
+### sub10 read 2026-10-05 04:28 IST: v4 on the rebuilt scorer = 0.05 (3/58)
+Hidden public reads on the rebuilt scorer: v4 0.05 (3/58), v4h2 0.10 (6/58), v10.1 0.08 x2. On the old scorer v4
+read 0.12 x2. So v4 lost ~4 tasks on the rebuild (or drew low; single-read noise is ~2.3 tasks), and v4h2 beats v4
+by 3 on the hidden split while it trailed v4 by 2 on L4 (27 vs 25): the L4 ordering of these two did not transfer,
+inside the noise either way. The base for every helper variant is v4h2 (0.10), not v4. sub11 (v4h2g, 34/74 on L4)
+reads at 05:31 IST; pre-registered reading against v4h2 0.10 (same scorer): gain if >= 8/58 (0.14), noise 5-7,
+regression <= 4.
