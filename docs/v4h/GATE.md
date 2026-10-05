@@ -453,3 +453,10 @@ int4 + vLLM's parser), 1 sample, 57 of 99 holdout tasks (cost cap), v4 not run o
 time pressure: v4h2g's extra locator recovery (install, then repeat) costs wall-clock, which this proxy punishes harder than
 L4 does (v4h2g hit the cap on 4 more tasks), so part of the gap may be a time-pressure artefact. On the hidden split the
 same pair reads v4h2 6 vs v4h2g 5, the same direction, inside single-read noise.
+
+## sub12 change, recorded before the slot (2026-10-05 21:00 IST)
+sub12 was armed (15:54 IST) as v4h2g read 2. After the Pallets checks (dev40 + holdout57: v4h2 29 vs v4h2g 20 of 97,
+paired 10-1, p = 0.012, pre-registered rule -> rebase onto v4h2), the more informative read is v4h2 read 2: it is the
+arm future variants build on and has one hidden read (0.10 = 6/58). sub12 = g4agent-v4h2 v1 (the exact sub9 kernel).
+Reading: second read within +-1 task of 6/58 -> v4h2's hidden level is ~6 and a single read is that stable; differing
+by >= 3 -> single hidden reads are too noisy to rank arms 1-2 tasks apart, and ranking leans on the Pallets proxy.
