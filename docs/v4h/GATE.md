@@ -460,3 +460,17 @@ paired 10-1, p = 0.012, pre-registered rule -> rebase onto v4h2), the more infor
 arm future variants build on and has one hidden read (0.10 = 6/58). sub12 = g4agent-v4h2 v1 (the exact sub9 kernel).
 Reading: second read within +-1 task of 6/58 -> v4h2's hidden level is ~6 and a single read is that stable; differing
 by >= 3 -> single hidden reads are too noisy to rank arms 1-2 tasks apart, and ranking leans on the Pallets proxy.
+
+## Root cause of the recurring "can't open file /tmp/swe/<helper>.py" + fix (2026-10-05 22:30 IST), pre-registered
+Measured on real L4 traces (scripts/analyze_helper_reachability.py, tests first): v4h2 73/74 tasks (helpers not in the
+sandbox tmp at all: locate 145/151, check 61/62, test 19/19 dead on the scorer); v4h2f 54/74 and v4h2g 44/74 tasks,
+and in EVERY one of those the first failure was the locator calling locate.py before it had run install.py (it
+skipped step 1). After a helper worked once in a task it never failed again. v4h2g's retry line only treated the
+symptom and cost turns. Fix (v5h2, v5h2b): a first SETUP stage whose only tools are the skill tools (compiled:
+setup tools=['SkillToolset']), so the install is the only action available; locator step 1 removed, one recovery
+line kept. Tests: tests/test_setup_stage.py, tests/test_v5h2_bundle.py (28 pass), validate.py OK.
+Pass condition on the next L4 run of v5h2 (and v5h2b): analyzer `--max-tasks-with-failure 1` passes, i.e. at most
+one task in 74 with any can't-open, and zero first failures of type helper_before_install in the locator. Fail ->
+the setup stage did not hold; read its traces before any other change.
+Queue (L4, after the weekly reset): v5h2 -> v5h2b -> v11b probe. v5all/v5b dropped (built on v4h2g, which lost 10-1
+to v4h2 off-repo).

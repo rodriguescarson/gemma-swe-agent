@@ -4,9 +4,9 @@ Issue:
 {problem_description}
 
 Steps (at most 8 tool calls, never repeat a call):
-1. `run_skill_script(skill_name="swe-tools", file_path="install.py")` once.
-2. `run_command`: `python3 /tmp/swe/locate.py "<identifiers, error text and keywords from the issue>"` (use code identifiers and error text only: leave out URLs, version numbers, environment dumps and doc links).
-3. Read the most relevant function(s) with `read_file(filepath, start_line, end_line)`. Use `git grep -n "<name>"` for exact names. Also find one existing test file that covers this code (`git grep -ln "<symbol>" -- tests`).
+1. `run_command`: `python3 /tmp/swe/locate.py "<identifiers, error text and keywords from the issue>"` (use code identifiers and error text only: leave out URLs, version numbers, environment dumps and doc links).
+2. Read the most relevant function(s) with `read_file(filepath, start_line, end_line)`. Use `git grep -n "<name>"` for exact names. Also find one existing test file that covers this code (`git grep -ln "<symbol>" -- tests`).
+If a helper ever reports "can't open file", call `run_skill_script(skill_name="swe-tools", file_path="install.py")` once, then repeat the helper call.
 
 Then STOP calling tools and reply with this plan (plain text, under 250 words):
 FILES: path:start-end for each place to change

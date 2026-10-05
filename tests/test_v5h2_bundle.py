@@ -48,9 +48,11 @@ def line_delta(a, b):
 # ---------------------------------------------------------------- v5h2 = v4h2 + listed changes only
 
 def test_v5h2_differs_from_v4h2_only_in_the_listed_files():
-    assert files(V5H2) == files(V4H2) | {"skills/swe-tools/scripts/view.py"}
+    # + setup stage (2026-10-05, tests/test_setup_stage.py: the locator skipped install in every can't-open task)
+    assert files(V5H2) == files(V4H2) | {"skills/swe-tools/scripts/view.py", "prompts/setup.md", "sub_agents/setup.yaml"}
     assert changed(V4H2, V5H2) == {"skills/swe-tools/scripts/install.py", "configs/sampling.yaml", "prompts/fixer.md",
-                                   "prompts/locator.md", "prompts/verifier.md", "sub_agents/fixer.yaml"}, changed(V4H2, V5H2)
+                                   "prompts/locator.md", "prompts/verifier.md", "sub_agents/fixer.yaml",
+                                   "agent.yaml"}, changed(V4H2, V5H2)
 
 
 def test_v5h2_takes_each_change_from_its_source_bundle():
@@ -64,11 +66,11 @@ def test_v5h2_takes_each_change_from_its_source_bundle():
 
 def test_v5h2_locator_has_the_search_term_filter_but_not_the_v4h2g_retry_line():
     loc = (V5H2 / "prompts/locator.md").read_text()
-    assert RETRY not in loc and "can't open file" not in loc
+    assert RETRY not in loc
     assert "leave out URLs, version numbers, environment dumps and doc links" in loc
-    rm, add = line_delta((V4H2 / "prompts/locator.md").read_text(), loc)
     v5_rm, v5_add = line_delta((V4H6G / "prompts/locator.md").read_text(), (V5ALL / "prompts/locator.md").read_text())
-    assert add == v5_add and len(rm) == 1 and rm[0].startswith("2. ")           # exactly v5all's step-2 change
+    filt = [l for l in v5_add if l.startswith("2. ")][0]
+    assert filt.replace("2. ", "1. ", 1) in loc.splitlines()                     # v5all's search step, now step 1
 
 
 def test_v5h2_fixer_reads_through_view_py_only():
@@ -85,6 +87,8 @@ def test_v5h2b_differs_from_v5h2_only_in_the_listed_files():
     assert files(V5H2B) == files(V5H2) | {"skills/swe-tools/scripts/repo_map.py"}
     assert changed(V5H2, V5H2B) == {"skills/swe-tools/SKILL.md", "prompts/locator.md", "prompts/fixer.md",
                                     "prompts/verifier.md"}, changed(V5H2, V5H2B)
+    for rel in ("agent.yaml", "prompts/setup.md", "sub_agents/setup.yaml"):
+        assert same(V5H2, V5H2B, rel), rel
 
 
 def test_v5h2b_ports_v5b_faithfully():
@@ -93,13 +97,12 @@ def test_v5h2b_ports_v5b_faithfully():
         assert same(V5B, V5H2B, rel), rel
     # the locator gets exactly the lines v5b added to v5all's locator, and loses nothing
     rm, add = line_delta((V5H2 / "prompts/locator.md").read_text(), (V5H2B / "prompts/locator.md").read_text())
-    v5b_rm, v5b_add = line_delta((V5ALL / "prompts/locator.md").read_text(), (V5B / "prompts/locator.md").read_text())
-    assert rm == v5b_rm == [] and add == v5b_add
+    assert rm == [] and len(add) == 3                                           # guard, title-only step, SPEC line
     loc = (V5H2B / "prompts/locator.md").read_text()
     assert RETRY not in loc
     assert loc.count("only a title") == 1 and loc.count(GUARD) == 1 and "SPEC:" in loc
-    # identical to v5b's locator except the v4h2g retry sentence
-    assert loc == (V5B / "prompts/locator.md").read_text().replace(" " + RETRY, "")
+    assert re.search(r"^3\. If the issue is short or only a title", loc, re.M)   # v5b's step 4, renumbered after setup
+    assert "from step 3, verbatim" in loc
 
 
 def test_v5h2b_guard_once_wherever_run_skill_script_appears():

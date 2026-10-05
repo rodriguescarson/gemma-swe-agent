@@ -42,7 +42,8 @@ def test_locator_no_longer_carries_the_install_step_but_keeps_one_recovery_line(
     loc = (ROOT / "submissions" / b / "prompts" / "locator.md").read_text()
     steps = re.findall(r"^\d+\. .*$", loc, re.M)
     assert steps and "install.py" not in steps[0], "step 1 must be the search, not the install"
-    assert loc.count("install.py") == 1 and "can't open file" in loc  # the single recovery instruction
+    rec = [l for l in loc.splitlines() if "can't open file" in l]
+    assert len(rec) == 1 and "install.py" in rec[0]                    # the single recovery instruction
 
 
 @pytest.mark.parametrize("b", BUNDLES)
