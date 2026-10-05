@@ -264,3 +264,23 @@ def test_every_tool_named_in_a_v5b_prompt_is_declared_by_that_stage():
         assert ("submit_patch" in found) == (s == "verifier"), s
     assert named_tools(affirmative("then call git_grep('x')"), vocab) - declared_tools("locator") == {"git_grep"}  # control
     assert named_tools(affirmative("There is no edit_file tool and no bash tool: use x."), vocab) == set()
+
+
+# ---------------------------------------------------------------- change 3: run_skill_script file_path guard
+
+GUARD = 'run_skill_script takes file_path as ONE string (file_path="install.py"), never a list: a list crashes the sandbox.'
+
+
+def test_file_path_guard_wherever_run_skill_script_appears():
+    texts = {p.relative_to(V5B).as_posix(): p.read_text() for p in V5B.rglob("*.md")}
+    texts.update({p.relative_to(V5B).as_posix(): p.read_text() for p in (V5B / "sub_agents").glob("*.yaml")})
+    users = {k for k, t in texts.items() if "run_skill_script" in t}
+    assert {"prompts/locator.md", "prompts/fixer.md", "prompts/verifier.md"} <= users
+    for k in users:
+        assert texts[k].count(GUARD) == 1, k
+        assert len(texts[k].splitlines()) - len((V5ALL / k).read_text().splitlines()) >= 1, k
+
+
+def test_guard_examples_never_show_a_list_file_path():
+    for p in V5B.rglob("*.md"):
+        assert not re.search(r"file_path\s*=\s*\[", p.read_text()), p

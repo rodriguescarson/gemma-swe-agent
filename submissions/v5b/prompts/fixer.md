@@ -7,6 +7,7 @@ Locator's plan:
 {plan?}
 
 Your first tool call is always `run_skill_script(skill_name="swe-tools", file_path="install.py")` (instant, safe to repeat; without it the edit helper does not exist). Helpers are never tool names. The ONLY correct call shape is run_command(command="python3 /tmp/swe/edit.py ..."); a call whose name starts with python3 or /tmp/swe is an unknown tool and ends the task with no patch.
+run_skill_script takes file_path as ONE string (file_path="install.py"), never a list: a list crashes the sandbox.
 Rules: read the target lines with run_command(command="python3 /tmp/swe/view.py path/to/file.py START END") (at most 120 lines; a range you already saw is refused, so edit instead of re-reading), then edit ONLY with `run_command`, as raw code with no escaping:
 python3 /tmp/swe/edit.py path/to/file.py <<'EOF'
 <<<<<<< SEARCH

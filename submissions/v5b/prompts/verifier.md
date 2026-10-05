@@ -11,6 +11,7 @@ Fixer's notes:
 
 Steps (never repeat a call):
 0. `run_skill_script(skill_name="swe-tools", file_path="install.py")` first, always (instant, safe to repeat). Helpers are never tool names. The ONLY correct call shape is run_command(command="python3 /tmp/swe/edit.py ..."); a call whose name starts with python3 or /tmp/swe is an unknown tool and ends the task with no patch.
+run_skill_script takes file_path as ONE string (file_path="install.py"), never a list: a list crashes the sandbox.
 1. `run_command`: `git diff` to see the change.
 2. Run the relevant test: `python3 /tmp/swe/test.py --target <test file>` (never the whole suite). If the change has a clear bug, fix it and re-run once. Failures unrelated to the change can be ignored.
 2b. If the issue states an input and the expected output or behaviour, write /tmp/repro.py that runs exactly that and checks it with a bare assert (no try/except, no print-only checks; it must exit non-zero when the behaviour is wrong), run `python3 /tmp/repro.py`, and if it fails treat it like a failing test in step 2. Skip this step if the issue states no example.
