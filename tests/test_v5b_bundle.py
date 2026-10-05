@@ -204,3 +204,63 @@ def test_v5b_packs_under_1_mb_with_repo_map_inside(tmp_path):
     assert r.returncode == 0, r.stderr
     assert z.stat().st_size < 1_000_000
     assert "skills/swe-tools/scripts/repo_map.py" in zipfile.ZipFile(z).namelist()
+
+
+# ---------------------------------------------------------------- change 2: title-only issues -> tests as the spec
+
+STAGES = ("locator", "fixer", "verifier")
+
+
+def v5b_prompt(stage, bundle=V5B):
+    return (bundle / "prompts" / f"{stage}.md").read_text()
+
+
+def declared_tools(stage, bundle=V5B):
+    """Tools a stage can call: its yaml tools list, plus the skill toolset when it declares a skill."""
+    from test_v10_bundle import SKILL_TOOLS
+    y = (bundle / "sub_agents" / f"{stage}.yaml").read_text()
+    tools = {t.strip() for t in re.search(r"^tools:\s*\[(.*)\]", y, re.M).group(1).split(",")}
+    return tools | (SKILL_TOOLS if re.search(r"^skills:\s*\[\s*skills/swe-tools\s*\]", y, re.M) else set())
+
+
+def test_locator_has_the_title_only_rule_with_repo_map_and_nearest_tests():
+    p = v5b_prompt("locator")
+    rule = next((l for l in p.splitlines() if "only a title" in l), None)
+    assert rule, "title-only rule missing"
+    assert "under 3 lines" in rule
+    assert 'python3 /tmp/swe/repo_map.py' in rule and "--grep" in rule        # the sandbox path, through run_command
+    assert 'git grep -ln' in rule and "-- tests" in rule
+    assert "python3 /tmp/swe/test.py --target" in rule                       # the real helper and flag
+    assert "SPEC:" in p and "traceback" in p.lower()                          # failures reported as the spec
+    assert "at most 8 tool calls" in p                                        # the call cap is unchanged
+    base = v5b_prompt("locator", V5ALL).splitlines()
+    assert 0 < len(p.splitlines()) - len(base) <= 6
+
+
+def test_test_helper_named_in_prompts_takes_target():
+    """The prompts use test.py --target; the shipped helper must read exactly that flag."""
+    src = (SCRIPTS / "test.py").read_text()
+    assert 'opt.get("target"' in src
+    for s in STAGES:
+        for m in re.finditer(r"python3 /tmp/swe/(\w+)\.py", v5b_prompt(s)):
+            assert (SCRIPTS / f"{m.group(1)}.py").exists(), (s, m.group(0))
+
+
+def affirmative(text):
+    """Drop the explicit negations ("There is no edit_file tool", "(no git_grep, no bash tool)"): naming a tool to say
+    it does not exist is the point of those lines, not a call."""
+    text = re.sub(r"\(no [^)]*\)", " ", text)
+    return re.sub(r"There is no [^.:]*[.:]", " ", text)
+
+
+def test_every_tool_named_in_a_v5b_prompt_is_declared_by_that_stage():
+    """Reuses the R89 matcher from the v10 prompt lints (tests/test_v10_prompts.named_tools)."""
+    from test_v10_prompts import HALLUCINATED, REGISTRY_FALLBACK, named_tools
+    from test_v10_bundle import SKILL_TOOLS
+    vocab = REGISTRY_FALLBACK | SKILL_TOOLS | HALLUCINATED
+    for s in STAGES:
+        found = named_tools(affirmative(v5b_prompt(s)), vocab)
+        assert found <= declared_tools(s), (s, found - declared_tools(s))
+        assert ("submit_patch" in found) == (s == "verifier"), s
+    assert named_tools(affirmative("then call git_grep('x')"), vocab) - declared_tools("locator") == {"git_grep"}  # control
+    assert named_tools(affirmative("There is no edit_file tool and no bash tool: use x."), vocab) == set()
