@@ -16,10 +16,24 @@
 #   fix_gold    --oracle              fix_empty    --skip-agent-patch        (scripts/pallets/run_eval_pallets.py with
 #                                                                             G4_WHEELHOUSE = the pack's own wheels)
 # Output: data/pallets/oracle/pod_probe/<run>/ (task_results.jsonl, test_outputs/) and probe.log. No GPU, no model.
+#
+# 2026-10-06 (heldout1k): PROBE_HARNESS=<repo-relative dir> uses an already packed harness dir (e.g. one written by
+# scripts/heldout/pack_heldout.py) instead of running pack.py in the container; PROBE_CONC = the harness --concurrency
+# (default 2); PROBE_NO_EDITABLE=1 exports G4_NO_EDITABLE=1 as scripts/pallets/or_race.sh does; DRY_RUN=1 prints the
+# plan and exits before anything is deleted or started.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 IDS_FILE="${1:?usage: pod_probe.sh IDS_FILE}"
 OUT="${PROBE_OUT:-$PWD/data/pallets/oracle/pod_probe}"      # PROBE_OUT: absolute dir, for a second probe beside the first
+if [ "${DRY_RUN:-0}" = 1 ]; then
+  echo "out=$OUT"; echo "ids=$IDS_FILE"
+  echo "harness=${PROBE_HARNESS:-pack.py --venv ${PROBE_VENV:-default}}"
+  echo "runs=${PROBE_RUNS:-stock fix}"; echo "conc=${PROBE_CONC:-2}"; echo "no_editable=${PROBE_NO_EDITABLE:-0}"
+  exit 0
+fi
+if [ -n "${PROBE_HARNESS:-}" ]; then
+  [ -f "$PROBE_HARNESS/tasks.jsonl" ] || { echo "no $PROBE_HARNESS/tasks.jsonl"; exit 1; }
+fi
 rm -rf "$OUT" && mkdir -p "$OUT"
 cp "$IDS_FILE" "$OUT/ids.txt"
 IMAGE="${PROBE_IMAGE:-python:3.12-slim}"
@@ -59,7 +73,12 @@ uv pip install -q --system --no-deps $(cat /tmp/newest.txt)
 bash /g4/pod/buildenv.sh
 python -c "import importlib.metadata as m; print('harness env:', {p: m.version(p) for p in ('click', 'flask', 'werkzeug', 'jinja2', 'itsdangerous')})" || true
 /root/buildenv/bin/python -c "import importlib.metadata as m; print('buildenv:', {p: m.version(p) for p in ('click', 'flask', 'werkzeug', 'jinja2', 'markupsafe', 'itsdangerous', 'blinker')})" || true
-python /g4/scripts/pallets/pack.py --ids /out/ids.txt --venv "$PROBE_VENV" --out /root/h
+if [ -n "$PROBE_HARNESS" ]; then
+  cp -r "/g4/$PROBE_HARNESS" /root/h
+else
+  python /g4/scripts/pallets/pack.py --ids /out/ids.txt --venv "$PROBE_VENV" --out /root/h
+fi
+if [ "$PROBE_NO_EDITABLE" = 1 ]; then export G4_NO_EDITABLE=1; fi
 cp -r /g4/submissions/v10 /tmp/bundle
 mkdir -p /tmp/sbx /tmp/run && cd /tmp/run
 export OPENAI_BASE_URL=http://127.0.0.1:9/v1 OPENAI_API_KEY=EMPTY G4_COMPACTION=0 TMPDIR=/tmp/sbx
@@ -67,7 +86,7 @@ IDS=$(tr '\n' ' ' < /out/ids.txt)
 common() {
   # shellcheck disable=SC2086
   echo --tasks /root/h/tasks.jsonl --snapshots-dir /root/h/snapshots --submission-dir /tmp/bundle --sandbox subprocess \
-    --timeout-seconds 180 --max-time-minutes 5 --concurrency 2 --display quiet --task-ids $IDS
+    --timeout-seconds 180 --max-time-minutes 5 --concurrency "$PROBE_CONC" --display quiet --task-ids $IDS
 }
 if [[ " $PROBE_RUNS " == *" stock "* ]]; then
 # shellcheck disable=SC2046
@@ -96,7 +115,8 @@ for label, g, e in (("stock", "stock_gold", "stock_empty"), ("fix", "fix_gold", 
     print(label, "valid", sum(1 for t in ids if res[g].get(t) and res[e].get(t) is False), "of", len(ids))
 PY
 SH
-docker run --rm --cpus "${PROBE_CPUS:-6}" --memory 12g -e PROBE_VENV="${PROBE_VENV:-default}" \
+docker run --rm --cpus "${PROBE_CPUS:-6}" --memory "${PROBE_MEM:-12g}" -e PROBE_VENV="${PROBE_VENV:-default}" \
+  -e PROBE_HARNESS="${PROBE_HARNESS:-}" -e PROBE_CONC="${PROBE_CONC:-2}" -e PROBE_NO_EDITABLE="${PROBE_NO_EDITABLE:-0}" \
   -e PROBE_RUNS="${PROBE_RUNS:-stock fix}" -v "$PWD":/g4:ro -v "$OUT":/out -v g4-pip-cache:/root/.cache/pip \
   -v "${G4_PALLETS:-$HOME/.cache/g4/pallets}":/root/.cache/g4/pallets:ro \
   -v g4-uv-cache:/root/.cache/uv -w /tmp "$IMAGE" bash -c "$SCRIPT" 2>&1 | tee "$OUT/probe.log"

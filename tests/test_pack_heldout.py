@@ -131,7 +131,7 @@ def test_snapshot_is_a_single_commit_repo_at_base_commit(world, tmp_path):
     tgz = out / "snapshots" / "widget_bbb2222.tgz"
     with tarfile.open(tgz) as t:
         names = t.getnames()
-    assert all(n == "./" or n.startswith("./") for n in names)          # the Pallets/competition member style
+    assert names[0] == "." and all(n.startswith("./") for n in names[1:])   # the Pallets member style
     ws = extract(tgz, tmp_path / "x")
     log = sh("-C", str(ws), "log", "--format=%s").splitlines()
     assert log == ["baseline"]
