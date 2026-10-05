@@ -22,10 +22,11 @@ Writes <out>/ (same names and meaning as pack.py):
                        advertises the graph tools when both files exist (agent_runner.py), so without them a run sees a
                        different prompt than the competition's. --no-graphs skips them.
   wheels/              the exact pinned wheels of the packed tasks' freezes (row env.deps) for linux x86_64 AND aarch64
-                       (the local Docker probe is arm64), + flit_core==3.12.0, minus each repo's own distribution; from
+                       (the local Docker probe is arm64), + flit_core==3.12.0; from
                        --wheel-cache, downloaded there first unless --no-fetch (sdist-only pins are built to a pure wheel).
-  wheels/_extra-<REPO_PKG>.txt  per repo (REPO_PKG = repo short name lower-cased, run_eval.faithful_install): the freeze
-                       minus the repo's own distribution. scripts/pallets/run_eval_pallets.py installs it --no-deps into
+  wheels/_extra-<REPO_PKG>.txt  per repo (REPO_PKG = repo short name lower-cased, run_eval.faithful_install): the full
+                       freeze, own distribution included (unlike pack.py: no buildenv copy supplies its metadata here).
+                       scripts/pallets/run_eval_pallets.py installs it --no-deps into
                        every sandbox, so the sandbox holds the miner's validation venv. Mixed versions of one package
                        across repos are fine here (unlike pack.py's single-venv packs): every repo's own exact pins are
                        installed last.
@@ -245,13 +246,12 @@ def build_embeddings(graph_json: Path, npz: Path, python: str) -> bool:
 
 
 # ------------------------------------------------------------------------------------------- wheels
-def own_dist(repo: str) -> str:
-    return norm(miner.own_package(repo))
-
 
 def extra_lines(row: dict) -> list:
-    skip = {own_dist(row["repo"]), norm(repo_pkg(row["repo"]))}
-    return [p for p in row["env"]["deps"] if norm(p.split("==")[0]) not in skip]
+    """The miner's validation freeze as is, own distribution included: its metadata is part of that venv (isort's
+    _version.py reads importlib.metadata.version("isort"); the first s200 pre-flight without it lost 12/12 isort gold
+    runs at collection). The repo's code still comes from /workspace, which precedes site-packages."""
+    return list(row["env"]["deps"])
 
 
 def wheel_key(fname: str) -> tuple:

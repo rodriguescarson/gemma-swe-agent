@@ -178,22 +178,25 @@ def test_env_recipe_is_carried_into_env_json_and_extra_files(world, tmp_path):
     assert w["pins"] == world["rows"][0]["env"]["deps"]
     assert w["own"] == "widget" and w["statement"] == "pr"
     assert env["widget_bbb2222"]["statement"] == "title_only"
-    # one _extra file per REPO_PKG (= repo short name, lower-case, as run_eval.faithful_install computes it):
-    # the freeze minus the repo's own distribution
-    assert (out / "wheels" / "_extra-widget.txt").read_text() == "iniconfig==2.3.0\npytest==8.4.2\nzope-interface==8.6\n"
-    assert (out / "wheels" / "_extra-cli.txt").read_text() == "pytest==8.4.2\nrequests==2.34.2\n"   # httpie/cli
+    # one _extra file per REPO_PKG (= repo short name, lower-case, as run_eval.faithful_install computes it): the miner's
+    # full freeze INCLUDING the repo's own distribution. Its metadata is part of the validation venv (isort's
+    # _version.py calls importlib.metadata.version("isort"); preflight run 1 without it: 12/12 isort gold collection
+    # errors); the code itself still comes from /workspace, which precedes site-packages
+    assert (out / "wheels" / "_extra-widget.txt").read_text() == \
+        "iniconfig==2.3.0\npytest==8.4.2\nwidget==1.0.0\nzope-interface==8.6\n"
+    assert (out / "wheels" / "_extra-cli.txt").read_text() == "httpie==3.2.4\npytest==8.4.2\nrequests==2.34.2\n"
 
 
 def test_wheelhouse_holds_exactly_the_pins_for_both_arches(world, tmp_path):
     out = pack(world, tmp_path / "h")
     whl = sorted(f.name for f in (out / "wheels").glob("*.whl"))
     assert "unrelated-9.9-py3-none-any.whl" not in whl
-    assert "widget-1.0.0-py3-none-any.whl" not in whl                   # own packages are not shipped
+    assert "widget-1.0.0-py3-none-any.whl" in whl                       # own distribution shipped (metadata)
     assert {"zope_interface-8.6-cp312-cp312-manylinux_2_17_x86_64.whl",
             "zope_interface-8.6-cp312-cp312-manylinux_2_17_aarch64.whl", "flit_core-3.12.0-py3-none-any.whl",
             "requests-2.34.2-py3-none-any.whl"} <= set(whl)
     man = json.loads((out / "manifest.json").read_text())
-    assert man["missing_wheels"] == []
+    assert man["missing_wheels"] == ["httpie==3.2.4"]                   # no wheel for it in the fake cache
     assert man["n_tasks"] == 3
 
 
