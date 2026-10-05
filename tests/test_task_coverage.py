@@ -44,3 +44,15 @@ def test_report_counts_and_gaps(tmp_path):
     rep = json.loads(out.read_text())
     assert rep["n"] == 6 and rep["counts"]["positive_only"] == 5 and rep["counts"]["negative_route"] == 1
     assert "negative_route" in rep["gaps"] and "positive_only" not in rep["gaps"]
+
+
+def test_datetime_library_idioms_are_tagged_and_plain_time_words_are_not():
+    """arrow-style tests (dt, arrow.Arrow, .shift(, humanize, DateTimeParser, tzoffset/utcnow) are datetime tasks;
+    the miner found 72 of 93 arrow tasks untagged (2026-10-05). 'timer' / 'timeout' alone must not count."""
+    import task_coverage as C
+    for tp in ("+    assert dt.shift(days=1) == x\n", "+    arw = arrow.Arrow(2013, 1, 1)\n",
+               "+    assert self.now.humanize(later) == 'in 2 hours'\n", "+    self.parser = parser.DateTimeParser()\n",
+               "+    tz = tzoffset(None, 3600)\n", "+    now = arrow.utcnow()\n"):
+        assert "datetime" in C.tags(_t(test_patch=tp)), tp
+    for tp in ("+    with timer():\n+        run()\n", "+    r = f(timeout=3)\n"):
+        assert "datetime" not in C.tags(_t(test_patch=tp)), tp

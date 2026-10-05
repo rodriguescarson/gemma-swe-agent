@@ -32,7 +32,8 @@ RX = {
     "parsing": r"\bpars(e|er|ing)\b|tokeni[sz]|\bloads?\(",
     "numeric_float": r"\d+\.\d+|approx\(|isclose|Decimal|Fraction",
     "path_fs": r"tmp_path|tmpdir|os\.path|pathlib|\.open\(|Path\(",
-    "datetime": r"datetime|timedelta|tzinfo|timezone",
+    "datetime": (r"datetime|timedelta|tzinfo|timezone|\bdt\b|arrow\.(Arrow|get|now|utcnow)|\.shift\(|\b(de)?humanize"
+                 r"|DateTimeParser|\btz(offset|utc|local|file|gettz)\b|\butcnow\b|\bstrftime|\bstrptime|\bisoformat"),
     "stateful": r"\.(reset|clear|add|append|push|pop|update|set_\w+|close|open|start|stop)\(",
     "cache": r"cache|memoi[sz]",
     "async": r"\basync def\b|\bawait\b|asyncio|anyio|trio",
