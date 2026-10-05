@@ -337,3 +337,28 @@ hidden 58: v4 3 < v4h2g 5 <= v4h2 6. A +9 local gain moved the hidden score by -
 repos (fastapi/rich/requests/httpx); the hidden set is private repos. Consequence: rank variants on the 1,522-task
 offline held-out set (data/heldout1k + Pallets; other repos, 20% title-only) before spending L4 quota or a slot; the
 public 74 stays a smoke/regression check only. Needs a model server (A6000 offered 2026-10-05, or paid).
+
+## Off-repo ranking check pre-registration (2026-10-05 16:05 IST, before any spend): does Pallets rank like hidden?
+Question: the public 74 (4 repos) ranked v4h2 25 < v4 27 < v4h2g 34 on L4, while the hidden 58 read v4 3 < v4h2g 5 <=
+v4h2 6. Does an offline set from OTHER repos (SWE-Pallets-X: click/flask/werkzeug/jinja2/markupsafe/sympy) rank these
+three bundles like hidden? Already on disk (reused, not re-run): v4 on dev40 = 7/40 (eval/runs/or_pal_v4_v10, 2026-10-01,
+docs/eval/PALLETS_OR_RACE.md; parasail/fp8 then ran ~3x slower than modelled L4, so that run sat under extra time pressure).
+No run of v4h2 or v4h2g on dev40 or holdout exists; no bundle has ever run on holdout (no packed holdout harness exists).
+Pipeline: scripts/pallets/or_race.sh (Docker-emulated pod env, faithful eval_config budgets 5 min / 70 calls, compaction on,
+L4 pacing, google/gemma-4-31b-it pinned parasail/fp8, CONC=2 per arm = 4 concurrent), 1 sample per task. PROXY result.
+Budget: hard cap $5 total for this check (OpenRouter usage 181.614 at start; stop at 186.61), per-arm MAX_USD_ARM set so
+the arms sum to <= the remaining cap. Smoke first: v4h2 vs v4h2g on 3 dev40 tasks; extrapolate per-task cost.
+Task-set rule: holdout (103) needs all three arms (~309 task-runs); if smoke cost x 309 > ($5 - smoke), cut to dev40
+(40 tasks; v4 reused, so missing arms = v4h2 + v4h2g). Holdout would additionally need packing, graph fetch and a gold/empty
+pre-flight, none of which exist yet.
+Readings (paired, same race, v4h2g - v4h2):
+- holdout 103: >= +8 -> proxy agrees with PUBLIC, disagrees with hidden -> not a better ranking tool; within +-4 -> consistent
+  with hidden; +5..+7 -> inconclusive.
+- dev40 (scaled by 40/103): >= +4 -> agrees with public (not a better ranking tool); within +-2 -> consistent with hidden;
+  +3 -> inconclusive.
+- v4: reported against both (dev40 v4 is a cross-day read, so a v4 gap within +-2 is not read as an ordering).
+Stage 2, only if stage-1 spend leaves >= $1.5 under the cap: a second dev40 race v4 vs v4h2 (same-day v4 control, and a v4h2
+replicate that measures run-to-run noise directly; v4h2 replicate |delta| is reported as the noise floor).
+Caveats stated now: hidden reads are single and noisy (~+-2.3 tasks SD), and the hidden gap v4h2g - v4h2 = -1 is itself
+inside that noise, so "agrees with hidden" here means only "does NOT reproduce the public +9"; it is weak evidence in either
+direction. Wilson 95% CIs per arm and paired wins/losses with a two-sided sign test are reported.
