@@ -478,3 +478,13 @@ Smoke (2026-10-05 22:55 IST, OpenRouter parasail/fp8, Docker, dev40 first 5): se
 in 5/5 tasks, locator's first locate.py worked 5/5, analyzer 0/5 tasks with a can't-open (v4h2f 54/74, v4h2g 44/74
 before). 2/5 solved (screening only). Compliance evidence only: Kaggle /tmp rewrite reachability is proven separately
 by the v4h2f helper-check (PASS); the L4 run of v5h2 is the binding test. OpenRouter balance after: $8.04.
+
+## v5h2 vs v4h2 off-repo, pre-registered 2026-10-05 23:10 IST (before spend)
+Arm: v5h2 (v4h2 + setup stage + view.py loop breaker + temp 0.2 + verifier repro + fixer Working rules + locator
+search filter), 1 sample, or_race.sh parasail/fp8, same settings as today's v4h2 runs, on dev40 (40) and holdout57
+(the same 57 ids, data/pallets/holdout57_ids.txt). Paired against v4h2's runs from today (dev40 16:23-17:49 IST,
+holdout57 18:30 IST): v4h2 29/97. Confound stated: different hour, same provider and settings.
+Reading (paired, 97 tasks): v5h2 - v4h2 >= +5 net with sign-test p < 0.10 -> v5h2 is the Kaggle/submission
+candidate after its L4 run passes the helper gate; within +-4 -> no evidence, v5h2 still runs on L4 for the helper
+gate, slot choice waits; <= -5 -> regression: bisect (setup stage alone on v4h2 first) before any L4 run.
+Cap $4.6 (dev40 $2.0, holdout57 $2.6).
