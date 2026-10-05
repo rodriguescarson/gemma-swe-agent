@@ -21,7 +21,8 @@ fi
 command -v "$KAGGLE" >/dev/null 2>&1 || { echo "$(date -u) [$(hostname -s)] ABORT: kaggle binary not found (KAGGLE_BIN=$KAGGLE); not armed" >> "$LOG"; echo "kaggle binary not found" >&2; exit 2; }
 # 0 = a submission with TAG exists, 1 = listing succeeded and it does not, 2 = listing failed (unknown: never submit on it)
 already() { local out; out=$("$KAGGLE" competitions submissions $COMP -v 2>/dev/null) || return 2
-  echo "$out" | grep -q "^ref," || return 2
+  # header: 'ref,fileName,...' (CLI 2.x) or 'fileName,date,...' (CLI 1.7, no ref column; 2026-10-05 sub11 stalled on it)
+  echo "$out" | grep -qE "^(ref,)?fileName," || return 2
   echo "$out" | grep -q ",\"\?$TAG" && return 0 || return 1; }
 echo "$(date -u) [$(hostname -s)] armed $KERNEL v${KERNEL_VERSION:-1} for $AT UTC (tag $TAG)" >> "$LOG"
 # Target = the NEXT occurrence of AT (UTC) after arming, as an absolute epoch; a late wake still fires, an afternoon

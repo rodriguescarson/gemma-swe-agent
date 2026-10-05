@@ -130,3 +130,37 @@ def test_venv_kaggle_next_to_the_script_is_found(tmp_path):
     env.pop("KAGGLE_BIN", None)
     subprocess.run(["bash", str(script), "k", "0001", "sub3: v4 staged"], env=env, check=True, timeout=60)
     assert len([l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]) == 1
+
+
+def _fake_kaggle_17(tmp, existing):
+    """kaggle 1.7.4.5 (the Mac's ~/Library/Python/3.9 CLI) prints the -v listing WITHOUT a ref column:
+    'fileName,date,description,status,publicScore,privateScore'. 2026-10-05: submit_at's header check required '^ref,'
+    and read every 1.7 listing as a failure, so sub11 refused to submit for 26 minutes."""
+    calls = tmp / "calls.txt"; fake = tmp / "kaggle"
+    fake.write_text(f"""#!/bin/bash
+echo "$@" >> {calls}
+if [ "$2" = submissions ]; then
+  echo 'fileName,date,description,status,publicScore,privateScore'
+  {"".join(f'echo \'submission.zip,d,"{d}",COMPLETE,0.1,\';' for d in existing)}
+  exit 0
+fi
+echo "Successfully submitted"
+""")
+    fake.chmod(0o755)
+    return fake, calls
+
+
+def _run17(tmp, existing, msg):
+    fake, calls = _fake_kaggle_17(tmp, existing)
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%H%M")
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1")
+    subprocess.run(["bash", str(SCRIPT), "k", now, msg], env=env, check=True, timeout=60)
+    return [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
+
+
+def test_kaggle_17_listing_without_ref_column_submits_once(tmp_path):
+    assert len(_run17(tmp_path, ["sub10: older"], "sub11: v4h2g")) == 1
+
+
+def test_kaggle_17_listing_still_detects_the_tag(tmp_path):
+    assert _run17(tmp_path, ["sub11: v4h2g"], "sub11: v4h2g") == []
