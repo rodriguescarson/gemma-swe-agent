@@ -10,6 +10,8 @@ import os
 import subprocess
 import sys
 import tarfile
+import zipfile
+from importlib import metadata as importlib_metadata
 from pathlib import Path
 
 import pytest
@@ -93,6 +95,13 @@ def world(tmp_path):
               "zope_interface-8.6-cp312-cp312-manylinux_2_17_aarch64.whl", "requests-2.34.2-py3-none-any.whl",
               "widget-1.0.0-py3-none-any.whl", "unrelated-9.9-py3-none-any.whl"):
         (wheels / f).write_bytes(b"w:" + f.encode())
+    # the own distribution as a real wheel: code + dist-info (METADATA, entry points)
+    with zipfile.ZipFile(wheels / "widget-1.0.0-py3-none-any.whl", "w") as z:
+        z.writestr("widget/__init__.py", "X = 'released'\n")
+        z.writestr("widget-1.0.0.dist-info/METADATA", "Metadata-Version: 2.1\nName: widget\nVersion: 1.0.0\n")
+        z.writestr("widget-1.0.0.dist-info/entry_points.txt", "[pytest11]\nwidget = widget.plugin\n")
+        z.writestr("widget-1.0.0.dist-info/WHEEL", "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n")
+        z.writestr("widget-1.0.0.dist-info/RECORD", "")
     return {"tmp": tmp_path, "clones": clones, "tasks": tasks, "ids": ids, "wheels": wheels, "rows": rows,
             "c1": c1, "c2": c2, "c3": c3, "sub": sub}
 
@@ -182,16 +191,20 @@ def test_env_recipe_is_carried_into_env_json_and_extra_files(world, tmp_path):
     # full freeze INCLUDING the repo's own distribution. Its metadata is part of the validation venv (isort's
     # _version.py calls importlib.metadata.version("isort"); preflight run 1 without it: 12/12 isort gold collection
     # errors); the code itself still comes from /workspace, which precedes site-packages
+    # Pins are `===` (string-exact), so no repo can be served another repo's metadata-only stub of a shared package
+    # (packaging, pluggy, attrs are both an own distribution and someone else's dependency); the own distribution is
+    # pinned to its stub's local version
     assert (out / "wheels" / "_extra-widget.txt").read_text() == \
-        "iniconfig==2.3.0\npytest==8.4.2\nwidget==1.0.0\nzope-interface==8.6\n"
-    assert (out / "wheels" / "_extra-cli.txt").read_text() == "httpie==3.2.4\npytest==8.4.2\nrequests==2.34.2\n"
+        "iniconfig===2.3.0\npytest===8.4.2\nwidget==1.0.0+g4meta\nzope-interface===8.6\n"
+    assert (out / "wheels" / "_extra-cli.txt").read_text() == "httpie==3.2.4+g4meta\npytest===8.4.2\nrequests===2.34.2\n"
 
 
 def test_wheelhouse_holds_exactly_the_pins_for_both_arches(world, tmp_path):
     out = pack(world, tmp_path / "h")
     whl = sorted(f.name for f in (out / "wheels").glob("*.whl"))
     assert "unrelated-9.9-py3-none-any.whl" not in whl
-    assert "widget-1.0.0-py3-none-any.whl" in whl                       # own distribution shipped (metadata)
+    assert "widget-1.0.0+g4meta-py3-none-any.whl" in whl                # own distribution: metadata-only stub
+    assert "widget-1.0.0-py3-none-any.whl" not in whl
     assert {"zope_interface-8.6-cp312-cp312-manylinux_2_17_x86_64.whl",
             "zope_interface-8.6-cp312-cp312-manylinux_2_17_aarch64.whl", "flit_core-3.12.0-py3-none-any.whl",
             "requests-2.34.2-py3-none-any.whl"} <= set(whl)
@@ -256,3 +269,24 @@ def test_unknown_id_fails_loudly(world, tmp_path):
     world["ids"].write_text("nope_123\n")
     with pytest.raises(SystemExit):
         pack(world, tmp_path / "h")
+
+
+def test_own_distribution_ships_as_a_metadata_only_wheel(world, tmp_path):
+    """The miner's venv gave the repo's own distribution for importlib.metadata only (code from the workspace via
+    PYTHONPATH). Installed as a real wheel it shadows /workspace/src (site-packages precedes .pth paths): preflight
+    run 2 lost black 4/5, cattrs 13/13, cleo 1/2 that resolved in run 1. So the stub keeps dist-info, drops the code."""
+    out = pack(world, tmp_path / "h")
+    stub = out / "wheels" / "widget-1.0.0+g4meta-py3-none-any.whl"
+    di = "widget-1.0.0+g4meta.dist-info"
+    with zipfile.ZipFile(stub) as z:
+        names = sorted(z.namelist())
+        assert all(n.startswith(di + "/") for n in names)
+        assert z.read(f"{di}/METADATA").decode() == "Metadata-Version: 2.1\nName: widget\nVersion: 1.0.0+g4meta\n"
+        assert b"[pytest11]" in z.read(f"{di}/entry_points.txt")
+        rec = z.read(f"{di}/RECORD").decode()
+        assert all(n in rec for n in names)
+        z.extractall(tmp_path / "site")
+    d = next(importlib_metadata.distributions(name="widget", path=[str(tmp_path / "site")]))
+    assert d.version == "1.0.0+g4meta"
+    other = digest(pack(world, tmp_path / "h2"))["wheels/widget-1.0.0+g4meta-py3-none-any.whl"]
+    assert other == hashlib.sha256(stub.read_bytes()).hexdigest()        # deterministic zip

@@ -25,7 +25,8 @@ Writes <out>/ (same names and meaning as pack.py):
                        (the local Docker probe is arm64), + flit_core==3.12.0; from
                        --wheel-cache, downloaded there first unless --no-fetch (sdist-only pins are built to a pure wheel).
   wheels/_extra-<REPO_PKG>.txt  per repo (REPO_PKG = repo short name lower-cased, run_eval.faithful_install): the full
-                       freeze, own distribution included (unlike pack.py: no buildenv copy supplies its metadata here).
+                       freeze, own distribution included (unlike pack.py: no buildenv copy supplies its metadata here)
+                       but shipped as a METADATA-ONLY wheel (metadata_stub): a real install would shadow /workspace/src.
                        scripts/pallets/run_eval_pallets.py installs it --no-deps into
                        every sandbox, so the sandbox holds the miner's validation venv. Mixed versions of one package
                        across repos are fine here (unlike pack.py's single-venv packs): every repo's own exact pins are
@@ -247,11 +248,22 @@ def build_embeddings(graph_json: Path, npz: Path, python: str) -> bool:
 
 # ------------------------------------------------------------------------------------------- wheels
 
+STUB = "+g4meta"     # local version of the metadata-only own-distribution wheel (metadata_stub)
+
+
 def extra_lines(row: dict) -> list:
-    """The miner's validation freeze as is, own distribution included: its metadata is part of that venv (isort's
-    _version.py reads importlib.metadata.version("isort"); the first s200 pre-flight without it lost 12/12 isort gold
-    runs at collection). The repo's code still comes from /workspace, which precedes site-packages."""
-    return list(row["env"]["deps"])
+    """The miner's validation freeze, own distribution included: its metadata is part of that venv (isort's
+    _version.py reads importlib.metadata.version("isort"); s200 pre-flight run 1 without it lost 12/12 isort gold runs
+    at collection). It ships as a metadata-only wheel `==X+g4meta` (run 2 installed the real wheel and its code shadowed
+    /workspace/src: 38 drops in black/cattrs/cleo/marshmallow/mistune/structlog). Every other pin is `===X`
+    (string-exact), so a stub of a package that is one repo's own and another repo's dependency (packaging, pluggy,
+    attrs, python-dateutil) can never be installed in place of the real code."""
+    own = norm(miner.own_package(row["repo"]))
+    out = []
+    for p in row["env"]["deps"]:
+        name, _, ver = p.partition("==")
+        out.append(f"{name}=={ver}{STUB}" if norm(name) == own else f"{name}==={ver}")
+    return out
 
 
 def wheel_key(fname: str) -> tuple:
@@ -291,7 +303,50 @@ def fetch_wheel(pin: str, cache: Path, python: str) -> None:
                     shutil.copy2(f, Path(cache) / f.name)
 
 
-def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str) -> dict:
+def metadata_stub(src: Path, dst: Path) -> None:
+    """src wheel -> a py3-none-any wheel holding only its dist-info (METADATA, entry points, licence files) plus a
+    G4_METADATA_ONLY marker, deterministic (fixed zip dates, sorted members). importlib.metadata sees the distribution;
+    no module of it lands in site-packages, so it cannot shadow /workspace/src (site-packages precedes .pth paths)."""
+    import base64
+    import hashlib
+    import zipfile
+    with zipfile.ZipFile(src) as z:
+        di = sorted({n.split("/")[0] for n in z.namelist() if n.split("/")[0].endswith(".dist-info")})
+        if len(di) != 1:
+            raise RuntimeError(f"{src.name}: expected one .dist-info, found {di}")
+        di = di[0]
+        dist, ver = di[: -len(".dist-info")].rsplit("-", 1)
+    new = f"{dist}-{ver}{STUB}.dist-info"
+    with zipfile.ZipFile(src) as z:
+        files = {new + n[len(di):]: z.read(n) for n in sorted(z.namelist())
+                 if n.startswith(di + "/") and not n.endswith(("/RECORD", "/WHEEL")) and not n.endswith("/")}
+    meta = files[f"{new}/METADATA"].decode("utf-8")
+    meta = re.sub(r"^Version: .*$", f"Version: {ver}{STUB}", meta, count=1, flags=re.M)
+    files[f"{new}/METADATA"] = meta.encode("utf-8")
+    di = new
+    files[f"{di}/WHEEL"] = b"Wheel-Version: 1.0\nGenerator: g4-pack-heldout\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+    files[f"{di}/G4_METADATA_ONLY"] = (f"metadata of {src.name}; code comes from the task workspace "
+                                        "(scripts/heldout/pack_heldout.py)\n").encode()
+    rec = ""
+    for n, b in sorted(files.items()):
+        h = base64.urlsafe_b64encode(hashlib.sha256(b).digest()).rstrip(b"=").decode()
+        rec += f"{n},sha256={h},{len(b)}\n"
+    files[f"{di}/RECORD"] = (rec + f"{di}/RECORD,,\n").encode()
+    tmp = dst.with_name(dst.name + ".part")
+    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as z:
+        for n, b in sorted(files.items()):
+            zi = zipfile.ZipInfo(n, date_time=(1980, 1, 1, 0, 0, 0))
+            zi.external_attr = 0o644 << 16
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            z.writestr(zi, b)
+    os.replace(tmp, dst)
+
+
+def stub_name(pin: str, src: Path) -> str:
+    return f"{src.name.split('-')[0]}-{pin.partition('==')[2]}{STUB}-py3-none-any.whl"
+
+
+def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str, own: set = frozenset()) -> dict:
     Path(cache).mkdir(parents=True, exist_ok=True)
     have = cache_index(cache)
     if fetch:
@@ -303,9 +358,15 @@ def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str) -
     missing, one_arch = [], []
     for pin in pins:
         name, _, ver = pin.partition("==")
+        ver = ver.lstrip("=")
         fs = have.get((norm(name), ver), [])
         if not fs:
             missing.append(pin)
+            continue
+        if pin in own:                                # metadata only, see metadata_stub
+            src = sorted(fs, key=lambda f: (not is_pure(f.name), f.name))[0]
+            d = wdir / stub_name(pin, src)
+            metadata_stub(src, d)
             continue
         if not arch_ok(fs):
             one_arch.append(pin)
@@ -407,7 +468,7 @@ def main(argv=None) -> int:
     for tid in packed:
         r = rows[tid]
         lines = extra_lines(r)
-        pins.update(lines)
+        pins.update(r["env"]["deps"])
         pkg = repo_pkg(r["repo"])
         if extras.setdefault(pkg, lines) != lines:
             raise SystemExit(f"pack_heldout: two different freezes for repo {r['repo']} in one pack")
@@ -416,8 +477,16 @@ def main(argv=None) -> int:
         f.unlink()
     for pkg, lines in sorted(extras.items()):
         (wdir / f"_extra-{pkg}.txt").write_text("".join(ln + "\n" for ln in lines))
-    w = ship_wheels(sorted(pins), Path(a.wheel_cache), wdir, not a.no_fetch, py)
-    pinset = {(norm(p.split("==")[0]), p.split("==")[1]) for p in pins}
+    own = {p for tid in packed for p in rows[tid]["env"]["deps"]
+           if norm(p.split("==")[0]) == norm(miner.own_package(rows[tid]["repo"]))}
+    for f in wdir.glob("*.whl"):                              # stale real wheels of an own distribution
+        if f"{wheel_key(f.name)[0]}=={wheel_key(f.name)[1]}" in {norm(p.split("==")[0]) + "==" + p.split("==")[1]
+                                                                 for p in own}:
+            f.unlink()
+    w = ship_wheels(sorted(pins), Path(a.wheel_cache), wdir, not a.no_fetch, py, own)
+    w["metadata_only"] = sorted(own)
+    pinset = {(norm(p.split("==")[0]), p.split("==")[1]) for p in pins} | \
+        {(norm(p.split("==")[0]), p.split("==")[1] + STUB) for p in own}
     for f in wdir.glob("*.whl"):                              # a re-pack with fewer tasks drops their wheels
         if wheel_key(f.name) not in pinset:
             f.unlink()
