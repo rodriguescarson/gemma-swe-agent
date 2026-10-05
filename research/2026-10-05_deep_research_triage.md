@@ -20,3 +20,12 @@ rollback (edit.py py_compile); undeclared-tool crash (prompt rule); temperature 
 ## New forum facts (2026-10-05)
 745855 fastapi_15661 unsolvable from the prompt (hidden tests import names absent from the task); 745775/745850
 missing FastAPI test deps and inline_snapshot wheel in the eval sandbox; 745774 baseline repeats one command up to 69x.
+
+## Correction 2026-10-05 15:00 IST: SWE-Gym trajectories are NOT open-teacher
+SWE-Gym/OpenHands-SFT-Trajectories (MIT) were sampled from gpt-4o-2024-08-06 and claude-3-5-sonnet-20241022 (SWE-Gym
+paper arXiv 2412.21139 App. B.4), i.e. closed commercial models: the same distillation class as SWE-smith
+(research/distill.md 2.3, "doubtful"). The report's "open-weight teachers" claim is wrong. Converted rows
+(data/v11/rows_swegym.jsonl, 2,978 rows / 214 tasks, train/convert_swegym.py, tests 30) are QUARANTINED: not used in
+any submitted adapter unless the organizers rule closed-model distillation acceptable. v11c data = Gemma on-policy
+collection + open-weight teachers (Qwen3-Coder, Kimi, DeepSeek) only. Also: those rows include submit_patch calls the
+real fixer cannot make; drop them if the quarantine is ever lifted.
