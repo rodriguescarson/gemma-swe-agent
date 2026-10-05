@@ -328,3 +328,12 @@ scripts) + locator search-term filter (no URLs/versions/env dumps). Combined bou
 sweep 3 + repro 1 + temperature unbounded (+7/-5); realistic +2..+8 over 34. 74 tasks, 4xL4, paired vs v4h2g (34).
 Pass: solved >= 34, crash rows <= 3, mean secs <= 190. PASS with >= 36 -> slot candidate immediately. A FAIL is read
 component by component through the single-variable runs already queued behind it (v4h6g, v4h2gt, v4h4g).
+
+## sub11 RESULT (read 2026-10-05 15:53 IST): v4h2g = 0.08 -> 5/58 (Kaggle truncates: 5/58 = 0.086)
+Pre-registered reading against v4h2 0.10 (6/58, same scorer): gain >= 8, noise 5-7, regression <= 4 -> NOISE (-1 task).
+Against sub10 v4 0.05 (3/58): +2 tasks, the edge of that rule's gain band; with v4 read once on this scorer, not a gain claim.
+Finding (the important one): L4 public ordering does not predict the hidden split. L4 74: v4h2 25 < v4 27 < v4h2g 34;
+hidden 58: v4 3 < v4h2g 5 <= v4h2 6. A +9 local gain moved the hidden score by -1..+2 tasks. The public 74 are 4
+repos (fastapi/rich/requests/httpx); the hidden set is private repos. Consequence: rank variants on the 1,522-task
+offline held-out set (data/heldout1k + Pallets; other repos, 20% title-only) before spending L4 quota or a slot; the
+public 74 stays a smoke/regression check only. Needs a model server (A6000 offered 2026-10-05, or paid).
