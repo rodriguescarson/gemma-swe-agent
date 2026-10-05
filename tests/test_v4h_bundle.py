@@ -160,3 +160,20 @@ def test_v4h6g_is_v4h2g_with_the_view_loop_breaker_in_the_fixer_only():
     assert 'run_command(command="python3 /tmp/swe/view.py' in p and "read_file(" not in p
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-800:]
+
+
+def test_v5all_combines_every_researched_change_on_v4h6g():
+    """v5all = v4h6g (view.py loop breaker) + temperature 0.2 + verifier repro step (v4h4) + fixer rules (sibling sweep,
+    issue-example-first, grep-not-page, edit by call 10) + locator search-term filter. Carson 2026-10-05: implement all."""
+    A, B = ROOT / "submissions" / "v4h6g", ROOT / "submissions" / "v5all"
+    assert files(B) == files(A)
+    changed = {rel for rel in files(A) if not filecmp.cmp(A / rel, B / rel, shallow=False)}
+    assert changed == {"configs/sampling.yaml", "prompts/verifier.md", "prompts/fixer.md", "prompts/locator.md"}, changed
+    assert "temperature: 0.2" in (B / "configs/sampling.yaml").read_text()
+    v = (B / "prompts/verifier.md").read_text(); assert "/tmp/repro.py" in v and "bare assert" in v
+    f = (B / "prompts/fixer.md").read_text()
+    for s in ("git grep -n", "sibling", "example in the issue", "by your 6th tool call"):
+        assert s in f, s
+    assert "URLs" in (B / "prompts/locator.md").read_text()
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "validate.py"), str(B)], capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr[-800:]

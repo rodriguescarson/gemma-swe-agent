@@ -320,3 +320,11 @@ by 3 on the hidden split while it trailed v4 by 2 on L4 (27 vs 25): the L4 order
 inside the noise either way. The base for every helper variant is v4h2 (0.10), not v4. sub11 (v4h2g, 34/74 on L4)
 reads at 05:31 IST; pre-registered reading against v4h2 0.10 (same scorer): gain if >= 8/58 (0.14), noise 5-7,
 regression <= 4.
+
+## v5all pre-registration (2026-10-05 11:30 IST, Carson: "implement all"); runs FIRST after the GPU reset
+v5all = v4h6g (view.py loop breaker, Kaggle-verified) + temperature 0.2 + verifier repro step + fixer rules (issue
+example first, edit by call 6, git grep instead of paging, sibling/caller sweep after the last edit, timeout 30 on
+scripts) + locator search-term filter (no URLs/versions/env dumps). Combined bound from the miss analysis: loops 7 +
+sweep 3 + repro 1 + temperature unbounded (+7/-5); realistic +2..+8 over 34. 74 tasks, 4xL4, paired vs v4h2g (34).
+Pass: solved >= 34, crash rows <= 3, mean secs <= 190. PASS with >= 36 -> slot candidate immediately. A FAIL is read
+component by component through the single-variable runs already queued behind it (v4h6g, v4h2gt, v4h4g).
