@@ -373,3 +373,28 @@ would have cut v4h2 at ~27 tasks. Stopped (in-flight tasks discarded), kept part
 both arms done on click_a3321c9 flask_9822a03 jinja2_b6f50df itsdangerous_7f4dcf8; v4h2g's extra markupsafe_3d809ae row is
 superseded by part B), re-launched part B on the other 36 with MAX_USD_ARM=2.0 (worst case total $4.42 <= $5). Stage 2 is
 off: there will not be $1.5 left. Results = part A rows for those 4 + part B rows for the 36.
+
+### Off-repo ranking check RESULT (dev40, read 2026-10-05 17:55 IST)
+Runs (gitignored): eval/runs/or_pal_dev40_v4h2_v4h2g_partA (4 tasks), _partB (36 tasks, 16:23-17:49 IST), merged rows in
+_merged; v4 reused from eval/runs/or_pal_v4_v10 (2026-10-01). Spend $2.23 for this check (proxies: smoke 0.090, part A 0.329
+incl. discarded in-flight tasks, part B 1.814); OpenRouter usage 181.614 -> 183.842. 0 non-200 replies in part B; provider
+mean latency 8.0 s (worse than 10-01's 4.8 s median), so 30-31/40 tasks per arm hit the 5-min cap: this is a heavily
+time-pressured proxy, not L4 conditions.
+
+| dev40 (40 tasks, 1 sample) | solved | Wilson 95% | hit cap | empty patch |
+|---|---|---|---|---|
+| v4 (2026-10-01, reused) | 7 | 0.087-0.320 | 25 | 16 |
+| v4h2 | 12 | 0.181-0.454 | 31 | 10 |
+| v4h2g | 8 | 0.105-0.348 | 30 | 12 |
+
+Paired: v4h2g vs v4h2: v4h2g-only 1 (click_a3321c9), v4h2-only 5 (jinja2_56a7246 jinja2_d5f49f5 markupsafe_3d809ae
+werkzeug_019498f werkzeug_63a800c), both 7; delta -4, sign p = 0.22. v4h2 vs v4: +5 (5-0, p = 0.06). v4h2g vs v4: +1 (1-0).
+v4's 7 solves are exactly the 7 tasks both new arms solved.
+Reading against the pre-registration: v4h2g - v4h2 = -4. Not >= +4, so Pallets does NOT reproduce the public +9 (the
+question's decisive part). It is also outside the "+-2 consistent with hidden" band, on the negative side, an outcome the
+pre-registration did not name; the direction matches hidden (-1) but the size does not, and p = 0.22 makes it noise-compatible.
+Ordering v4 7 < v4h2g 8 < v4h2 12 is the hidden order (v4 3 < v4h2g 5 <= v4h2 6), with the v4 leg a cross-day read (v4h2g vs
+v4 = +1 is inside +-2 and is not read). Pallets' record against hidden is now 1 match (this) and 1 miss (v4 vs v10.1,
+docs/eval/PALLETS_OR_RACE.md). Weak evidence: hidden reads are single (~+-2.3 tasks SD) and every hidden gap here is inside
+that; 40 tasks give CIs about +-0.14 wide. Not run: holdout (cost cap) and stage 2 (budget rule). Next cheapest discriminator:
+the same race on more Pallets tasks (holdout, needs packing + gold pre-flight) at a less time-pressured provider hour.
