@@ -346,7 +346,10 @@ def stub_name(pin: str, src: Path) -> str:
     return f"{src.name.split('-')[0]}-{pin.partition('==')[2]}{STUB}-py3-none-any.whl"
 
 
-def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str, own: set = frozenset()) -> dict:
+def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str, own: set = frozenset(),
+                real_too: set = frozenset()) -> dict:
+    """Copy each pin's wheels (every arch) from the cache. A pin in `own` ships as its metadata-only stub, plus the
+    real wheels when it is also in `real_too` (another repo of the pack needs its code)."""
     Path(cache).mkdir(parents=True, exist_ok=True)
     have = cache_index(cache)
     if fetch:
@@ -367,7 +370,8 @@ def ship_wheels(pins: list, cache: Path, wdir: Path, fetch: bool, python: str, o
             src = sorted(fs, key=lambda f: (not is_pure(f.name), f.name))[0]
             d = wdir / stub_name(pin, src)
             metadata_stub(src, d)
-            continue
+            if pin not in real_too:
+                continue
         if not arch_ok(fs):
             one_arch.append(pin)
         for f in fs:
@@ -477,16 +481,21 @@ def main(argv=None) -> int:
         f.unlink()
     for pkg, lines in sorted(extras.items()):
         (wdir / f"_extra-{pkg}.txt").write_text("".join(ln + "\n" for ln in lines))
-    own = {p for tid in packed for p in rows[tid]["env"]["deps"]
-           if norm(p.split("==")[0]) == norm(miner.own_package(rows[tid]["repo"]))}
-    for f in wdir.glob("*.whl"):                              # stale real wheels of an own distribution
-        if f"{wheel_key(f.name)[0]}=={wheel_key(f.name)[1]}" in {norm(p.split("==")[0]) + "==" + p.split("==")[1]
-                                                                 for p in own}:
+    own, as_dep = set(), set()
+    for tid in packed:
+        o = norm(miner.own_package(rows[tid]["repo"]))
+        for p in rows[tid]["env"]["deps"]:
+            (own if norm(p.split("==")[0]) == o else as_dep).add(p)
+    as_dep.add(FLIT)
+    real = {(norm(p.split("==")[0]), p.split("==")[1]) for p in as_dep}
+    for f in wdir.glob("*.whl"):                  # real wheels of an own distribution no other repo of the pack needs
+        k = wheel_key(f.name)
+        if not k[1].endswith(STUB) and k not in real:
             f.unlink()
-    w = ship_wheels(sorted(pins), Path(a.wheel_cache), wdir, not a.no_fetch, py, own)
+    w = ship_wheels(sorted(pins), Path(a.wheel_cache), wdir, not a.no_fetch, py, own, as_dep)
     w["metadata_only"] = sorted(own)
-    pinset = {(norm(p.split("==")[0]), p.split("==")[1]) for p in pins} | \
-        {(norm(p.split("==")[0]), p.split("==")[1] + STUB) for p in own}
+    w["metadata_only_and_real"] = sorted(own & as_dep)
+    pinset = real | {(norm(p.split("==")[0]), p.split("==")[1] + STUB) for p in own}
     for f in wdir.glob("*.whl"):                              # a re-pack with fewer tasks drops their wheels
         if wheel_key(f.name) not in pinset:
             f.unlink()

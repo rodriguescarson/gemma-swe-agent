@@ -81,7 +81,7 @@ def world(tmp_path):
                 "validation": {"os": "darwin", "base_rc": 1, "gold_rc": [0, 0]}}
 
     wdeps = ["iniconfig==2.3.0", "pytest==8.4.2", "widget==1.0.0", "zope-interface==8.6"]
-    hdeps = ["httpie==3.2.4", "pytest==8.4.2", "requests==2.34.2"]
+    hdeps = ["httpie==3.2.4", "pytest==8.4.2", "requests==2.34.2", "widget==1.0.0"]   # widget = acme/widget's own
     rows = [row("widget_aaa1111", "acme/widget", c1, wdeps), row("widget_bbb2222", "acme/widget", c2, wdeps, True),
             row("httpie_ccc3333", "httpie/cli", c3, hdeps)]
     tasks = tmp_path / "tasks.jsonl"
@@ -196,7 +196,7 @@ def test_env_recipe_is_carried_into_env_json_and_extra_files(world, tmp_path):
     # pinned to its stub's local version
     assert (out / "wheels" / "_extra-widget.txt").read_text() == \
         "iniconfig===2.3.0\npytest===8.4.2\nwidget==1.0.0+g4meta\nzope-interface===8.6\n"
-    assert (out / "wheels" / "_extra-cli.txt").read_text() == "httpie==3.2.4+g4meta\npytest===8.4.2\nrequests===2.34.2\n"
+    assert (out / "wheels" / "_extra-cli.txt").read_text() == "httpie==3.2.4+g4meta\npytest===8.4.2\nrequests===2.34.2\nwidget===1.0.0\n"
 
 
 def test_wheelhouse_holds_exactly_the_pins_for_both_arches(world, tmp_path):
@@ -204,7 +204,9 @@ def test_wheelhouse_holds_exactly_the_pins_for_both_arches(world, tmp_path):
     whl = sorted(f.name for f in (out / "wheels").glob("*.whl"))
     assert "unrelated-9.9-py3-none-any.whl" not in whl
     assert "widget-1.0.0+g4meta-py3-none-any.whl" in whl                # own distribution: metadata-only stub
-    assert "widget-1.0.0-py3-none-any.whl" not in whl
+    # ... and the real wheel too, because httpie's freeze needs widget's code (s200 run 3: isort lost black, httpie
+    # lost mistune when the real wheel of another repo's own distribution was dropped)
+    assert "widget-1.0.0-py3-none-any.whl" in whl
     assert {"zope_interface-8.6-cp312-cp312-manylinux_2_17_x86_64.whl",
             "zope_interface-8.6-cp312-cp312-manylinux_2_17_aarch64.whl", "flit_core-3.12.0-py3-none-any.whl",
             "requests-2.34.2-py3-none-any.whl"} <= set(whl)
@@ -290,3 +292,10 @@ def test_own_distribution_ships_as_a_metadata_only_wheel(world, tmp_path):
     assert d.version == "1.0.0+g4meta"
     other = digest(pack(world, tmp_path / "h2"))["wheels/widget-1.0.0+g4meta-py3-none-any.whl"]
     assert other == hashlib.sha256(stub.read_bytes()).hexdigest()        # deterministic zip
+
+
+def test_real_own_wheel_dropped_when_no_other_repo_needs_it(world, tmp_path):
+    world["ids"].write_text("widget_aaa1111\n")
+    out = pack(world, tmp_path / "h")
+    whl = {f.name for f in (out / "wheels").glob("*.whl")}
+    assert "widget-1.0.0+g4meta-py3-none-any.whl" in whl and "widget-1.0.0-py3-none-any.whl" not in whl
