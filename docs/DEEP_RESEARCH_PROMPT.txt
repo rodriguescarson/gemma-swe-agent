@@ -1,0 +1,96 @@
+aDEEP RESEARCH BRIEF: Kaggle "Google – The Gemma 4 Developer Agent Competition"
+Written 2026-10-05. Please return live, sourced findings (links + dates), not general advice.
+
+====================================================================================================
+1. WHAT WE ARE BUILDING (context you need)
+====================================================================================================
+- Competition: Kaggle "gemma-4-developer-agent" (main track, $65k, final deadline 2026-12-02, team merge 2026-11-25)
+  and the paper track "gemma-4-developer-agent-paper" ($35k, deadline 2026-11-12).
+- Task: an offline coding agent that fixes GitHub-style issues (SWE-bench style). It is graded on ~120 HIDDEN tasks
+  from PRIVATE repositories (public leaderboard = 58 of them, private = the rest). A task counts as solved only if all
+  hidden FAIL_TO_PASS and PASS_TO_PASS tests pass after the agent's patch.
+- Fixed model: google/gemma-4-31b-it, int4 QAT (W4A16, compressed-tensors), served by vLLM 0.19.1 on 4x NVIDIA L4
+  (tensor-parallel 4), ~30 tokens/s decode, 32k context, events compaction at 14,336 tokens. No internet at run time.
+- Submission = an ADK (Google Agent Development Kit) "agent config" bundle: agent.yaml + prompts + sub-agents
+  (SequentialAgent/ParallelAgent/LoopAgent allowed) + "skills" (our own stdlib-only Python scripts run inside the
+  sandbox) + optional LoRA adapters (rank <= 128, <= 3 GiB, loaded by vLLM). No custom ADK callbacks (the scorer
+  registers none). Sampling knobs available: temperature, top_p, top_k, presence/frequency penalty, seed,
+  max_output_tokens, thinking on/off.
+- Tools the agent gets: run_command (5,000-char output cap, 300 s), read_file (150 lines), edit_file, write_file,
+  submit_patch, get_status, code-graph tools (get_code_neighbors, search_similar_code, get_code_subgraph),
+  run_skill_script, load_skill_resource.
+- Budget per task: ~5 minutes wall clock and <= 70 tool calls (our eval_config); whole hidden run must finish in 12 h
+  sequentially or the submission errors.
+- One submission per day; two final selections.
+
+====================================================================================================
+2. WHERE WE ARE (measured, so you can judge what would be new to us)
+====================================================================================================
+- Public leaderboard: leader 0.24 (~14/58 tasks, team "ТониСтарк собрал реактор в яме", no public code); five teams
+  at 0.17; most at 0.10-0.15. Our hidden reads: 0.10 (v4h2), 0.12 x2 (old scorer), 0.05 (v4 on the rebuilt scorer).
+- Our best measured on the 74 locally-valid public tasks (faithful 4xL4 Kaggle run): 34/74 (v4h2g).
+- Our agent today: 3 stages (locator -> fixer -> verifier), each with fresh context; our own stdlib helpers:
+  locate.py (BM25/AST symbol search), edit.py (SEARCH/REPLACE edits with fuzzy matching and syntax rollback),
+  test.py (targeted pytest runner), check.py (preflight: revert test edits, remove scratch), view.py (line viewer that
+  refuses exact repeat reads).
+- Failure profile of our 40 misses: 22 are "unreachable from the issue text" (title-only PR descriptions whose spec is
+  behind a GitHub link, or hidden tests that check details the issue never states); 16 show repetition loops (the
+  model repeats one identical tool call 10-74 times, often a read with a malformed argument); ~29 edit the right file
+  with a wrong fix; 7 edit the wrong file; the 70-call budget binds more often than the 5-minute cap.
+- Tried and ruled out (don't re-suggest without new evidence): bash-only scaffolds; heavy multi-stage pipelines with
+  repair loops (scored lower: 0.08); thinking-on at large budgets (too slow); LoRA trained naively on our own
+  successful trajectories (adapter applied but caused a read_file repeat loop, 0/5 on smoke); presence/frequency
+  penalties as loop breakers (vLLM applies them within one completion only).
+- Queued, not yet measured: temperature 0.2 (every scored public bundle uses 0.1-0.2), reproduction-script step,
+  sibling-function sweep, rebalanced LoRA (v11b), and "v5all" combining all of these.
+
+====================================================================================================
+3. WHAT WE WANT YOU TO FIND (priority order)
+====================================================================================================
+A. THE COMPETITION ITSELF (live)
+   1. Current public leaderboard top 20 with dates and score history; any team that jumped recently.
+   2. Every Kaggle discussion thread and public notebook from the last 3 weeks about methods that scored >= 0.15:
+      agent structure, prompts, eval_config budgets, temperature/thinking settings, LoRA results, compaction tricks,
+      tool restrictions, how they avoid empty patches and context death. Quote exact settings.
+   3. Organizer (Ryan Holbrook / Kaggle staff) announcements: scorer/wheelhouse changes after 2026-09-30, rulings on
+      distillation from other models, LoRA support, rerun policy, the 12 h limit.
+   4. Paper-track writeups already posted (titles, methods, any reported scores).
+   5. Anything about the leader (0.24): profile, past competitions, GitHub, posts, talks.
+
+B. TECHNIQUES THAT MOVE A ~30B OPEN MODEL ON SWE-BENCH UNDER TIGHT BUDGETS (2025-2026 papers, blogs, repos)
+   1. Methods with measured gains for 7B-32B open models on SWE-bench Verified/Lite where each task has only ONE
+      attempt and ~5 minutes: scaffold/harness design, edit formats, localization, test-driven loops, loop breaking,
+      context management. Report the model size, benchmark, gain, and cost to implement.
+   2. Handling vague / title-only issues offline: inferring intent from tests, git history, docstrings, changelogs,
+      sibling code; any paper on "underspecified issues" (e.g. Ambig-SWE) and what transfers.
+   3. Loop / repetition breaking for agentic tool use without callbacks (prompt-level, tool-level, sampling-level).
+   4. Fine-tuning recipes that work with LoRA at rank <= 128 on ~30B models: SWE-smith, SWE-Gym, SWE-Lego, Kimi-Dev,
+      SWE-RL, Skywork-SWE, R2E-Gym, DeepSWE: how many trajectories, which data mix, masking, whether gains survive
+      int4 quantization; open trajectory datasets with permissive licences usable for SFT.
+   5. Gemma 4 / Gemma 3 specifically as a coding agent: tool-call format quirks, known parser bugs, best prompts,
+      third-party SWE-bench numbers for Gemma 4 31B and the scaffold used.
+   6. Test-time compute that fits ONE GPU-node and 5 minutes: cheap self-verification, single-attempt critics, short
+      parallel candidates with test-based selection.
+
+C. OPEN-SOURCE CODE WE COULD REUSE (GitHub)
+   1. Public repos for this competition (search "gemma-4-developer-agent", "adk_submission", "swegemma") updated in the
+      last 3 weeks; their claimed scores and what changed.
+   2. Stdlib-only tools that work as agent "skills": AST code search (AutoCodeRover style), repo maps (Aider style),
+      robust SEARCH/REPLACE editors, reproduction-test generators, test selection (e.g. TestPrune).
+
+D. DATA (for our own held-out evaluation and training)
+   1. Existing execution-verified SWE task datasets in Python from repos other than fastapi, rich, requests, httpx
+      (SWE-bench extra, SWE-Gym, SWE-smith, R2E-Gym, SWE-rebench, Multi-SWE-bench, Nemotron/NVIDIA sets): licence,
+      size, format, whether runnable offline.
+   2. Public SFT trajectory sets with open licences from open teacher models (Qwen3-Coder, DeepSeek, Kimi).
+
+====================================================================================================
+4. OUTPUT FORMAT WE NEED
+====================================================================================================
+- A ranked list of concrete, implementable ideas for OUR setup (ADK bundle, Gemma-4-31B int4, 5 min/70 calls,
+  offline), each with: source link + date, evidence (who measured what), expected gain if stated, cost to implement,
+  and any risk (rules, time budget, 12 h cap).
+- Separate VERIFIED facts (official pages, measured results) from forum speculation.
+- A short list of what NOT to do (things others tried that failed), with sources.
+- Live numbers: current top-20 leaderboard snapshot with timestamp.
+- Exclude generic advice ("use better prompts"); we want specific, checkable techniques and settings.

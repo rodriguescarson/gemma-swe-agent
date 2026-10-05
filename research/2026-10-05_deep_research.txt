@@ -1,0 +1,213 @@
+Deep Research Report: Optimization and Strategy for the Kaggle Gemma 4 Developer Agent Competition
+The Kaggle "Google – The Gemma 4 Developer Agent Competition" presents an unprecedented engineering challenge: successfully deploying an autonomous software engineering agent powered by a strictly constrained 31-billion parameter open-weight model (Gemma-4-31b-it) entirely offline. Evaluated on approximately 120 hidden GitHub-style issues from private repositories, agents must navigate massive codebases, localize defects, and generate syntax-valid patches that pass hidden test suites, all within a bounded runtime of 12 hours on a 4x NVIDIA L4 cluster1.
+The analysis reveals a profound disconnect between local evaluation metrics and live scoring, driven largely by undocumented intricacies within the official Agent Development Kit (ADK), vLLM deployment bugs, and the inherent underspecificity of real-world issue descriptions. This report provides an exhaustive diagnostic of the live competition landscape, dissects systemic failures within the scoring environment, evaluates state-of-the-art methodologies for ~30B parameter open-weight models, and synthesizes a ranked suite of actionable, standard-library-only strategies to optimize the agent payload.
+The Live Competition Landscape and Leaderboard Dynamics
+The public leaderboard evaluates agent submissions against a subset of exactly 58 public tasks, representing approximately 50% of the total hidden test data3. The final results will be calculated against the remaining private tasks, meaning current leaderboard standings are subject to significant variance.
+Current Leaderboard Snapshot
+The competitive distribution exhibits a sharp power-law curve. While the vast majority of active participants are clustered in the 0.10 to 0.15 score range, a minute fraction of teams has successfully broken the 0.17 threshold, indicating the discovery of robust techniques to handle sandbox limitations and context death.
+
+Rank
+Team Name
+Public Score (Resolved Rate)
+Est. Tasks Solved (out of 58)
+Time Since Last Join
+1
+ТониСтарк собрал реактор в яме
+0.24
+~14 / 58
+416h3
+2
+Statistical Science by Lasme
+0.17
+~10 / 58
+1114h3
+3-5
+Anonymized/Various
+0.17
+~10 / 58
+N/A
+22
+ISAKA Tsuyoshi
+0.12
+~7 / 58
+N/A5
+24
+Manoj Gowda BG
+0.10 - 0.12
+~6 / 58
+N/A7
+> 25
+Main distribution cluster
+0.05 - 0.10
+~3 - 6 / 58
+N/A4
+Note: The highest known purely public notebook baseline ("romanrozen" EDA baseline) currently scores 0.12, while the official Kaggle starter kit ("nursrijan") yields a baseline of 0.056. There is currently no open-source public code that scores above the 0.12 threshold.
+Cross-Validation Disconnect and Leader Analysis
+A critical theme dominating the competition forums is the failure of local cross-validation (CV) scores to translate to the public leaderboard. Competitors executing identical bundles on local hardware report substantial degradation upon Kaggle submission. For instance, local CV scores of 0.24 yield leaderboard scores of 0.10, and CVs of 0.18 yield leaderboard scores of 0.055.
+The current leader, "ТониСтарк собрал реактор в яме" (0.24), has maintained their position for several weeks with no public code releases or forum disclosures outlining their methodology3. The leading submissions are highly likely bypassing the native ADK tools via robust error handling and custom standard-library parsing scripts, as the unmodified ADK is fundamentally incapable of reaching a 0.24 score due to deep-seated parser anomalies9.
+Furthermore, the competition operates a parallel Paper Track (deadline: November 12, 2026), offering a $35,000 prize pool for research advancing agentic software engineering11. As the deadline remains active, no final paper-track writeups have been publicly posted, though the rules require winning submissions to open-source their methodology and code repositories12.
+Forensic Diagnostic of the Kaggle Scoring Environment
+The most formidable barrier to advancing in this competition is the idiosyncratic and brittle nature of the Kaggle scoring backend. A comprehensive forensic analysis of the September 30, 2026 wheelhouse update reveals multiple catastrophic failure modes that silently discard generated patches or induce infinite autoregressive loops2.
+The Double-JSON Escaping Anomaly
+When the official swegemma tools execute a read_file command, the extracted file text undergoes two separate, uncoordinated serialization layers before reaching the LLM's context window. First, the ADK wraps the result in a JSON string containing the status and content. Subsequently, LiteLLM serializes this string again to comply with standard OpenAI tool message formats9.
+The result is double-escaped text. A standard newline character \n is rendered as \\n, and Python block docstrings """ are rendered as \\\"\\\"\\\"9.
+This anomaly critically compromises the native edit_file tool. The edit_file tool strictly requires its old_string argument to execute a byte-for-byte match against the target file. Because the LLM reads the double-escaped text in its context, it frequently attempts to replace text containing literal backslashes (e.g., \"\"\"Break *iterable*), which inevitably fails with a Failed to replace: old_string not found error9. This is a leading cause of repetition loops, where the agent, unaware of the serialization mismatch, retries the identical failed edit endlessly until the 70-call budget is exhausted.
+Silenced LoRA Adapters and vLLM Architecture Bugs
+The competition rules explicitly permit Low-Rank Adaptation (LoRA) adapters up to rank 128 and 3 GiB1. However, deploying them in the current patched vLLM 0.19.1 environment carries absolute risk.
+Due to a specific architectural implementation in the Gemma 4 variant, Gemma4Model registers every decoder layer twice: once standardly as language_model.model.layers.N, and once through a shared alias language_model.model.self_decoder.decoder_layers.N13. During runtime, when LoRAModelManager.activate_adapter iterates over these definitions, it successfully maps the weights to the primary layer. However, when it encounters the alias, it finds no specific LoRA weights mapped in the .safetensors file. Consequently, it executes a module.reset_lora(index) command, silently wiping the exact weights it just loaded13.
+The operational impact is profound: submissions embedding heavily fine-tuned LoRA adapters are silently evaluated as the base Gemma-4-31b-it model, rendering the adapters useless7. Compounding this issue, enabling LoRA via enable_lora=True in the server configuration shrinks the Key-Value (KV) cache allocation dramatically. Competitors report that enabling LoRA restricts the maximum context length to approximately 7.6k tokens, causing tasks requiring the full 32k context to hang indefinitely in the vLLM queue7.
+Sandbox Exceptions and Patch Discarding
+The declarative security model of the ADK evaluation harness is severely brittle regarding tool execution exceptions.
+	•	Undeclared Tool Crashes: If the Gemma 4 model hallucinates a tool name or attempts to call a custom skill not explicitly bound in the agent.yaml configuration, the ADK does not return a graceful validation error to the model. Instead, _get_tool raises a Python ValueError that escapes the sandbox, immediately terminating the entire task and scoring the submission with an empty patch10.
+	•	Malformed Array Arguments: The model periodically hallucinates JSON arrays instead of strings for the file_path argument in run_skill_script (e.g., {"file_path": ["scripts/x.py"]}). The internal .startswith("scripts/") check in skill_toolset.py throws an AttributeError on the list object. Similar to the undeclared tool bug, this exception crashes the sandbox and discards the task2.
+	•	Token Compaction Failure: The ADK is designed to compact event history when the token count reaches 14,3361. However, reports indicate that rapid token influxes can bypass this trigger, pushing the context toward the absolute 32,768 limit. When this overflow occurs, the patch is discarded without scoring2.
+Time Budgets and Rerun Policies
+The overarching constraint dictates that the entire hidden task sequence must complete within 12 hours of wall-clock time1. Organizer Ryan Holbrook has officially clarified a crucial parameter: the computational time consumed by the underlying patch validation (i.e., executing the Pytest suites in the backend to score the agent's patch) does not count against the 12-hour limit16.
+Given a pool of approximately 120 hidden tasks, the mathematical maximum time allotted per task is precisely 6.0 minutes. Therefore, the current local configuration of a 5-minute wall-clock budget per task is strictly optimal to ensure a handful of loop-prone, computationally heavy tasks do not exhaust the global budget and invalidate the entire submission. Furthermore, Kaggle organizers have established a precedent of manually rerunning submissions affected by internal infrastructure or GPU outages17.
+Methodologies for 30B Open Models on Tight Budgets
+Deploying a 31-billion parameter model on a single 4xL4 node requires highly optimized scaffolding. The baseline Gemma-4-31b model achieves approximately 52.0% on SWE-bench Verified, notably trailing other open-weight models like Qwen 2.5 27B (77.2%)18. Bridging this gap requires sophisticated agentic workflows, specifically addressing the phenomenon of underspecified issues and test-time loop breaking.
+Resolving Underspecified Tasks (The Ambig-SWE Paradigm)
+A diagnostic breakdown indicates that a vast majority of failed tasks are "unreachable from the issue text," characterized by title-only pull descriptions or vague feature requests. This directly mirrors the findings of the Ambig-SWE benchmark research (Vijayvargiya et al., 2025/2026), which investigates agent behavior under ambiguity19.
+The Ambig-SWE framework categorizes missing information into two primary classes:
+	•	Navigational Underspecificity: The issue describes a defect but provides no file names, function names, or stack traces, leaving the agent entirely blind to the spatial coordinates of the required fix20.
+	•	Informational Underspecificity: The issue successfully points to the correct file but remains ambiguous regarding the intended logical behavior (e.g., "refactor this module to match the new API" without defining the new API)20.
+Standard linear read-edit-submit pipelines fail uniformly on these tasks. To succeed, the agent structure must mandate a robust offline exploration phase.
+	•	Test-Driven Discovery: When the issue text is barren, the existing test suite is the sole source of truth. The agent must be instructed to utilize its run_command budget to execute pytest on the most likely candidate modules. The resulting assertion tracebacks provide immediate navigational coordinates, while the mismatch between expected and actual values resolves the informational ambiguity20.
+	•	Git History Mining: For informational gaps, the agent must leverage the standard library to read repository histories. Issuing a git log -S "keyword" -p or git blame via run_command provides context on how sibling functions were previously implemented, allowing the agent to infer the missing specifications21.
+Loop and Repetition Breaking Without Callbacks
+The Kaggle ADK expressly forbids custom callbacks, meaning repetition loops must be broken entirely at the sampling and prompt levels1.
+	•	Sampling Level Interventions: The application of presence and frequency penalties is fundamentally flawed for cross-turn loop breaking, as vLLM applies these penalties strictly within a single auto-regressive generation sequence, not across the accumulated multi-turn chat history. However, temperature optimization is critical. Deterministic generation () mathematically guarantees an infinite loop if the model encounters a local minimum or a rejected tool call22. Setting the temperature to  or  (standard among public Kaggle bundles) introduces sufficient token entropy to naturally dislodge the model after a sequential failure.
+	•	Prompt-Level Safeguards: The system prompt must be structurally engineered to parse ADK errors. The prompt must contain a heavily weighted, capitalized directive: "CRITICAL: If a tool returns an error (e.g., 'old_string not found' or 'Sandbox execution error'), YOU MUST NOT repeat the identical tool call. You must systematically alter the arguments, change your search strategy, or invoke a different tool."
+Test-Time Compute within a 5-Minute Budget
+Given the strict 5-minute, 70-call budget, heavy multi-stage parallel pipelines (e.g., generating 5 patches and selecting the best via parallel test runs) are unviable and consistently score lower (e.g., 0.08) due to severe token bloat and context swapping overhead2.
+Instead, test-time compute must be localized strictly to the verification stage. Single-attempt critic routines, where a secondary prompt context reviews the generated git diff against the original issue text before executing the final test suite, provide the highest yield for the lowest token expenditure.
+Designing the Ultimate Stdlib-Only Agent Toolkit
+The native tools provided by the ADK (read_file, search_similar_code) are insufficient for navigating enterprise-scale repositories. The integration of Python stdlib-only tools inside the sandbox as custom "skills" represents the most significant competitive advantage available.
+Standard-Library Structural Repo Maps
+Industry-standard codebase intelligence tools like Aider rely heavily on tree-sitter to generate structural repository maps21. However, tree-sitter requires external C-bindings, violating the offline, dependency-free nature of the Kaggle sandbox.
+Research into tools like skeletree and roam-code demonstrates that identical structural extraction can be achieved natively using Python's built-in ast (Abstract Syntax Tree) module23. A custom standard-library skill (e.g., repo_map.py) can traverse the workspace, parse every .py file via ast.parse(), and extract class definitions, method signatures, and global variables24. By formatting this output as a highly compressed, LLM-friendly hierarchy, the agent gains immediate navigational context across the entire repository without expending tokens on brute-force grep commands.
+Blast-Radius and Impact Analysis
+Advanced static analysis frameworks like qartez-mcp utilize import graphs to calculate the "Blast Radius" of a proposed change21. Using purely standard libraries (ast to extract import statements and collections.defaultdict to construct an adjacency list), a custom skill can build a directed dependency graph of the repository entirely in memory.
+Before the agent commits a fix to a highly connected utility file (e.g., utils.py), a preflight_check.py skill can execute a reverse Breadth-First Search (BFS) on this import graph to identify all modules that depend on the altered function21. The agent is then programmatically instructed to run the tests for the entire blast radius, ensuring that a localized fix does not silently trigger regressions across the broader codebase.
+Fuzzy Matching and Syntax-Validated Editors
+The strict string-matching requirement of the native edit_file tool, combined with the double-JSON escaping bug, is the primary bottleneck for successful code manipulation9.
+To circumvent this, the development team must deploy a custom standard-library tool (e.g., smart_edit.py) to bypass the native tool entirely. This tool would accept an approximate old_string or a precise line-number range, utilize Python's difflib.SequenceMatcher to locate the highest-probability matching block of code in the target file, and execute the replacement21.
+Crucially, immediately after writing to the file, smart_edit.py must execute python -m py_compile <file> to verify syntactic validity. If an IndentationError or SyntaxError is detected, the tool must automatically revert the file to its previous state and return the traceback to the LLM21. This effectively immunizes the agent against malformed indentation—a pervasive failure mode in LLM code generation.
+Fine-Tuning Recipes, Distillation Risks, and Trajectory Data
+While deploying LoRA adapters in the current Kaggle environment is hazardous due to the vLLM layer-alias bug13, engineering adapter weights for potential future wheelhouse patches—or utilizing the training data for prompt alignment—remains a critical contingency.
+SWE-smith vs. SWE-Gym Data Mixes
+The landscape of open-weight SWE fine-tuning is currently dominated by two primary datasets: SWE-smith and SWE-Gym. The distinction between them is critical regarding Kaggle's competition rules.
+	•	SWE-smith: This dataset contains 50,137 task instances across 128 GitHub repositories, making it the largest dataset to date for training software engineering agents27. A 32B parameter model fine-tuned on this data (SWE-agent-LM-32B) achieved an impressive 40.2% on SWE-bench Verified27. However, SWE-smith generated its 5,016 expert trajectories using Claude 3.7 Sonnet27. Utilizing these trajectories touches a regulatory grey area in Kaggle regarding distillation from external, closed-source commercial LLMs2. If the organizers strictly interpret this as a violation, utilizing SWE-smith for fine-tuning risks immediate disqualification2.
+	•	SWE-Gym: This environment provides a mathematically safer alternative. It contains 2,438 Python tasks sourced from 11 repositories, designed explicitly to build outcome-supervised reward models and fine-tuned agents32. Crucially, SWE-Gym provides trajectories sampled strictly from open-weight models (e.g., the OpenHands-SFT-Trajectories dataset, containing 491 highly curated successful runs)32. Because the teacher models are open, this bypasses the closed-source distillation prohibition entirely. Fine-tuning a 32B coder model on these 491 trajectories yielded an absolute improvement of +12.3% on SWE-bench metrics32.
+Public Repositories and Baselines
+Analysis of open-source GitHub repositories dedicated to this competition reveals minimal advanced developments. Projects such as harshithKumar12/swegemma and Avik-Das-567/Kaggle-Notebooks-Avik (Dual-Space Spectral Graph SWE Agent) serve primarily as architectural scaffolds rather than providing high-scoring payloads37. The lack of open-source repositories scoring above 0.12 reinforces the necessity of relying on custom, proprietary skill development.
+Ranked Implementable Strategies for the ADK Payload
+The following recommendations are synthesized for immediate implementation within the local ADK setup (Gemma-4-31B int4, 5 min/70 calls, offline). They are ranked by their expected return on investment relative to implementation cost and operational risk.
+
+Priority
+Technique / Action
+Source Evidence
+Expected Gain
+Cost to Implement
+Risk Profile
+1
+Prompt-Level Double-JSON Unescaping Directive: Inject explicit system instructions warning the model that read files contain double-escaped strings (\\n, \\\"). Mandate that the model mentally unescape these strings when generating the old_string block for native edit tools.
+Kaggle Forums9
+High (Theoretically resolves ~30% of malformed edit loops).
+Low (Prompt engineering only).
+None (Fully compliant with all rules).
+2
+Deploy Fuzzy, Syntax-Validated Editor (smart_edit.py): Bypass the native edit_file tool entirely. Deploy a custom skill utilizing difflib.SequenceMatcher for fuzzy block matching and py_compile for immediate syntax validation and rollback on failure.
+roam-code architecture21
+Very High (Eliminates indentation errors and exact-match string failures).
+Medium (Requires robust Python scripting inside the skills directory).
+Low (Negligible ms overhead against the time budget).
+3
+AST-Based Structural Repo Mapper (repo_map.py): Implement a zero-dependency structural extractor using the built-in ast module. Parse the workspace and summarize class/function signatures to provide immediate navigational context without token-heavy grep commands.
+skeletree / roam-code22
+High (Resolves up to 50% of navigational underspecificity).
+Medium (Requires traversing the file tree efficiently).
+None (Tokens saved offset the script execution time).
+4
+Temperature Standardization: Standardize generation parameters to  to introduce sufficient token entropy to naturally break infinite repetition loops, explicitly avoiding deterministic  generation.
+Forum consensus / Aider22
+Moderate (Prevents absolute local minimum trapping).
+Low (Configuration parameter in agent.yaml).
+None.
+5
+Test-Driven Exploration Protocol: Implement a dedicated skill that searches for test_*.py files near modified targets and executes them via pytest. The agent must parse the tracebacks to infer informational context on vague, title-only issues.
+Ambig-SWE20
+High (Addresses Ambig-SWE informational gaps).
+High (Requires robust stdout parsing to prevent context death).
+Moderate (Consumes 2-3 extra tool calls per attempt).
+6
+Prepare SWE-Gym LoRA Adapter (Contingency): Train a rank-64/128 LoRA on the OpenHands 491-trajectory set from SWE-Gym. Hold deployment until organizers officially confirm the vLLM layer-alias bug is patched.
+SWE-Gym32
+Moderate (Improves tool formatting and logical routing).
+High (Requires external GPU compute infrastructure to train).
+High (Current vLLM bug will wipe adapter weights entirely)7.
+Operational Anti-Patterns (What NOT to Do)
+Based on the forensic analysis of failed public notebooks and the architecture of the Kaggle ADK scorer, the following strategies represent categorical dead ends and must be strictly avoided.
+
+Anti-Pattern
+Reason for Failure
+Source Evidence
+Deploying LoRA Adapters Immediately
+The currently patched vLLM 0.19.1 build iterates over the decoder_layers alias and executes reset_lora, zeroing out adapter weights. The agent will execute entirely as the un-tuned base model.
+Verified by user logs observing zeroed lora_b_stacked tensors7.
+Passing Arrays to Custom Skills
+The ADK function run_skill_script fundamentally crashes if file_path is passed as a JSON array instead of a string, triggering an AttributeError and discarding the patch.
+Verified Kaggle ADK bug2.
+Using importlib in Custom Tools
+Kaggle's declarative security model explicitly blocks dynamic module loading via importlib. Custom tools must execute entirely within the sandbox via run_command or as pre-registered standard skills.
+Official Harness README Section 2.139.
+Activating Thinking Mode at Large Budgets
+The reasoning_content tag is dropped between tool calls by the Kaggle vLLM configuration. Thinking mode consumes excessive tokens without preserving its logical chain across multiple dialogue turns, accelerating context death.
+Forum consensus on token bloat and vLLM ignoring reasoning2.
+Training on SWE-smith Trajectories
+SWE-smith generated its expert trajectories using Claude 3.7 Sonnet. Utilizing this dataset introduces a high risk of violating Kaggle's rules against distillation from closed-source commercial LLMs.
+Dataset documentation and Kaggle distillation debate2.
+Heavy Multi-Stage Reflection Loops
+Complex agent pipelines require constant context reloading. This prevents the 14,336-token compaction from firing gracefully, triggering the overflow bug at 32,768 tokens that silently terminates the task.
+Empirically scored lower (0.08) in local measurements; compaction overflow bugs verified2.
+By circumventing the native ADK tools via robust, syntax-validated standard-library skills, implementing ast-based repository mapping, and structurally forcing the agent to rely on test-suite tracebacks to resolve ambiguity, the payload can be immunized against the primary causes of repetition loops and context death, maximizing performance within the 5-minute constraint.
+Works cited
+	•	The Gemma 4 Developer Agent Competition - Google - Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/leaderboard
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743506
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/744319
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743140
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/745364
+	•	Google - The Gemma 4 Developer Agent Competition - Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743213
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/744272
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/745028
+	•	Google - The Gemma 4 Developer Agent Paper Track | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent-paper/overview/abstract
+	•	Google - The Gemma 4 Developer Agent Paper Track | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent-paper/rules
+	•	Google - The Gemma 4 Developer Agent Competition - Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743508
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/744331
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743063
+	•	Google - The Gemma 4 Developer Agent Competition - Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743663
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743683
+	•	Gemma 4 31B vs Qwen 3.6 27B: Best Local Model for Agents, https://www.betterclaw.io/blog/gemma-4-27b-vs-qwen-3-6-27b
+	•	Ambig-SWE: Interactive Agents to Overcome Underspecificity ... - arXiv, https://arxiv.org/abs/2502.13069
+	•	Ambig-SWE: Interactive Agents to Overcome Underspecificity in, https://openreview.net/forum?id=X2yzXtH4wp
+	•	Qartez MCP Server, https://mcpservers.org/servers/kuberstar/qartez-mcp
+	•	/dev/michael, https://michaellivs.com/
+	•	IT lexicon · 5900+ terms in 7 languages | Thern AI Solutions, https://wiki.thern.io/en/
+	•	daudibrahimhasan/skeletree: A token-cheap skeleton of ... - GitHub, https://github.com/daudibrahimhasan/skeletree
+	•	roam-code - PyPI, https://pypi.org/project/roam-code/
+	•	jCodeMunch vs. Alternatives — Comparison, https://jcodemunch.com/versus.php
+	•	SWE-smith: Scaling Data for Software Engineering Agents - arXiv, https://arxiv.org/html/2504.21798
+	•	SWE-bench/SWE-smith-py · Datasets at Hugging Face, https://huggingface.co/datasets/SWE-bench/SWE-smith-py
+	•	SWE-bench/SWE-smith · Datasets at Hugging Face, https://huggingface.co/datasets/SWE-bench/SWE-smith
+	•	SWE-smith: Scaling Data for Software Engineering Agents - arXiv, https://arxiv.org/abs/2504.21798
+	•	Google - The Gemma 4 Developer Agent Competition | Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/rules
+	•	Training Software Engineering Agents and Verifiers with SWE-Gym, https://raw.githubusercontent.com/mlresearch/v267/main/assets/pan25g/pan25g.pdf
+	•	SWE-Gym/SWE-Gym · Datasets at Hugging Face, https://huggingface.co/datasets/SWE-Gym/SWE-Gym
+	•	Training Software Engineering Agents and Verifiers with SWE-Gym, https://github.com/SWE-Gym/SWE-Gym
+	•	SWE-Gym/OpenHands-SFT-Trajectories · Datasets at Hugging Face, https://huggingface.co/datasets/SWE-Gym/OpenHands-SFT-Trajectories
+	•	SWE-Gym - Hugging Face, https://huggingface.co/SWE-Gym
+	•	BK Harshith Kumar harshithKumar12 - GitHub, https://github.com/harshithKumar12
+	•	A collection of my Kaggle notebooks, featuring end-to-end ... - GitHub, https://github.com/Avik-Das-567/Kaggle-Notebooks-Avik
+	•	The Gemma 4 Developer Agent Competition - Google - Kaggle, https://www.kaggle.com/competitions/gemma-4-developer-agent/discussion/743573
