@@ -362,3 +362,8 @@ replicate that measures run-to-run noise directly; v4h2 replicate |delta| is rep
 Caveats stated now: hidden reads are single and noisy (~+-2.3 tasks SD), and the hidden gap v4h2g - v4h2 = -1 is itself
 inside that noise, so "agrees with hidden" here means only "does NOT reproduce the public +9"; it is weak evidence in either
 direction. Wilson 95% CIs per arm and paired wins/losses with a two-sided sign test are reported.
+Smoke (16:00-16:06 IST, eval/runs/or_pal_smoke3_v4h2_v4h2g, 3 dev40 tasks): v4h2 1/3 $0.052, v4h2g 2/3 $0.038, 0 capped,
+mean provider latency 5.7 s (still ~3x modelled L4). Smoke rate $0.015/task-run x 309 = $4.64 vs $4.91 left: inside the cap
+by the letter, but the 3 smoke tasks never hit the 5-min cap, and the full 40-task runs of 2026-10-01 cost $0.017-0.020 per
+task-run (x 309 = $5.3-6.1). Decision: CUT TO DEV40 (cap risk, plus holdout has no packed harness or gold pre-flight).
+Stage 1 = v4h2 vs v4h2g on dev40, MAX_USD_ARM=1.2.
