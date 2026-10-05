@@ -488,3 +488,10 @@ Reading (paired, 97 tasks): v5h2 - v4h2 >= +5 net with sign-test p < 0.10 -> v5h
 candidate after its L4 run passes the helper gate; within +-4 -> no evidence, v5h2 still runs on L4 for the helper
 gate, slot choice waits; <= -5 -> regression: bisect (setup stage alone on v4h2 first) before any L4 run.
 Cap $4.6 (dev40 $2.0, holdout57 $2.6).
+RESULT (2026-10-06 00:40 IST): dev40 v5h2 14 vs v4h2 12 (3-1); holdout57 15 vs 17 (2-4); pooled 97: 29 vs 29, paired
+5-5, net 0, p = 1.0 -> pre-registered band "within +-4": no evidence either way. v5h2 still runs on L4 (helper gate);
+the slot choice waits for that run. Reading: the v5all prompt/sampling changes (view.py loop breaker, temp 0.2,
+verifier repro, fixer Working rules, search filter) are neutral off-repo. What this race cannot see: Docker keeps
+v4h2's helpers reachable, while on the Kaggle scorer v4h2 ran with locate/check/test dead (73/74 tasks). The setup
+stage's value is therefore only measurable on L4/hidden, not here. Spend $1.76 (balance $6.28). Run dirs:
+eval/runs/or_dev40_v5h2, or_hold57_v5h2 (+ _rest: 17 tasks re-run after the tool's 2 h limit killed the first pass).
