@@ -474,3 +474,7 @@ one task in 74 with any can't-open, and zero first failures of type helper_befor
 the setup stage did not hold; read its traces before any other change.
 Queue (L4, after the weekly reset): v5h2 -> v5h2b -> v11b probe. v5all/v5b dropped (built on v4h2g, which lost 10-1
 to v4h2 off-repo).
+Smoke (2026-10-05 22:55 IST, OpenRouter parasail/fp8, Docker, dev40 first 5): setup ran install.py as the first call
+in 5/5 tasks, locator's first locate.py worked 5/5, analyzer 0/5 tasks with a can't-open (v4h2f 54/74, v4h2g 44/74
+before). 2/5 solved (screening only). Compliance evidence only: Kaggle /tmp rewrite reachability is proven separately
+by the v4h2f helper-check (PASS); the L4 run of v5h2 is the binding test. OpenRouter balance after: $8.04.
