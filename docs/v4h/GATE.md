@@ -430,3 +430,26 @@ Smoke (18:18-18:29 IST, eval/runs/or_hold_smoke3_deepinfra): deepinfra/fp8 mean 
 3 arms x 99 = $13.4 and 2 arms x 99 = $8.9, both > $5.73 left -> **v4h2 vs v4h2g only (v4 dropped), N = floor(5.73 /
 (2 x 0.045 x 1.1)) = 57**: the first 57 of holdout_clean_ids.txt (data/pallets/holdout_n57_ids.txt: click 15, sympy 15,
 werkzeug 13, jinja2 10, flask 3, markupsafe 1), MAX_USD_ARM=2.86, one race, launched 18:32 IST.
+
+### Holdout ranking check RESULT (read 2026-10-05 20:50 IST)
+Race eval/runs/or_hold57_v4h2_v4h2g (gitignored), launched 18:30 IST (not 18:32 as written above), done 20:48 IST, parasail/fp8,
+0 non-200 replies, no arm hit its cap. Spend: smoke $0.270 + race $2.731 (v4h2 1.484, v4h2g 1.247); OpenRouter usage
+183.852 -> 186.853 = $3.00 of the $6 cap. Time pressure as on dev40: mean latency 8.35 / 9.09 s, mean late_s 5.68 / 6.43;
+39 / 43 of 57 tasks hit the 5-min cap.
+
+| holdout first 57 clean (1 sample) | solved | Wilson 95% | hit cap | empty patch |
+|---|---|---|---|---|
+| v4h2 | 17 | 0.195-0.427 | 39 | 14 |
+| v4h2g | 12 | 0.125-0.333 | 43 | 19 |
+
+Paired: v4h2-only 5 (click_0ef55fd click_8762c77 jinja2_7232b82 jinja2_9b96b48 werkzeug_f54fe98), v4h2g-only 0, both 12;
+v4h2 - v4h2g = **+5**, sign p = 0.062. By repo (v4h2/v4h2g of n): click 4/2 of 15, jinja2 5/3 of 10, werkzeug 4/3 of 13,
+sympy 3/3 of 15, flask 0/0 of 3, markupsafe 1/1 of 1.
+**Pooled dev40 + holdout57 (97 tasks): v4h2 29 [0.217-0.396], v4h2g 20 [0.138-0.297]; v4h2-only 10, v4h2g-only 1, both 19;
+two-sided sign p = 0.012.**
+Pre-registered reading: v4h2 - v4h2g = +5 >= +4 -> **rebase future variants (v5all/v5b changes) onto v4h2**. Holdout
+replicates dev40's direction (-4 there, -5 here, 1 v4h2g-only task in 97). Limits, stated: PROXY (OpenRouter fp8, not
+int4 + vLLM's parser), 1 sample, 57 of 99 holdout tasks (cost cap), v4 not run on holdout, and both sets ran under ~4x L4
+time pressure: v4h2g's extra locator recovery (install, then repeat) costs wall-clock, which this proxy punishes harder than
+L4 does (v4h2g hit the cap on 4 more tasks), so part of the gap may be a time-pressure artefact. On the hidden split the
+same pair reads v4h2 6 vs v4h2g 5, the same direction, inside single-read noise.
