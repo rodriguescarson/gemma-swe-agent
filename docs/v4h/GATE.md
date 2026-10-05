@@ -367,3 +367,9 @@ mean provider latency 5.7 s (still ~3x modelled L4). Smoke rate $0.015/task-run 
 by the letter, but the 3 smoke tasks never hit the 5-min cap, and the full 40-task runs of 2026-10-01 cost $0.017-0.020 per
 task-run (x 309 = $5.3-6.1). Decision: CUT TO DEV40 (cap risk, plus holdout has no packed harness or gold pre-flight).
 Stage 1 = v4h2 vs v4h2g on dev40, MAX_USD_ARM=1.2.
+Stage 1 deviation (16:22 IST): at 16:21 the arms had spent $0.19/$0.14 for 4-5 rows ($0.0009/call, ~$0.04/task-run, 2x the
+smoke rate; provider ~6-8 s late per call vs the L4 target, so most tasks hit the 5-min cap, as on 2026-10-01). A $1.2 arm cap
+would have cut v4h2 at ~27 tasks. Stopped (in-flight tasks discarded), kept part A rows (eval/runs/or_pal_dev40_v4h2_v4h2g_partA:
+both arms done on click_a3321c9 flask_9822a03 jinja2_b6f50df itsdangerous_7f4dcf8; v4h2g's extra markupsafe_3d809ae row is
+superseded by part B), re-launched part B on the other 36 with MAX_USD_ARM=2.0 (worst case total $4.42 <= $5). Stage 2 is
+off: there will not be $1.5 left. Results = part A rows for those 4 + part B rows for the 36.
