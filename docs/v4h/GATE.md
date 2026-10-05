@@ -424,3 +424,9 @@ Readings (paired v4h2 - v4h2g on the holdout tasks run): >= +4 -> rebase future 
 within +-2 -> no evidence either way, keep the v4h2g base; v4h2g ahead by >= 4 -> dev40's -4 was noise; +3 / -3 -> named
 inconclusive. Also reported: pooled dev40 + holdout paired counts with a two-sided sign test, Wilson 95% CIs per arm.
 If N < 99 the thresholds stay as written (they were set for ~99); a subset run is reported as weaker.
+Correction: the heading's "18:40 IST" is wrong; the pre-registration was committed at 18:17 IST (ba8ff2e), before any spend.
+Smoke (18:18-18:29 IST, eval/runs/or_hold_smoke3_deepinfra): deepinfra/fp8 mean latency 10.3 s, mean late_s 8.41 (> 5.51)
+-> rule picks **parasail/fp8**. v4h2 0/3 $0.164, v4h2g 0/3 $0.106, 6/6 capped. r = max($0.045, $0.040) = $0.045/task-run:
+3 arms x 99 = $13.4 and 2 arms x 99 = $8.9, both > $5.73 left -> **v4h2 vs v4h2g only (v4 dropped), N = floor(5.73 /
+(2 x 0.045 x 1.1)) = 57**: the first 57 of holdout_clean_ids.txt (data/pallets/holdout_n57_ids.txt: click 15, sympy 15,
+werkzeug 13, jinja2 10, flask 3, markupsafe 1), MAX_USD_ARM=2.86, one race, launched 18:32 IST.
