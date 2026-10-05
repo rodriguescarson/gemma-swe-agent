@@ -398,3 +398,29 @@ v4 = +1 is inside +-2 and is not read). Pallets' record against hidden is now 1 
 docs/eval/PALLETS_OR_RACE.md). Weak evidence: hidden reads are single (~+-2.3 tasks SD) and every hidden gap here is inside
 that; 40 tasks give CIs about +-0.14 wide. Not run: holdout (cost cap) and stage 2 (budget rule). Next cheapest discriminator:
 the same race on more Pallets tasks (holdout, needs packing + gold pre-flight) at a less time-pressured provider hour.
+
+## Holdout ranking check pre-registration (2026-10-05 18:40 IST, before any spend): v4 / v4h2 / v4h2g on Pallets holdout
+Prep (free, done): graphs+embeddings for 103/103 holdout tasks fetched (`fetch.py --ids data/pallets/holdout_ids.txt`,
+DONE bad=0); packed `data/pallets/harness_holdout` (pack.py --venv default: 99 tasks, 31 pinned wheels, 95 PR-style
+statements); gold pre-flight with `pod_probe.sh` (PROBE_RUNS=fix, data/pallets/oracle/pod_probe_holdout/probe.log): fix_gold
+resolved 99/99, fix_empty resolved 0/99 -> **99/99 valid**. Dropped 4, none for failing pre-flight: flask_8646edc
+flask_46433e9 flask_fdab801 flask_4eb5e94 are flask-wz2-venv tasks, which pack refuses to mix with the default venv and
+or_race.sh runs one pack per race (dev40 likewise had no wz2 task). Clean list: data/pallets/holdout_clean_ids.txt (99, in
+holdout_order: click 35, sympy 37, werkzeug 13, jinja2 10, flask 3, markupsafe 1). or_race.sh now takes HARNESS= and 1..N
+arms (a77bf60, tests first).
+Settings: as dev40 (or_race.sh, eval_config budgets 5 min / 70 calls, compaction on, --l4-pace, CONC=2 per arm, 1 sample).
+Provider: the cap-hit rate on dev40 came from provider lateness (parasail/fp8 part B: mean latency 8.05 s, mean late_s 5.51
+over the L4 target). crusoe/bf16 probes took 17-69 s (unusable); deepinfra/fp8 0.6-1.2 s vs parasail 0.7-3.8 s on tiny probes.
+Rule: smoke on deepinfra/fp8; if its mean late_s < 5.51 use deepinfra/fp8 for the race, else parasail/fp8. (A provider
+change vs dev40 is a disclosed difference for the pooled count.)
+Smoke: v4h2 vs v4h2g on data/pallets/holdout_smoke3_ids.txt (click_f67c2bb sympy_96b678f werkzeug_7294d72); smoke rows are
+not used in the result.
+Budget: $6.0 total incl. smoke (OpenRouter usage at start 183.84x; stop at +6.0). Arms and task count: rate r = smoke
+$/task-run, taken as max(smoke rate, dev40 rate $0.040) to cover capped tasks. If 3 x 99 x r <= $6 - smoke: all three arms
+on 99. Else v4h2 + v4h2g only (v4 dropped as least informative). If 2 x 99 x r > $6 - smoke too: the first N tasks of
+holdout_clean_ids.txt (holdout_order, repos interleaved), N = floor((6 - smoke) / (2 x r x 1.1)); per-arm MAX_USD_ARM =
+(6 - smoke) / arms, so an arm cap cannot cut an arm short of its N tasks in expectation. Arms run in ONE race (same hour).
+Readings (paired v4h2 - v4h2g on the holdout tasks run): >= +4 -> rebase future variants (v5all/v5b changes) onto v4h2;
+within +-2 -> no evidence either way, keep the v4h2g base; v4h2g ahead by >= 4 -> dev40's -4 was noise; +3 / -3 -> named
+inconclusive. Also reported: pooled dev40 + holdout paired counts with a two-sided sign test, Wilson 95% CIs per arm.
+If N < 99 the thresholds stay as written (they were set for ~99); a subset run is reported as weaker.
