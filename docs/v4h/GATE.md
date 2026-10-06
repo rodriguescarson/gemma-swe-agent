@@ -495,3 +495,12 @@ verifier repro, fixer Working rules, search filter) are neutral off-repo. What t
 v4h2's helpers reachable, while on the Kaggle scorer v4h2 ran with locate/check/test dead (73/74 tasks). The setup
 stage's value is therefore only measurable on L4/hidden, not here. Spend $1.76 (balance $6.28). Run dirs:
 eval/runs/or_dev40_v5h2, or_hold57_v5h2 (+ _rest: 17 tasks re-run after the tool's 2 h limit killed the first pass).
+
+## sub12 RESULT (read 2026-10-06 22:00 IST): v4h2 read 2 = 0.08 -> 5/58 (read 1, sub9: 0.10 = 6/58)
+Pre-registered: within +-1 of 6/58 -> v4h2's hidden level is ~6 and a single read is that stable. Result: -1 -> stable
+band. Hidden levels on the rebuilt scorer: v4 3/58 (1 read), v4h2 6 and 5 (mean 5.5), v4h2g 5 (1 read). All three
+recent bundles sit within ~2 tasks of each other on hidden, consistent with Pallets (v4h2 = v5h2 29/97, v4h2g 20/97).
+Queue incident the same day: the v5h2 L4 push got 'Connection aborted' at 13:00 IST, kaggle_push_retry exited (it
+retried only quota messages), and queue_after_reset then waited 9 h in l4_result_summary for a run that never started.
+Fixed test-first (1b6adc2): transient network errors during the push are retried, a drop after a successful push is
+not, and a failed push is logged PUSH_FAILED and skipped. Queue restarted 22:02 IST: v5h2 -> v5h2b -> v11b probe.
