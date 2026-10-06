@@ -597,3 +597,42 @@ KV tokens, screen-only): try KV_DTYPE = fp8_e5m2 at 0.95 (then 0.93, 0.90); keep
 shows a sane run (no error rows, solved rows possible). If any of that fails, fall back to bf16 KV at the highest utilisation that starts and say so.
 Because e5m2 is lossy, this race is a screen on a degraded-numerics server: the three arms share the same server, so a ranking is still paired, but
 absolute solve rates are not comparable with Kaggle or with the earlier proxy races (stated in the report).
+
+### P2 addendum 4 (2026-10-06 ~21:35 UTC, before stage 1a launches): final probe numbers, effective caps, and the autonomous plan to the 36 h hard stop
+**Server for everything below:** vLLM 0.19.1 (scripts/a6000/serve.sh), int4 checkpoint, bf16 KV, gpu_memory_utilization 0.95 (GPU_UTIL=0.95; 25,792 KV tokens vs 23,168 at 0.90).
+fp8 KV was tried and is impossible here (e4m3: Triton "fp8e4nv not supported" on Ampere; e5m2: vLLM rejects it for this compressed-tensors checkpoint), so
+addendum 3's fallback applies: the "doubled KV" screen deviation did not happen; the only change from the kernel is the 0.95 utilisation.
+**Probe (arm-pure, last 4 ids, pace proxy, this server):**
+| arm | T | S (effective) | mean item wall s | calls |
+|---|---|---|---|---|
+| v4h2 | 1 | 1.128 | 178.8 | 181 |
+| v4h2 | 2 | 1.333 | 211.3 | 185 |
+| v6p | 2 | 1.624 | 320.2 | 297 |
+| v6p-think | 2 | 1.392 | 313.9 | 63 |
+v6p at T = 1: its one run was INVALID (the reused container did not hold the v6p bundle; 0 calls; fixed test-first, commit 7a941ef) and was not repeated.
+Deviation from addendum 2: C = 2 is decided without it, because the decision cannot depend on it: at C = 1 the v4h2 term alone is ~179 s per task and the
+v6p-think term is >= 360 s, so beating C = 2's projection (17.2 h for 100 ids) would need v6p's mean item under ~150 s, and every v6p run so far took 250-355 s.
+**Decision (p2_probe.py DECISION): C = 2.** Per-arm G4_L4_SCALE: v4h2 0.7499, v6p 0.6157, v6p-think 0.7184. The harness divides the bundle's cap by the scale, so the
+EFFECTIVE per-task cap is 300 s / scale = **v4h2 400 s, v6p 487 s, v6p-think 418 s** (never below 300 s; tests/test_a6000_p2.py::test_scale_below_one_stretches_the_cap_to_300s_times_S,
+which loads scripts/run_eval.py's own scale_argv). The command timeout is stretched the same way (180 s -> 240 / 292 / 251 s).
+Projection (p2_lib.decide): 100 ids x 3 arms 17.2 h, 200 ids 34.4 h, **50 ids 8.6 h** -> stage 1a = the first 50 ids of s200_valid_ids.txt.
+
+**The plan, in order, all before the hard stop (launch of stage 1a + 36 h; everything GPU ends then, wherever it stands):**
+1. **Stage 1a** (ids 1-50), arms v4h2 / v6p / v6p-think interleaved (rotated order), C = 2, the scales above. Reading: the P2 rule (BETTER net >= +5 and p < 0.10, WORSE, NO EVIDENCE;
+   UNRESOLVED when the arm's cap-hit share is >= 10 points above v4h2's and the verdict is not BETTER). Output per arm: solved/50, Wilson CI, paired W/L vs v4h2, median secs, cap hits.
+2. **P4 on the chosen arm** = the non-reference arm with the larger net (wins - losses) vs v4h2 in stage 1a if that net is > 0, else v6p (autopilot_lib.choose_p4_arm; a tie goes to v6p).
+   The 74 public tasks of data/kaggle_valid_ids.txt, sequential (T = 1), scripts/a6000/run_eval.py (the kernel's run cell, subprocess sandbox, the bundle's own eval_config budgets, NOT stretched:
+   this is the near-Kaggle condition), model through a pace proxy on 127.0.0.1:8002. Judged by scripts/keep_rule.py against eval/kaggle/g4-l4-v4h2g-p312/results.jsonl
+   (KEEP = solved >= 37 and paired wins - losses >= +3) plus analyze_helper_reachability (<= 1 task with can't-open), cap hits, median secs and the run's own S(1) from the proxy log.
+   Recorded as an **A6000 screen**, never a Kaggle result; the A6000 is slower than the L4 model (S(1) is reported), so a miss is pessimistic.
+3. **Stage 1b** (ids 51-100), same arms, scales, server and settings (nothing re-measured). **Combination rule (registered here, before 1b starts):** the 100-task table pools stage 1a and 1b by
+   summing wins and losses per contrast and the arms' solved/cap counts; the P2 verdict rule is applied to the pooled counts (same thresholds, cap gap on the pooled shares);
+   stage 1a's own verdict stays as reported; if the two stages' nets differ by >= 5 the pooled verdict is marked "heterogeneous" and read with that caveat.
+4. **P3 with the remaining time:** ONE pass (not 4) over data/heldout1k/all_valid_ids.txt minus the 200 sample ids (data/heldout1k/harness_all packed on this box), the bundle with the most pooled
+   solved tasks of the 100 (ties: v6p, v6p-think, v4h2), C = 2 with that arm's scale, every model call captured exactly (a capture proxy per item), a resumable queue stopped cleanly at the hard stop.
+   Rows: train/build_sft.py on test-verified successes, rebalance_rows.py, validate_rows.py. Preference pairs need a solved and a failed attempt of the same task: a single pass gives none,
+   so the pair count will be reported as what it is (0 unless a task has two attempts). Weights and large data stay out of git.
+**Self-repair and stop rules (supervisor scripts/a6000/autopilot.py):** a dead vLLM or dockerd is restarted (at most 3 times per step) and the queue resumes without redoing finished items; items whose error is a
+server/network error are purged and re-run. If more than 15% of a step's items error (judged from 10 items) or its median task time is under 60 s, the step stops, is diagnosed and fixed test-first, and resumes once;
+if it fails again the reason is logged and the next step starts. A health line goes to docs/a6000/P2_LOG.md and is pushed every 60 minutes. Disk free must stay >= 100 GB. At the end: vLLM, proxies, dockerd and monitors stopped,
+nvidia-smi clean, one final table per step and a "DONE <time>" line in P2_LOG.md.
