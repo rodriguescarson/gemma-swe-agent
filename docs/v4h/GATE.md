@@ -504,3 +504,54 @@ Queue incident the same day: the v5h2 L4 push got 'Connection aborted' at 13:00 
 retried only quota messages), and queue_after_reset then waited 9 h in l4_result_summary for a run that never started.
 Fixed test-first (1b6adc2): transient network errors during the push are retried, a drop after a successful push is
 not, and a failed push is logged PUSH_FAILED and skipped. Queue restarted 22:02 IST: v5h2 -> v5h2b -> v11b probe.
+
+## P2 pre-registration: off-repo ranking of v4h2 / v6p / v6p-think on the A6000 (2026-10-06 19:44 local, before ANY model run on this task set)
+Machine: RTX A6000 48 GB, 32 CPUs, 94 GB RAM; vLLM 0.19.1 (scripts/a6000/serve.sh, TP=1), model gemma-4-31b-it-qat-w4a16-ct. Nothing below
+was run when this was written. Later changes are dated addenda, never edits here.
+
+**Instrument.** The pods' faithful environment emulated in Docker exactly as scripts/pallets/or_race.sh does (python:3.12-slim, pod/buildenv.sh,
+`/wheels` = data/raw/wheels, G4_WHEELHOUSE = the pack's own wheels, G4_COMPACTION=1, G4_NO_EDITABLE=1, scripts/pallets/run_eval_pallets.py,
+`--sandbox subprocess`, budgets from each bundle's eval_config.yaml: 5 min / 70 calls / 150 turns / 180 s per command), except that the model is
+the LOCAL vLLM behind scripts/a6000/pace_proxy.py (replies held to the modelled L4 time of each call; never delayed when the A6000 is slower).
+Only docker.io inside this WSL distro (dockerd started by hand, no systemd change). PROXY-class result: int4 + vLLM's own gemma4 parser, the
+scorer's stack, one GPU instead of 4xL4, Docker emulation of the sandbox, 1 sample per task per arm.
+Task set: data/heldout1k/harness_s200 re-packed on this box (scripts/heldout/pack_heldout.py, README recipe; clones and wheels downloaded here) with
+the gold pre-flight re-run here in Docker (x86_64; every task counted must resolve with its gold patch and not with the test patch alone).
+Ids: data/heldout1k/s200_valid_ids.txt in file order (the pre-flight-valid ids that are still valid after the re-run; a task that fails the re-run
+pre-flight is dropped from every arm and listed).
+
+**Step 1: concurrency probe (before any arm run).** Bundle v6p (its three parallel fixers are the heaviest load of the three arms), 4 tasks
+(the LAST 4 ids of s200_valid_ids.txt, which are outside stage 1), at T = 4, 2, 1, 3 task-runs in flight, in that order, a fresh proxy log per level.
+Deviation from "3 tasks": 4 tasks per level so that T = 4 is a real level (3 tasks cannot occupy 4 slots).
+Slowdown S(T) = sum over the level's 200-status calls of max(upstream latency, L4-model time) / sum of L4-model time (the L4 model = router.l4_model_s,
+the one or_proxy --l4-pace uses; max() because the proxy holds a faster reply to the model time, so it is what the harness's cap sees).
+Also reported: the raw ratio (no max), the trace-based ratio of scripts/a6000/speed_ratio.py (tool time included), CPU load.
+Rule: C = the highest T in {1,2,3,4} with S(T) <= 1.15. If S(2) > 1.15 (even two in flight is too slow): run at T = 2 anyway and divide the harness's
+--max-time-minutes AND --timeout-seconds by 1/S(2), i.e. G4_L4_SCALE = 1/S(2) (the harness flag run_eval.py already provides; bundles unchanged; it also
+scales the helpers' clock footers), recorded as a screen-only deviation: the cap then means the same amount of model work as on L4.
+Projection: m = mean wall seconds of an item (one task-run, container start to result) at the chosen T in the probe; projected hours
+H = 200 tasks x (2 m + 360 s x scale) / T / 3600 (v6p-think is assumed to run to the cap; v4h2 and v6p to take m).
+If H > 12: stage 1 only (the first 100 ids of s200_valid_ids.txt, all three arms), nothing beyond it tonight. If H <= 12: all 200 ids in id order
+as one pass (stage 1 = the first 100 is read separately as well).
+
+**Step 2: the race.** Arms v4h2 (reference), v6p, v6p-think (submissions/<name>). v5h2 skipped (neutral off-repo already, GAPS 2026-10-06). One queue of
+(task, arm) items in task order, the arms of one task adjacent and their order rotated by task index (so no arm is always first), C items in flight,
+one vLLM server and one proxy for the whole race. Same settings for every arm; only the bundle differs. One sample per task per arm.
+Valid rows: a task is paired only when both arms returned a row without an infrastructure error (connection error, harness exception, sandbox setup
+failure); such rows are listed and excluded, not counted as failures.
+
+**Gates per arm (reported, not the ranking):** (a) helper reachability, scripts/analyze_helper_reachability.py: <= 1 task with can't-open
+(caveat stated now: Docker keeps v4h2's helpers reachable while on the Kaggle scorer they were dead in 73/74 tasks, so this race cannot see the value
+of the setup stage); (b) median task seconds; (c) cap hits = rows whose error is "Agent exceeded session timeout"; (d) loops = tasks with one identical tool
+call (name + arguments) >= 5 times in a row in one stage; (e) v6p-think only: no task fails from the thinking settings (any error naming thinking or
+thinking_budget counts; the allowed number is 0).
+Health flags raised at any check: an arm's median task seconds < 60, or > 10% of its rows errored.
+
+**Reading rule (paired, per contrast v6p vs v4h2, v6p-think vs v4h2, v6p-think vs v6p).** Per arm: solved/n with Wilson 95% CI. Per contrast:
+wins/losses on tasks valid in both arms, exact two-sided sign test. BETTER = net >= +5 and p < 0.10; WORSE = net <= -5 and p < 0.10; otherwise NO EVIDENCE
+(thresholds from the v5h2 off-repo pre-registration, kept for n = 100 and n = 200). Cap hits: if an arm's cap-hit share is >= 10 percentage points above
+v4h2's, a WORSE or NO EVIDENCE verdict for that arm is written UNRESOLVED (time pressure, not capability) and never WORSE; a BETTER verdict stands.
+Also reported for every contrast: the paired counts on tasks where neither arm hit the cap. Stage 1 alone is weaker than the 200 reading, and says so.
+
+**Hygiene.** Stop at 100 GB free disk. vLLM, the proxy, the dockerd I started and all monitors are stopped when the work ends; nvidia-smi must list no
+compute process. No tokens in git, logs or messages; weights and run directories stay out of git (scripts, tests, the report and result rows go in).
