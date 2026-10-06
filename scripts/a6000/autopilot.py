@@ -13,7 +13,8 @@ ROOT = HERE.parents[1]
 sys.path.insert(0, str(HERE))
 import autopilot_lib as lib  # noqa: E402
 
-LOG = ROOT / "docs" / "a6000" / "P2_LOG.md"
+LOG = Path(os.environ.get("AUTOPILOT_LOG") or ROOT / "docs" / "a6000" / "P2_LOG.md")
+NO_PUSH = bool(os.environ.get("AUTOPILOT_NO_PUSH"))   # tests
 G4 = Path.home() / "g4"
 PY = str(G4 / "venv" / "bin" / "python")
 ENV = dict(os.environ, PATH="/usr/bin:" + ":".join(p for p in os.environ.get("PATH", "").split(":") if not p.startswith("/mnt/")))
@@ -37,6 +38,8 @@ def log_line(text, push=True):
 
 
 def git_push(msg):
+    if NO_PUSH:
+        return True
     cmds = [["git", "add", "docs/a6000/P2_LOG.md", "docs/v4h/GATE.md"], ["git", "commit", "-q", "-m", msg, "-m", "Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>"],
             ["git", "pull", "-q", "--rebase", "--autostash", "origin", "wip/gemma-agent"], ["git", "push", "-q", "origin", "wip/gemma-agent"]]
     for c in cmds:
@@ -168,8 +171,12 @@ def disk_free_gb():
 
 
 def stats_for(step):
-    mod = importlib.reload(importlib.import_module("autopilot_stats"))
-    return mod.collect(step["stats"])
+    try:
+        mod = importlib.reload(importlib.import_module("autopilot_stats"))
+        return mod.collect(step["stats"])
+    except Exception as e:                      # a collector bug must never take the supervisor down
+        print("stats error:", repr(e)[:200], flush=True)
+        return dict(done=0, solved=0, empty=0, errors=0, cap=0, median_s=None, durations=[])
 
 
 # -------------------------------------------------------------------------------------------------- the loop
