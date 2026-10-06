@@ -199,3 +199,15 @@ def test_arm_scales_are_the_probe_values_and_give_the_registered_caps():
 
 def test_item_script_uses_litellms_local_cost_map_like_the_kernel():
     assert "LITELLM_LOCAL_MODEL_COST_MAP=True" in race.item_script("v6p", "t1", port=8001, scale=1.0)
+
+
+def test_arm_scale_can_come_from_a_probe_summary(tmp_path):
+    import json
+    f = tmp_path / "probe_summary.json"
+    f.write_text(json.dumps({"results": [{"arm": "v6p-b", "T": 2, "S": 1.45, "m": 280}, {"arm": "v6p-b", "T": 1, "S": 9.0, "m": 1}]}))
+    assert math.isclose(race.scale_from_probe(str(f), "v6p-b", fallback=0.6156688916658797), 1 / 1.45)
+    assert race.scale_from_probe(str(tmp_path / "none.json"), "v6p-b", fallback=0.61) == 0.61
+    f.write_text(json.dumps({"results": [{"arm": "v6p-b", "T": 2, "S": 1.10, "m": 280}]}))
+    assert race.scale_from_probe(str(f), "v6p-b", fallback=0.61) == 1.0         # S <= 1.15: no stretch
+    f.write_text(json.dumps({"results": [{"arm": "v6p-b", "T": 2, "S": float("nan"), "m": None}]}))
+    assert race.scale_from_probe(str(f), "v6p-b", fallback=0.61) == 0.61        # unusable probe: the fallback

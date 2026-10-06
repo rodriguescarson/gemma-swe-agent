@@ -91,7 +91,7 @@ def test_markdown_section_has_a_row_per_arm_and_a_verdict_per_contrast(tmp_path)
         put(tmp_path, "v6p-think", f"t{i}", resolved=(i < 2), secs=330.0, error=CAP if i > 6 else None)
     text, contrasts = md.section("stage 1a", str(tmp_path), [f"t{i}" for i in range(10)], ["v4h2", "v6p", "v6p-think"], "v4h2")
     assert "| v4h2 |" in text and "| v6p |" in text and "| v6p-think |" in text and "BETTER" in text
-    assert contrasts["v6p"] == {"wins": 7, "losses": 0}
+    assert (contrasts["v6p"]["wins"], contrasts["v6p"]["losses"]) == (7, 0) and "cap_gap" in contrasts["v6p"]
     assert "A6000 screen" in text
 
 
@@ -116,3 +116,29 @@ def test_markdown_shows_both_tables_when_a_contended_file_exists(tmp_path):
     cf = tmp_path / "contended.json"; cf.write_text(json.dumps({"items": [["v6p", "t3"]], "why": "ran while two runners were alive"}))
     text = md.both_tables("stage 1a", str(tmp_path), [f"t{i}" for i in range(6)], md.ARMS, "v4h2", str(cf))
     assert "all items" in text and "without contended items" in text and "v6p/t3" in text and text.count("| v6p |") >= 2
+
+
+def _md():
+    spec = importlib.util.spec_from_file_location("p2_results_md3", ROOT / "scripts" / "a6000" / "p2_results_md.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def _fill(tmp_path, v6p_solved):
+    for i in range(10):
+        put(tmp_path, "v4h2", f"t{i}", resolved=(i < 2), secs=300.0)
+        put(tmp_path, "v6p", f"t{i}", resolved=(i in v6p_solved), secs=320.0)
+        put(tmp_path, "v6p-think", f"t{i}", resolved=False, secs=330.0)
+    (tmp_path / "ids.txt").write_text("".join(f"t{i}\n" for i in range(10)))
+
+
+def test_choose_p4_writes_the_better_arm_else_v5h2(tmp_path):
+    md = _md(); md.CHOICE = tmp_path / "choice.json"
+    _fill(tmp_path, set(range(9)))                                           # v6p solves 9, v4h2 2: BETTER (net +7, p = 0.0156)
+    md.main([str(tmp_path), "--label", "t", "--to", "10", "--ids", str(tmp_path / "ids.txt"), "--choose", "p4", "--no-append", "--contended", str(tmp_path / "nope.json")])
+    assert json.loads(md.CHOICE.read_text())["p4_arm"] == "v6p"
+    _fill(tmp_path, {0, 1, 2, 3})                                            # v6p ahead by 2 only: not BETTER
+    for i in range(10):
+        put(tmp_path, "v6p", f"t{i}", resolved=(i in {0, 1, 2, 3}), secs=320.0)
+    md.main([str(tmp_path), "--label", "t", "--to", "10", "--ids", str(tmp_path / "ids.txt"), "--choose", "p4", "--no-append", "--contended", str(tmp_path / "nope.json")])
+    assert json.loads(md.CHOICE.read_text())["p4_arm"] == "v5h2"

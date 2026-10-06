@@ -31,17 +31,29 @@ def stop_reason(done, errors, median_s):
 
 
 def choose_p4_arm(contrasts):
-    """contrasts: {arm: {"wins", "losses"}} vs v4h2 from stage 1a. The best non-reference arm = the larger net (wins - losses) if it is > 0;
-    otherwise v6p (the planned first L4 run); a tie goes to v6p."""
-    best, best_net = "v6p", 0
+    """contrasts: {arm: {"wins", "losses", "cap_gap"}} vs v4h2 from stage 1a. The arm whose verdict is BETTER under the P2 rule (p2_lib.verdict); both BETTER: the larger net,
+    a tie goes to v6p; none BETTER: v5h2 (addendum 6)."""
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from p2_lib import verdict
+    best, best_net = "v5h2", None
     for arm in ("v6p", "v6p-think"):
         c = contrasts.get(arm)
-        if c is None:
+        if c is None or verdict(c["wins"], c["losses"], c.get("cap_gap", 0.0)) != "BETTER":
             continue
         net = c["wins"] - c["losses"]
-        if net > best_net or (net == best_net and net > 0 and arm == "v6p"):
+        if best_net is None or net > best_net:
             best, best_net = arm, net
     return best
+
+
+def choose_p3_arm(stats):
+    """stats: {arm: {"solved", "valid"}}. Highest solved share among arms with >= 40 valid tasks; ties v6p-b, v6p, v6p-think, v4h2; nothing eligible: v6p (addendum 6)."""
+    order = ["v6p-b", "v6p", "v6p-think", "v4h2"]
+    ok = [a for a in order if a in stats and stats[a]["valid"] >= 40]
+    if not ok:
+        return "v6p"
+    return max(ok, key=lambda a: (round(stats[a]["solved"] / stats[a]["valid"], 9), -order.index(a)))
 
 
 def pool(a, b):

@@ -16,9 +16,9 @@ def summary_text(p2_out, p4_out, p3_out, ids=None):
     ids = ids or [l.strip() for l in open(ROOT / "data" / "heldout1k" / "s200_valid_ids.txt") if l.strip()]
     parts = [f"\n## FINAL SUMMARY ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}) - every number is an A6000 screen, never a Kaggle result\n"]
     a, b, both = ids[:50], ids[50:100], ids[:100]
-    for label, sel in (("stage 1a (ids 1-50)", a), ("stage 1b (ids 51-100)", b), ("pooled stage 1a + 1b (ids 1-100)", both)):
+    for label, sel, arms in (("stage 1a (ids 1-50)", a, md.ARMS), ("stage 1b (ids 51-100)", b, ["v4h2", "v6p", "v6p-b"]), ("pooled stage 1a + 1b (ids 1-100), arms that ran in both", both, list(md.POOLABLE))):
         if sel:
-            t, _ = md.section(label, p2_out, sel, md.ARMS, "v4h2")
+            t, _ = md.section(label, p2_out, sel, arms, "v4h2")
             parts.append(f"#### {label}\n{t}")
         else:
             parts.append(f"#### {label}\nnot run\n")

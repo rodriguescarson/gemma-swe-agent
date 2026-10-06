@@ -34,13 +34,26 @@ def test_stop_rule_needs_enough_items_and_trips_on_errors_or_fast_median():
     assert ap.stop_reason(done=20, errors=0, median_s=None) is None
 
 
-def test_p4_arm_choice_best_non_reference_else_v6p():
-    c = lambda net6, net6t: {"v6p": {"wins": 5 + net6, "losses": 5}, "v6p-think": {"wins": 5 + net6t, "losses": 5}}
-    assert ap.choose_p4_arm(c(3, 1)) == "v6p"
-    assert ap.choose_p4_arm(c(1, 4)) == "v6p-think"
-    assert ap.choose_p4_arm(c(-2, -1)) == "v6p"                                    # neither beats the reference: the planned first L4 run
-    assert ap.choose_p4_arm(c(2, 2)) == "v6p"                                      # tie -> v6p
-    assert ap.choose_p4_arm({}) == "v6p"
+def test_p4_arm_is_the_arm_that_is_BETTER_under_the_p2_rule_else_v5h2():
+    c = lambda w6, l6, w6t, l6t, g6=0.0, g6t=0.0: {"v6p": {"wins": w6, "losses": l6, "cap_gap": g6}, "v6p-think": {"wins": w6t, "losses": l6t, "cap_gap": g6t}}
+    assert ap.choose_p4_arm(c(9, 2, 5, 5)) == "v6p"                          # net +7, p = 0.065: BETTER
+    assert ap.choose_p4_arm(c(5, 5, 9, 2)) == "v6p-think"
+    assert ap.choose_p4_arm(c(10, 1, 9, 2)) == "v6p"                          # both BETTER: the larger net
+    assert ap.choose_p4_arm(c(9, 2, 9, 2)) == "v6p"                           # tie -> v6p
+    assert ap.choose_p4_arm(c(6, 1, 5, 5)) == "v5h2"                          # net +5 but p = 0.125: not BETTER
+    assert ap.choose_p4_arm(c(8, 5, 6, 7)) == "v5h2"                          # positive net is not enough any more
+    assert ap.choose_p4_arm(c(2, 9, 2, 9)) == "v5h2" and ap.choose_p4_arm({}) == "v5h2"
+    assert ap.choose_p4_arm(c(9, 2, 5, 5, g6=0.3)) == "v6p"                   # a BETTER verdict stands despite more cap hits
+
+
+def test_p3_arm_is_the_highest_solved_share_among_arms_with_40_valid_tasks():
+    st = {"v4h2": {"solved": 20, "valid": 100}, "v6p": {"solved": 25, "valid": 100}, "v6p-b": {"solved": 10, "valid": 50}, "v6p-think": {"solved": 12, "valid": 39}}
+    assert ap.choose_p3_arm(st) == "v6p"                                       # v6p-think has 38% but only 39 valid tasks: ineligible; v6p 25% vs v6p-b 20%
+    st["v6p-b"] = {"solved": 13, "valid": 50}
+    assert ap.choose_p3_arm(st) == "v6p-b"                                     # 26% > 25%
+    st["v6p-b"] = {"solved": 25, "valid": 100}
+    assert ap.choose_p3_arm(st) == "v6p-b"                                     # tie: v6p-b before v6p
+    assert ap.choose_p3_arm({"v4h2": {"solved": 1, "valid": 3}}) == "v6p"      # nothing eligible: the planned bundle
 
 
 def test_pooling_adds_the_paired_counts_and_flags_heterogeneity():

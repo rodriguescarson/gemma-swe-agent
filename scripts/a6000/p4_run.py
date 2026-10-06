@@ -1,5 +1,5 @@
 """P4 runner (docs/v4h/GATE.md, 'P2 addendum 4'): the chosen bundle on the 74 public tasks, sequential, through a pace proxy, via scripts/a6000/run_eval.py
-(the kernel's run cell, subprocess sandbox, the bundle's own budgets). The arm comes from ~/g4/runs/autopilot_choice.json {"p4_arm"} (default v6p).
+(the kernel's run cell, subprocess sandbox, the bundle's own budgets). The arm comes from ~/g4/runs/autopilot_choice.json {"p4_arm"} (default v5h2, addendum 6).
 
     python scripts/a6000/p4_run.py [--port 8002] [--out ~/g4/runs/p4]      resumable"""
 import argparse, json, sys
@@ -12,9 +12,9 @@ CHOICE = Path.home() / "g4" / "runs" / "autopilot_choice.json"
 
 def chosen_arm(path=str(CHOICE)):
     try:
-        return json.loads(Path(path).read_text()).get("p4_arm") or "v6p"
+        return json.loads(Path(path).read_text()).get("p4_arm") or "v5h2"
     except (FileNotFoundError, ValueError):
-        return "v6p"
+        return "v5h2"
 
 
 def main(argv=None):

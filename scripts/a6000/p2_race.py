@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(Path(__file__).resolve().parent))
 from make_eval_kernel import read_budget  # noqa: E402
-from p2_lib import build_items  # noqa: E402
+from p2_lib import arm_scale, build_items  # noqa: E402
 
 DOCKER = "/usr/bin/docker"
 IMAGE = "python:3.12-slim"
@@ -55,6 +55,16 @@ def parse_arm_scales(items):
     return {k: float(v) for k, _, v in (i.partition("=") for i in (items or []))}
 
 
+def scale_from_probe(path, arm, fallback):
+    """Cap scale of an arm from the arm-pure probe at T = 2 (probe_summary.json): 1 / S when S > 1.15, else 1.0; the fallback when there is no usable probe."""
+    try:
+        rs = [r for r in json.loads(Path(path).read_text())["results"] if r["arm"] == arm and r["T"] == 2]
+        s = rs[-1]["S"]
+        return fallback if not s == s else arm_scale(s)
+    except (FileNotFoundError, ValueError, KeyError, IndexError, TypeError):
+        return fallback
+
+
 def scale_for(arm, scales, default):
     return scales.get(arm, default)
 
@@ -94,12 +104,16 @@ def main(argv=None):
     ap.add_argument("--arms", nargs="+", default=["v4h2", "v6p", "v6p-think"])
     ap.add_argument("--conc", type=int, required=True); ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--arm-scale", nargs="*", default=[], help="ARM=SCALE per arm (G4_L4_SCALE); --scale is the default")
+    ap.add_argument("--arm-scale-from-probe", nargs="*", default=[], metavar="ARM[=FALLBACK]", help="take the arm's scale from OUT/probe_summary.json (T = 2)")
     ap.add_argument("--port", type=int, default=8001); ap.add_argument("--label", default="p2")
     ap.add_argument("--items-dir", default="items"); ap.add_argument("--keep", action="store_true", help="reuse a running container, leave it running")
     ap.add_argument("--cpus", default="24"); ap.add_argument("--mem", default="64g")
     a = ap.parse_args(argv)
     arm_scales = parse_arm_scales(a.arm_scale)
     out = Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
+    for spec in a.arm_scale_from_probe:
+        arm, _, fb = spec.partition("=")
+        arm_scales[arm] = scale_from_probe(str(out / "probe_summary.json"), arm, float(fb) if fb else a.scale)
     ids = ids_list(a.ids, a.n, a.ids_from_end)
     items = pending(build_items(ids, a.arms), str(out), a.items_dir)
     (out / "ids.txt").write_text("".join(i + "\n" for i in ids))

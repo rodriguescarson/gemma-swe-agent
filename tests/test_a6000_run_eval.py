@@ -55,9 +55,9 @@ def _load_p4():
     return m
 
 
-def test_p4_arm_comes_from_the_choice_file_default_v6p(tmp_path):
+def test_p4_arm_comes_from_the_choice_file_default_v5h2(tmp_path):
     m = _load_p4()
-    assert m.chosen_arm(str(tmp_path / "none.json")) == "v6p"
+    assert m.chosen_arm(str(tmp_path / "none.json")) == "v5h2"
     f = tmp_path / "c.json"; f.write_text(json.dumps({"p4_arm": "v6p-think"}))
     assert m.chosen_arm(str(f)) == "v6p-think"
 
