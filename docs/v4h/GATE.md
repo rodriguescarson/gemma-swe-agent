@@ -674,3 +674,5 @@ What had been seen of stage 1a before this addendum: the 22:48 interim (v4h2 2/7
   a fixer whose targeted test passes writes a flag and every other fixer's next helper call is refused with STOP. Limits stated now: raw run_command calls (the copy, git grep, the final diff) are not counted by the ledger, only paid for by the allowance; the bundle had not run on a model when this was written.
 **Gate (scripts/p2_probe_gate.py, runs after the v6p-b probe of addendum 6, 4 items at T = 2):** v6p-b is BROKEN and is dropped from stage 1b (stage 1b then runs v4h2 and v6p only, recorded) when 3 or more probe items ended with an empty patch, or 2 or more with the tool-call budget error,
 or any item with an infrastructure/harness error, or the probe did not run. Passing the gate says only that the bundle runs; it is not a result and the probe items are never part of any table (they are the last 4 ids, outside stages 1a and 1b).
+
+(Timestamp correction for addendum 7: written and pushed at 2026-10-06 23:28 UTC, not ~23:35.)
