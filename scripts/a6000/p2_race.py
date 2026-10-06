@@ -70,7 +70,7 @@ def item_script(arm, task, port, scale, items="items"):
     flags = budget_flags(str(ROOT / "submissions" / arm))
     return (f"set -u; [ -d /tmp/bundle_{arm} ] || cp -r /g4/submissions/{arm} /tmp/bundle_{arm}; mkdir -p /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task} /out/{items}/{arm}; cd /tmp/run_{arm}_{task}; "
             f"export PYTHONDONTWRITEBYTECODE=1 UV_LINK_MODE=copy G4_WHEELHOUSE=/root/h/wheels G4_COMPACTION=1 G4_L4_SCALE={scale} "
-            f"G4_NO_EDITABLE=1 OPENAI_API_KEY=EMPTY OPENAI_BASE_URL=http://host.docker.internal:{port}/v1 TMPDIR=/tmp/sbx_{arm}_{task}; "
+            f"G4_NO_EDITABLE=1 LITELLM_LOCAL_MODEL_COST_MAP=True OPENAI_API_KEY=EMPTY OPENAI_BASE_URL=http://host.docker.internal:{port}/v1 TMPDIR=/tmp/sbx_{arm}_{task}; "
             f"python /g4/scripts/pallets/run_eval_pallets.py eval --tasks /root/h/tasks.jsonl --snapshots-dir /root/h/snapshots "
             f"--submission-dir /tmp/bundle_{arm} --results-dir /out/{items}/{arm}/{task} --sandbox subprocess {flags} --concurrency 1 "
             f"--display quiet --task-ids {task} > /out/{items}/{arm}/{task}.out 2>&1; rc=$?; rm -rf /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task}; exit $rc")

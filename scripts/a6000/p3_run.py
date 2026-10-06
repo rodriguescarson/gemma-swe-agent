@@ -23,7 +23,8 @@ def chosen_arm(path=str(CHOICE)):
 
 
 def race_args(out, arm, port):
-    return [out, "--harness", str(ROOT / "data" / "heldout1k" / "harness_p3"), "--ids", str(ROOT / "data" / "heldout1k" / "p3_ids.txt"), "--arms", arm,
+    return [out, "--harness", "data/heldout1k/harness_p3",   # repo-relative: p2_race mounts the repo at /g4 and copies /g4/$HARNESS
+             "--ids", str(ROOT / "data" / "heldout1k" / "p3_ids.txt"), "--arms", arm,
             "--conc", "2", "--arm-scale", f"{arm}={p2_lib.ARM_SCALE[arm]}", "--port", str(port), "--label", "p3", "--keep"]
 
 

@@ -23,7 +23,7 @@ def test_p3_race_args_use_one_arm_its_scale_the_capture_proxy_port_and_the_p3_pa
     run = _mod("p3_run")
     a = run.race_args("/o", "v6p", 8003)
     assert a[a.index("--arms") + 1] == "v6p" and "v6p=0.6156688916658797" in a and a[a.index("--port") + 1] == "8003"
-    assert a[a.index("--harness") + 1].endswith("harness_p3") and a[a.index("--ids") + 1].endswith("p3_ids.txt") and a[a.index("--conc") + 1] == "2"
+    assert a[a.index("--harness") + 1] == "data/heldout1k/harness_p3" and a[a.index("--ids") + 1].endswith("p3_ids.txt") and a[a.index("--conc") + 1] == "2"
     assert "--keep" in a and a[a.index("--label") + 1] == "p3"
 
 

@@ -191,3 +191,7 @@ def test_arm_scales_are_the_probe_values_and_give_the_registered_caps():
     assert math.isclose(p2.ARM_SCALE["v6p-think"], 0.7184229714777164)
     caps = {a: 300 / s for a, s in p2.ARM_SCALE.items()}
     assert round(caps["v4h2"]) == 400 and round(caps["v6p"]) == 487 and round(caps["v6p-think"]) == 418
+
+
+def test_item_script_uses_litellms_local_cost_map_like_the_kernel():
+    assert "LITELLM_LOCAL_MODEL_COST_MAP=True" in race.item_script("v6p", "t1", port=8001, scale=1.0)
