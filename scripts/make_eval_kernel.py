@@ -292,7 +292,8 @@ PROBES = {"locate.py": 'python3 /tmp/swe/locate.py "parse_header"', "test.py": "
           "check.py": "python3 /tmp/swe/check.py --mode preflight",
           "edit.py": "python3 /tmp/swe/edit.py pkg/mod.py <<'EOF'\n<<<<<<< SEARCH\n    return x\n=======\n    return x  # edited\n>>>>>>> REPLACE\nEOF",
           "run.py": 'python3 /tmp/swe/run.py --timeout 5 "echo hi"', "gate.py": "python3 /tmp/swe/gate.py",
-          "view.py": "python3 /tmp/swe/view.py pkg/mod.py 1 2", "repo_map.py": "python3 /tmp/swe/repo_map.py pkg --grep parse_header"}
+          "view.py": "python3 /tmp/swe/view.py pkg/mod.py 1 2", "repo_map.py": "python3 /tmp/swe/repo_map.py pkg --grep parse_header",
+          "repro.py": "python3 /tmp/swe/repro.py", "select_best.py": "python3 /tmp/swe/select_best.py --test tests/test_mod.py"}
 for h, c in PROBES.items():
     if h not in HELPERS_B64: continue
     r = m.run_command(c); o = (r.stdout + r.stderr); bad = "can't open file" in o or "No such file" in o; ok &= not bad
