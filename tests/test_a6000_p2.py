@@ -160,3 +160,27 @@ def test_plan_stage_ladder():
 def test_item_script_copies_a_missing_bundle_so_a_reused_container_works():
     s = race.item_script("v6p", "t1", port=8001, scale=1.0)
     assert "[ -d /tmp/bundle_v6p ] || cp -r /g4/submissions/v6p /tmp/bundle_v6p" in s
+
+
+# ------------------------------------------------------------------ the effective cap (autopilot step 0)
+def _harness_run_eval():
+    # scripts/run_eval.py (the harness wrapper), not scripts/a6000/run_eval.py that shadows it on sys.path
+    sp = importlib.util.spec_from_file_location("harness_run_eval", ROOT / "scripts" / "run_eval.py")
+    m = importlib.util.module_from_spec(sp); sp.loader.exec_module(m)
+    return m
+
+
+def test_scale_below_one_stretches_the_cap_to_300s_times_S():
+    run_eval = _harness_run_eval()
+    S_v4h2, S_v6p = 1.3334808722128053, 1.6242496795545336
+    for S, want_s in ((S_v4h2, 300 * S_v4h2), (S_v6p, 300 * S_v6p)):
+        argv = run_eval.scale_argv(["--max-time-minutes", "5.0", "--timeout-seconds", "180", "--max-turns", "150"], p2.arm_scale(S))
+        minutes = float(argv[argv.index("--max-time-minutes") + 1])
+        assert abs(minutes * 60 - want_s) < 0.5, (S, minutes * 60)           # v4h2 ~400 s, v6p ~487 s, never below 300 s
+        assert int(argv[argv.index("--timeout-seconds") + 1]) >= 180
+        assert argv[argv.index("--max-turns") + 1] == "150"
+
+
+def test_the_item_script_hands_the_scale_to_the_harness_env_only():
+    s = race.item_script("v6p", "t1", port=8001, scale=p2.arm_scale(1.6242496795545336))
+    assert "G4_L4_SCALE=0.61566" in s and "--max-time-minutes 5.0" in s     # run_eval divides; the flag stays the bundle's own 5.0
