@@ -155,3 +155,8 @@ def test_plan_stage_ladder():
     assert p2.plan_stage_ladder({200: 20.0, 100: 10.0, 50: 5.0}) == 100
     assert p2.plan_stage_ladder({200: 40.0, 100: 20.0, 50: 10.0}) == 50
     assert p2.plan_stage_ladder({200: 90.0, 100: 45.0, 50: 22.0}) == 50          # even 50 over 12 h: stage 1a anyway
+
+
+def test_item_script_copies_a_missing_bundle_so_a_reused_container_works():
+    s = race.item_script("v6p", "t1", port=8001, scale=1.0)
+    assert "[ -d /tmp/bundle_v6p ] || cp -r /g4/submissions/v6p /tmp/bundle_v6p" in s
