@@ -41,7 +41,7 @@ def test_classify():
     assert c({"resolved": True, "error": None, "agent_patch_size": 5}) == {"solved", }
     assert c({"resolved": False, "error": CAP, "agent_patch_size": 0}) == {"cap", "empty"}
     assert c({"resolved": False, "error": "Agent exceeded turns budget (150 turns)", "agent_patch_size": 3}) == {"budget"}
-    assert c({"resolved": False, "error": "litellm.APIError: boom", "agent_patch_size": 0}) == {"error", "empty"}
+    assert c({"resolved": False, "error": "litellm.APIError: boom", "agent_patch_size": 0}) == {"error", "infra", "empty"}
 
 
 def test_stats_and_flags(tmp_path):
