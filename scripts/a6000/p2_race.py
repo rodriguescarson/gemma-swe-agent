@@ -93,7 +93,9 @@ def item_script(arm, task, port, scale, items="items"):
             f"G4_NO_EDITABLE=1 LITELLM_LOCAL_MODEL_COST_MAP=True OPENAI_API_KEY=EMPTY OPENAI_BASE_URL=http://host.docker.internal:{port}/v1 TMPDIR=/tmp/sbx_{arm}_{task}; "
             f"python /g4/scripts/pallets/run_eval_pallets.py eval --tasks /root/h/tasks.jsonl --snapshots-dir /root/h/snapshots "
             f"--submission-dir /tmp/bundle_{arm} --results-dir /out/{items}/{arm}/{task} --sandbox subprocess {flags} --concurrency 1 "
-            f"--display quiet --task-ids {task} > /out/{items}/{arm}/{task}.out 2>&1; rc=$?; rm -rf /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task}; exit $rc")
+            f"--display quiet --task-ids {task} > /out/{items}/{arm}/{task}.out 2>&1; rc=$?; "
+            f"L=$(find /tmp/sbx_{arm}_{task} -type d -path '*swe/budget' 2>/dev/null | head -1); [ -n \"$L\" ] && cp -r \"$L\" /out/{items}/{arm}/{task}.ledger; "
+            f"rm -rf /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task}; exit $rc")
 
 
 def pending(items, out, items_dir="items"):

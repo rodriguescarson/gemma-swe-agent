@@ -686,3 +686,7 @@ The v6p-b gate of addendum 7 gets two more conditions. v6p-b is also **dropped f
 counted helper call prints `[fixer K: helper call n/7 ...]` into the tool result stored in the item's trace, and every refusal prints SHARE SPENT or STOP, so the per-fixer count of an item is the largest n printed for K in
 that item's trace. p2_race also copies the real ledger directory out beside the item (`<task>.ledger`) before the sandbox is removed, best effort; when that copy exists its `K.call.*` files are counted instead.
 All earlier conditions of addendum 7 stand (3 or more empty patches, 2 or more tool-call-budget errors, any infrastructure/harness error, or no probe).
+
+(Addendum 8 notes, written 2026-10-06 23:41 UTC; the "~23:45" above was an estimate, the addendum was pushed at 23:30 UTC.)
+- The ledger footer is now the FIRST line of the output of view.py, edit.py and test.py (the harness truncates tool output at 5000 characters, which could have cut a trailing footer out of the stored trace and made the gate's trace-based count read zero). Test: tests/test_v6pb_bundle.py::test_the_footer_is_the_first_line_of_every_counted_helper_output. This is the only change to the bundle since addendum 7; nothing else in v6p-b moved.
+- Where the report goes: after the probe, scripts/p2_probe_gate.py appends the gate verdict and one ledger line per probe item (fixer a / b / c counted helper calls and refusals, with the source: copied ledger directory or trace footers) to docs/a6000/P2_LOG.md, writes OUT/probe_gate.json, and the results backup pushes both.

@@ -52,3 +52,9 @@ def test_only_new_or_changed_files_are_planned_and_huge_files_skipped(tmp_path):
     assert len(bk.plan(str(src), str(dst))) == 1
     mk(src / "p2" / "proxy_big.jsonl", "x" * 200)
     assert all("proxy_big" not in str(d) for s, d in bk.plan(str(src), str(dst), max_bytes=100))
+
+
+def test_probe_gate_result_is_backed_up(tmp_path):
+    src, dst = tmp_path / "runs", tmp_path / "repo"
+    mk(src / "p2" / "probe_gate.json")
+    assert "p2/probe_gate.json" in {str(d.relative_to(dst)) for s, d in bk.plan(str(src), str(dst))}

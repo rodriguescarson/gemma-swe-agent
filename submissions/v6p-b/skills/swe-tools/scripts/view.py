@@ -40,7 +40,6 @@ if __name__ == "__main__":
     _refusal, _footer = _budget.enter(ws())
     if _refusal:
         print(_refusal); sys.exit(0)
-    _rc = main(sys.argv[1:])
     if _footer:
-        print(_footer)
-    sys.exit(_rc)
+        print(_footer)                              # first line: the harness truncates long tool output
+    sys.exit(main(sys.argv[1:]))

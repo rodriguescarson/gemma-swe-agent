@@ -230,6 +230,7 @@ def test_gate_passes_a_probe_that_produced_patches_and_stayed_in_budget(tmp_path
     g = _gate_mod()
     for i, (p, e) in enumerate([(10, None), (0, None), (30, "Agent exceeded session timeout (8.0 min)"), (5, None)]):
         _probe_item(tmp_path, "v6p-b", f"t{i}", patch=p, error=e)
+        _trace(tmp_path, "v6p-b", f"t{i}", [_step("cd /tmp/wa && python3 /tmp/swe/view.py f.py 1 5", "1| x\n[fixer a: helper call 1/7, 6 left]")])   # the caps engaged
     r = g.gate(str(tmp_path), "v6p-b")
     assert r["ok"] is True and r["empty"] == 1 and r["n"] == 4
 
@@ -238,7 +239,7 @@ def test_gate_fails_on_three_empty_patches_or_two_budget_exhaustions_or_an_infra
     g = _gate_mod()
     for i in range(4):
         _probe_item(tmp_path, "v6p-b", f"t{i}", patch=0 if i < 3 else 5)
-    assert g.gate(str(tmp_path), "v6p-b")["ok"] is False
+    r0 = g.gate(str(tmp_path), "v6p-b"); assert r0["ok"] is False and any("empty" in x for x in r0["reasons"])
     t2 = tmp_path / "b"; t2.mkdir()
     for i in range(4):
         _probe_item(t2, "v6p-b", f"t{i}", patch=5, error="Agent exceeded tool call budget (70 calls)" if i < 2 else None)
@@ -261,3 +262,90 @@ def test_a_failed_gate_drops_the_arm_from_the_race(tmp_path):
     assert race.drop_failed_arms(["v4h2", "v6p", "v6p-b"], str(tmp_path / "probe_gate.json"), ["v6p-b"]) == (["v4h2", "v6p", "v6p-b"], [])
     assert race.drop_failed_arms(["v4h2", "v6p"], str(tmp_path / "missing.json"), ["v6p-b"]) == (["v4h2", "v6p"], [])      # arm not in the race: nothing to drop
     assert race.drop_failed_arms(["v4h2", "v6p-b"], str(tmp_path / "missing.json"), ["v6p-b"]) == (["v4h2"], ["v6p-b"])    # no gate result for a required arm: dropped
+
+
+# ------------------------------------------------------------------ addendum 8: helper reachability and the ledger in the gate
+def _trace(out, arm, task, steps, T=2):
+    import json
+    d = out / f"probe_{arm}_T{T}" / arm / task / "traces"; d.mkdir(parents=True, exist_ok=True)
+    (d / f"trace_{task}.json").write_text(json.dumps({"steps": steps}))
+
+
+def _step(cmd, text):
+    return {"tool_calls": [{"function_name": "run_command", "arguments": {"command": cmd}}], "observation": {"content": json.dumps({"status": "ok", "stdout": text})}}
+
+
+def _ok_item(out, task, patch=10, footers=("a:1", "a:2", "b:1", "c:1", "c:2", "c:3")):
+    _probe_item(out, "v6p-b", task, patch=patch)
+    steps = [_step("cd /tmp/wX && python3 /tmp/swe/view.py f.py 1 5", f"1| x\n[fixer {f.split(':')[0]}: helper call {f.split(':')[1]}/7, 5 left]") for f in footers]
+    _trace(out, "v6p-b", task, steps)
+
+
+def test_gate_reports_ledger_counts_per_fixer_and_per_item_from_the_traces(tmp_path):
+    g = _gate_mod()
+    for t in ("t0", "t1", "t2", "t3"):
+        _ok_item(tmp_path, t)
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ok"] is True and {k: r["ledger"]["t0"][k] for k in "abc"} == {"a": 2, "b": 1, "c": 3} and r["ledger"]["t0"]["refused"] == 0
+    assert r["ledger_total"] == 24 and r["helper_fail_tasks"] == 0
+
+
+def test_gate_counts_refusals(tmp_path):
+    g = _gate_mod()
+    _ok_item(tmp_path, "t0", footers=("a:7",))
+    _probe_item(tmp_path, "v6p-b", "t1", patch=5)
+    _trace(tmp_path, "v6p-b", "t1", [_step("cd /tmp/wb && python3 /tmp/swe/view.py f.py 1 5", "SHARE SPENT: your 7 helper calls are used. Your next call is the final command run_command(command=\"cd /tmp/wb && git -C /tmp/wb diff\")"),
+                                       _step("cd /tmp/wa && python3 /tmp/swe/edit.py f.py", "STOP: candidate c already passes. final command cd /tmp/wa && git diff")])
+    assert g.gate(str(tmp_path), "v6p-b")["ledger"]["t1"]["refused"] == 2
+
+
+def test_gate_fails_when_the_caps_never_engaged(tmp_path):
+    g = _gate_mod()
+    for t in ("t0", "t1", "t2", "t3"):
+        _probe_item(tmp_path, "v6p-b", t, patch=10)
+        _trace(tmp_path, "v6p-b", t, [_step("cd /tmp/wa && python3 /tmp/swe/view.py f.py 1 5", "1| x")])          # helper ran, no footer: not counted
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ok"] is False and r["ledger_total"] == 0 and any("never engaged" in x for x in r["reasons"])
+
+
+def test_gate_fails_when_more_than_one_item_cannot_open_a_helper_file(tmp_path):
+    g = _gate_mod()
+    for t in ("t0", "t1", "t2", "t3"):
+        _ok_item(tmp_path, t)
+    bad = lambda task: _trace(tmp_path, "v6p-b", task, [_step("python3 /tmp/swe/edit.py f.py", "python3: can't open file '/tmp/swe/edit.py'")] + [
+        _step("cd /tmp/wa && python3 /tmp/swe/view.py f.py 1 5", "1| x\n[fixer a: helper call 1/7, 6 left]")])
+    bad("t0")
+    assert g.gate(str(tmp_path), "v6p-b")["ok"] is True                      # one item with a can't-open is tolerated
+    bad("t1")
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ok"] is False and r["helper_fail_tasks"] == 2 and any("can't open" in x for x in r["reasons"])
+
+
+def test_a_copied_ledger_directory_is_preferred_over_the_trace_footers(tmp_path):
+    g = _gate_mod()
+    for t in ("t0", "t1", "t2", "t3"):
+        _ok_item(tmp_path, t)
+    led = tmp_path / "probe_v6p-b_T2" / "v6p-b" / "t0.ledger"; led.mkdir()
+    for name in ("a.call.1", "a.call.2", "a.call.3", "a.call.4", "b.call.1", "passed.b"):
+        (led / name).write_text("")
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ledger"]["t0"]["a"] == 4 and r["ledger"]["t0"]["b"] == 1 and r["ledger"]["t0"]["c"] == 0 and r["ledger"]["t0"]["source"] == "ledger"
+    assert r["ledger"]["t1"]["source"] == "traces"
+
+
+def test_item_script_copies_the_ledger_out_before_the_sandbox_is_removed():
+    s = race.item_script("v6p-b", "t1", port=8001, scale=1.0, items="probe_v6p-b_T2")
+    assert "swe/budget" in s and "/out/probe_v6p-b_T2/v6p-b/t1.ledger" in s
+    assert s.index("swe/budget") < s.index("rm -rf /tmp/sbx_v6p-b_t1") and s.rstrip().endswith("exit $rc")
+
+
+def test_gate_main_writes_the_ledger_report_to_the_log(tmp_path):
+    g = _gate_mod()
+    for t in ("t0", "t1", "t2", "t3"):
+        _ok_item(tmp_path, t)
+    log = tmp_path / "log.md"
+    assert g.main([str(tmp_path), "--arm", "v6p-b", "--log", str(log)]) == 0
+    text = log.read_text()
+    assert "GATE PASS" in text and "ledger t0: fixer a 2, b 1, c 3" in text and "can't open" in text
+    import json
+    assert json.loads((tmp_path / "probe_gate.json").read_text())["v6p-b"]["ledger"]["t0"]["a"] == 2

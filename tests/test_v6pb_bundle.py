@@ -200,3 +200,15 @@ def test_a_passing_test_in_one_copy_stops_the_edit_helper_in_another(tmp_path):
     assert "STOP" in stopped and "candidate b" in stopped
     assert (a / "mod.py").read_text().count("x + 2") == 0                            # the edit was not made
     assert "OK" in _run("edit.py", ["mod.py", "--lines", "2-2"], b, tmp_path, stdin="    return x + 3\n")   # the passer may still work
+
+
+def test_the_footer_is_the_first_line_of_every_counted_helper_output(tmp_path):
+    """The harness truncates tool output (max_stdout_chars 5000): a footer at the end of a long view could be lost, so it comes first."""
+    r = _repo(tmp_path)
+    (r / "long.py").write_text("".join("x%d = %d  # %s\n" % (i, i, "y" * 60) for i in range(200)))
+    view = _run("view.py", ["long.py", "1", "120"], r, tmp_path)
+    assert view.splitlines()[0].startswith("[fixer a: helper call 1/") and "1| x0" in view
+    edit = _run("edit.py", ["mod.py", "--lines", "2-2"], r, tmp_path, stdin="    return x + 9\n")
+    assert edit.splitlines()[0].startswith("[fixer a: helper call 2/") and "OK" in edit
+    test = _run("test.py", ["--target", "test_mod.py"], r, tmp_path)
+    assert test.splitlines()[0].startswith("[fixer a: helper call 3/")

@@ -7,6 +7,8 @@ import _budget                                      # v6p-b: the per-fixer call 
 _refusal, _footer = _budget.enter(ws())
 if _refusal:
     print(_refusal); sys.exit(0)
+if _footer:
+    print(_footer)                                  # first line: the harness truncates long tool output
 a = sys.argv[1:]; opt = {}
 i = 0
 while i < len(a):
@@ -27,5 +29,3 @@ body = "\n".join(l for l in lines if not l.startswith(("platform ", "rootdir", "
 print(body[-2200:] if r.returncode else "all selected tests passed")
 if r.returncode == 0:
     _budget.mark_passed(ROOT)                        # the other fixers stop at their next helper call
-if _footer:
-    print(_footer)

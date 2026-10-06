@@ -274,6 +274,6 @@ if __name__ == "__main__":
     except Fail as e:
         text = str(e)
         sys.exit_code = 1
-    sys.stdout.buffer.write((text + ("\n" + _footer if _footer else "") + "\n").encode("utf-8", "replace"))
+    sys.stdout.buffer.write(((_footer + "\n" if _footer else "") + text + "\n").encode("utf-8", "replace"))
     sys.stdout.flush()
     sys.exit(getattr(sys, "exit_code", 0))

@@ -38,7 +38,7 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
         if top == "p2":
             r = rel[3:]
             if "/" not in r:
-                return name in ("items.jsonl", "probe_summary.json", "ids.txt") or fnmatch.fnmatch(name, "proxy_*.jsonl") or fnmatch.fnmatch(name, "report_*.txt")
+                return name in ("items.jsonl", "probe_summary.json", "probe_gate.json", "ids.txt") or fnmatch.fnmatch(name, "proxy_*.jsonl") or fnmatch.fnmatch(name, "report_*.txt")
             return _p2_like(r, p3=False)
         if top == "p3":
             r = rel[3:]
