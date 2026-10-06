@@ -23,3 +23,19 @@ Race bundles on harness_s200 (OpenRouter spend; `DRY_RUN=1` in front prints the 
     HARNESS=data/heldout1k/harness_s200 scripts/pallets/or_race.sh v4h2 v5h2
 
 (tested by `tests/test_heldout_race_doc.py` under `DRY_RUN=1`).
+
+## Results (2026-10-06, Docker python:3.12-slim arm64, `pod_probe.sh` fix runs, race settings)
+
+| pack | tasks | gold resolves, empty does not | dropped |
+|---|---|---|---|
+| harness_s200 (sample200_ids.txt) | 200 | 200 (`s200_valid_ids.txt`) | 0 |
+| harness_all | 1046 | 1044 (`all_valid_ids.txt`) | 2 empty_resolves: isort_d75b093 (miner base_rc 0, F2P from parametrize-id drift), trio_50b9825 |
+
+Per-task classes: `preflight_all_summary.json`. Earlier s200 runs that found packer bugs (kept in gitignored
+`preflight_s200_run*`): run 1 (stopped at 79 gold runs), isort without its own distribution's metadata (12 gold collection
+errors); run 2 162/200, the real own wheel shadowed /workspace/src (38 drops); run 3 197/200, real wheels of black and
+mistune missing for isort/httpie. Each fixed in the packer, never in the tasks.
+
+Env recipe: each repo's `wheels/_extra-<repo>.txt` is the miner's validation freeze; the repo's own distribution is a
+metadata-only wheel `X+g4meta` (importlib.metadata works, code comes from the workspace), every other pin is `===X`.
+Snapshots are single-commit `baseline` repos at base_commit (tomlkit's toml-test submodule vendored), byte-deterministic.
