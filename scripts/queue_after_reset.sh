@@ -5,9 +5,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 export KAGGLE_BIN=${KAGGLE_BIN:-$PWD/.venv/bin/kaggle} RETRY_S=${RETRY_S:-900}
+L=${QUEUE_LOG_DIR:-eval/overnight}; PUSH_RETRY_SH=${PUSH_RETRY_SH:-scripts/kaggle_push_retry.sh}
+SUMMARY_SH=${SUMMARY_SH:-scripts/l4_result_summary.sh}
 for slug in "$@"; do
-  echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] queue: $slug" >> eval/overnight/progress.log
-  bash scripts/kaggle_push_retry.sh "$slug" >> "eval/overnight/${slug}.out" 2>&1
-  SUMMARY_SETTLE_S=60 bash scripts/l4_result_summary.sh "$slug" "eval/overnight/${slug}.out"
+  echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] queue: $slug" >> "$L/progress.log"
+  if ! bash "$PUSH_RETRY_SH" "$slug" >> "$L/${slug}.out" 2>&1; then
+    # no run started: l4_result_summary would wait forever for it (2026-10-06, 9 h on v5h2). Next slug.
+    echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] PUSH_FAILED $slug (see $L/${slug}.out)" >> "$L/progress.log"
+    continue
+  fi
+  SUMMARY_SETTLE_S=60 bash "$SUMMARY_SH" "$slug" "$L/${slug}.out"
 done
-echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] queue done: $*" >> eval/overnight/progress.log
+echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] queue done: $*" >> "$L/progress.log"

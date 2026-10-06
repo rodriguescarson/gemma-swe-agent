@@ -38,3 +38,27 @@ def test_weekly_quota_refusal_is_retried_too(tmp_path):
     env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
     r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode == 0 and (tmp_path / "cnt").read_text().strip() == "3" and "quota" in r.stdout.lower()
+
+
+def _fake(tmp, script):
+    fake = tmp / "push_wait.sh"; fake.write_text("#!/bin/bash\n" + script); fake.chmod(0o755)
+    return fake
+
+
+def test_transient_connection_error_during_push_is_retried(tmp_path):
+    """2026-10-06 13:00 IST: 'Connection aborted / RemoteDisconnected' on push ended the loop, so the queue dropped v5h2."""
+    fake = _fake(tmp_path, 'n=$(cat "$CNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CNT"\n'
+                           '[ $n -lt 3 ] && { echo "k: (\'Connection aborted.\', RemoteDisconnected(\'Remote end closed connection without response\'))"; echo "k: push FAILED"; exit 1; }\n'
+                           'echo "k: COMPLETE"; exit 0\n')
+    env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and (tmp_path / "cnt").read_text().strip() == "3", r.stdout
+
+
+def test_connection_error_after_a_successful_push_is_not_retried(tmp_path):
+    """A drop while POLLING a kernel that did start must not push a second (quota-billed) run."""
+    fake = _fake(tmp_path, 'n=$(cat "$CNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CNT"\n'
+                           'echo "k: pushed v3"; echo "k: (\'Connection aborted.\', RemoteDisconnected(\'x\'))"; exit 1\n')
+    env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode != 0 and (tmp_path / "cnt").read_text().strip() == "1"
