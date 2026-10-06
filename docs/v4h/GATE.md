@@ -646,3 +646,19 @@ cannot run) was being counted as an *error* and dropped from the pairing, which 
 - every other error (for example "Tool '...' not found", turns budget) is the arm's own failure: unsolved, in the pairing, counted as an "error" for health and the stop rule.
 This refines "sandbox setup failure" in the P2 pre-registration (a failed setup that is the harness's fault is an infrastructure row; a verification failure caused by the agent's patch is not).
 Also recorded: the stretched cap works as registered (a v6p-think item ended "Agent exceeded session timeout (6.959688 min)" = 5 min / 0.7184 = 417.6 s).
+
+### P2 addendum 6 (Carson's amendment, 2026-10-06 ~23:20 UTC, during stage 1a; no stage 1a result was read while writing it)
+What had been seen of stage 1a before this addendum: the 22:48 interim (v4h2 2/7, v6p 1/8 with 3 empty patches, v6p-think 1/8 with 6 empty patches and 6 cap hits) and, in the first 5 v6p items,
+3 that spent all 70 tool calls and ended with an empty patch. v6p-b below is motivated by that second observation (the three fixers, the locator and the verifier share one 70-call budget).
+1. **P4 arm rule (replaces addendum 4's rule 2 choice):** the non-reference arm (v6p or v6p-think) whose stage 1a verdict against v4h2 is **BETTER** under the P2 rule (net >= +5 and sign p < 0.10, on the
+   "all items" table; the table without contended items is a sensitivity reading, not the decision). If both are BETTER, the larger net; a tie goes to v6p. **If neither is BETTER, P4 runs on v5h2** (submissions/v5h2),
+   not v6p. P4's conditions are unchanged (public 74, sequential, pace proxy, the bundle's own budgets, keep_rule.py against eval/kaggle/g4-l4-v4h2g-p312, labelled an A6000 screen).
+2. **Bundle v6p-b** (built while stage 1a runs, CPU only, the race untouched): v6p rebased on v4h2, **thinking OFF**, with a fixed tool-call share per stage inside the 70-call total: the locator and the verifier keep a
+   reserved share, the remaining calls are split into equal per-fixer shares, and the fixers stop once one of them passes its tests. Test first (tests/test_v6pb_bundle.py): the shares sum to <= 70 and no fixer's share can
+   exhaust the whole budget; the bundle is run through the official compiler (adk_submission) and the repo's validate script. The bundle's exact contents are recorded in a later dated addendum, before stage 1b starts.
+3. **Stage 1b arms: v4h2, v6p, v6p-b** (v6p-b replaces v6p-think; v6p-think runs in stage 1a only and its stage 1a reading stands, with no pooled row). v4h2 and v6p stay pooled 1a + 1b under addendum 4's combination
+   rule. **v6p-b is judged on stage 1b alone (50 tasks) against v4h2, paired,** with the P2 verdict rule (BETTER net >= +5 and p < 0.10, UNRESOLVED when its cap-hit share is >= 10 points above v4h2's and the
+   verdict is not BETTER); it is never pooled with stage 1a because it did not run there. Its cap scale is measured like the other arms': an arm-pure probe at T = 2 on the last 4 ids (one extra step, after P4 and
+   before stage 1b), scale = 1 / S when S > 1.15, else 1.0; if the probe cannot run, v6p's scale.
+4. **P3 bundle rule (amended because the arms now differ by stage):** the arm with the highest solved share (solved / valid finished tasks, counting every task that arm ran) among arms with at least 40 valid tasks;
+   ties v6p-b, v6p, v6p-think, v4h2.
