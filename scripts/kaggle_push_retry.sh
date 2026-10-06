@@ -16,7 +16,7 @@ while :; do
   # a network drop DURING the push (push_wait prints "push FAILED") never started a run: retry it. A drop after a
   # successful push (no "push FAILED") is not retried, or a second quota-billed run would start.
   if [ $st -ne 0 ] && echo "$out" | grep -q "push FAILED" && \
-     echo "$out" | grep -qE "Connection aborted|RemoteDisconnected|Connection reset|timed out|Temporary failure in name resolution|50[234] "; then
+     echo "$out" | grep -qE "Connection aborted|RemoteDisconnected|Connection reset|Max retries exceeded|timed out|Temporary failure in name resolution|50[234] "; then
     echo "$(date -u) $slug: transient network error during push (attempt $n); retry in ${RETRY_S:-600}s"
     if [ "${RETRY_MAX:-0}" -gt 0 ] && [ "$n" -ge "${RETRY_MAX:-0}" ]; then exit 1; fi
     sleep "${RETRY_S:-600}"; continue

@@ -62,3 +62,13 @@ def test_connection_error_after_a_successful_push_is_not_retried(tmp_path):
     env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
     r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
     assert r.returncode != 0 and (tmp_path / "cnt").read_text().strip() == "1"
+
+
+def test_max_retries_exceeded_during_push_is_retried(tmp_path):
+    """2026-10-06 23:20 IST: urllib3 'Max retries exceeded' on the push also never started a run."""
+    fake = _fake(tmp_path, 'n=$(cat "$CNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$CNT"\n'
+                           '[ $n -lt 2 ] && { echo "k: HTTPSConnectionPool(host=\'api.kaggle.com\', port=443): Max retries exceeded with url: /v1/kernels"; echo "k: push FAILED"; exit 1; }\n'
+                           'echo "k: COMPLETE"; exit 0\n')
+    env = dict(os.environ, PUSH_WAIT_SH=str(fake), CNT=str(tmp_path / "cnt"), RETRY_S="0", RETRY_MAX="10")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and (tmp_path / "cnt").read_text().strip() == "2", r.stdout
