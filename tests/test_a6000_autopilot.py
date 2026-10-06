@@ -56,3 +56,21 @@ def test_infra_error_detection():
     assert f("litellm.InternalServerError: 503 Service Unavailable") and f("Connection refused")
     assert not f(None) and not f("Agent exceeded session timeout (5.0 min)") and not f("Agent exceeded turns budget (150 turns)")
     assert not f("Tool 'python3 /tmp/swe/edit.py' not found")           # a bundle behaviour (the heredoc-as-tool-name crash), not infrastructure
+
+
+def test_purge_removes_only_infra_error_items(tmp_path):
+    spec2 = importlib.util.spec_from_file_location("p2_purge", ROOT / "scripts" / "a6000" / "p2_purge.py")
+    pg = importlib.util.module_from_spec(spec2); spec2.loader.exec_module(pg)
+    import json
+    def put(arm, task, err):
+        d = tmp_path / "items" / arm / task; d.mkdir(parents=True)
+        (d / "task_results.jsonl").write_text(json.dumps({"instance_id": task, "error": err}) + "\n")
+        (tmp_path / "items" / arm / f"{task}.out").write_text("x")
+    put("v6p", "a", "litellm.APIConnectionError: Connection error.")
+    put("v6p", "b", "Agent exceeded session timeout (5.0 min)")
+    put("v4h2", "c", None)
+    put("v4h2", "d", "litellm.InternalServerError: 503")
+    n = pg.purge(str(tmp_path), "items", rm=lambda p: (__import__("shutil").rmtree(p) if __import__("os").path.isdir(p) else __import__("os").path.exists(p) and __import__("os").remove(p)))
+    assert n == 2
+    assert not (tmp_path / "items" / "v6p" / "a").exists() and not (tmp_path / "items" / "v6p" / "a.out").exists()
+    assert (tmp_path / "items" / "v6p" / "b").exists() and (tmp_path / "items" / "v4h2" / "c").exists() and not (tmp_path / "items" / "v4h2" / "d").exists()
