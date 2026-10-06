@@ -84,3 +84,37 @@ def verdict(wins, losses, cap_gap):
     if net <= -5 and p < 0.10:
         return "WORSE"
     return "NO EVIDENCE"
+
+
+# ------------------------------------------------------------------------------------------ addendum 2
+ARMS = ("v4h2", "v6p", "v6p-think")
+
+
+def arm_scale(s):
+    """G4_L4_SCALE of one arm: 1 / its own S when S > 1.15 (the cap then means the same model work as on L4), else 1.0; clamped."""
+    if not s == s or s <= SLOWDOWN_MAX:
+        return 1.0
+    return min(SCALE_MAX, max(SCALE_MIN, 1.0 / s))
+
+
+def decide(per_level, n_tasks, think_m=THINK_ITEM_S):
+    """per_level: {C: {arm: {"S": effective slowdown, "m": mean item wall s}}} for arms v4h2 and v6p (v6p-think is assumed to behave like v6p
+    with m = think_m until it is measured; pass its own entry to override). -> {"C", "H": {C: hours}, "scales": {arm: scale at C}}.
+    H(C) = n x sum_arm m_arm / scale_arm / C / 3600; the smaller H wins, a tie goes to the smaller C."""
+    H, scales = {}, {}
+    for c, arms in per_level.items():
+        a = dict(arms)
+        a.setdefault("v6p-think", {"S": a["v6p"]["S"], "m": think_m})
+        sc = {k: arm_scale(v["S"]) for k, v in a.items()}
+        H[c] = n_tasks * sum(v["m"] / sc[k] for k, v in a.items()) / c / 3600
+        scales[c] = sc
+    best = min(H, key=lambda c: (round(H[c], 9), c))
+    return {"C": best, "H": H, "scales": scales[best]}
+
+
+def plan_stage_ladder(h_by_n):
+    """All 200 when H_200 <= 12 h, else the first 100 when H_100 <= 12 h, else the first 50 (stage 1a)."""
+    for n in (200, 100):
+        if h_by_n[n] <= WALL_LIMIT_H:
+            return n
+    return 50

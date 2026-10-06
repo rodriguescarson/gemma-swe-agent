@@ -51,6 +51,14 @@ echo SETUP_DONE
 '''
 
 
+def parse_arm_scales(items):
+    return {k: float(v) for k, _, v in (i.partition("=") for i in (items or []))}
+
+
+def scale_for(arm, scales, default):
+    return scales.get(arm, default)
+
+
 def budget_flags(bundle):
     b = read_budget(bundle)[0]
     return (f"--max-time-minutes {b['max_time_minutes']} --max-tool-calls {b['max_tool_calls']} "
@@ -85,10 +93,12 @@ def main(argv=None):
     ap.add_argument("--n", type=int); ap.add_argument("--ids-from-end", type=int)
     ap.add_argument("--arms", nargs="+", default=["v4h2", "v6p", "v6p-think"])
     ap.add_argument("--conc", type=int, required=True); ap.add_argument("--scale", type=float, default=1.0)
+    ap.add_argument("--arm-scale", nargs="*", default=[], help="ARM=SCALE per arm (G4_L4_SCALE); --scale is the default")
     ap.add_argument("--port", type=int, default=8001); ap.add_argument("--label", default="p2")
     ap.add_argument("--items-dir", default="items"); ap.add_argument("--keep", action="store_true", help="reuse a running container, leave it running")
     ap.add_argument("--cpus", default="24"); ap.add_argument("--mem", default="64g")
     a = ap.parse_args(argv)
+    arm_scales = parse_arm_scales(a.arm_scale)
     out = Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
     ids = ids_list(a.ids, a.n, a.ids_from_end)
     items = pending(build_items(ids, a.arms), str(out), a.items_dir)
@@ -121,7 +131,7 @@ def main(argv=None):
                     return
                 task, arm = items[idx[0]]; idx[0] += 1
             t0 = time.time()
-            p = subprocess.run([DOCKER, "exec", name, "bash", "-c", item_script(arm, task, a.port, a.scale, a.items_dir)], capture_output=True, text=True)
+            p = subprocess.run([DOCKER, "exec", name, "bash", "-c", item_script(arm, task, a.port, scale_for(arm, arm_scales, a.scale), a.items_dir)], capture_output=True, text=True)
             t1 = time.time()
             with lock:
                 done[0] += 1

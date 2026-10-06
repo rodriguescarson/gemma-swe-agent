@@ -8,6 +8,8 @@ export G4_PY="${G4_PY:-$HOME/g4/venv/bin/python}"
 export MODEL_DIR="${MODEL_DIR:-$HOME/g4/model}"
 export PORT="${PORT:-8000}"
 export BUNDLE="${BUNDLE:-}"
+export KV_DTYPE="${KV_DTYPE:-}"      # P2 addendum 2: fp8 doubles the KV tokens (screen-only deviation); empty = the kernel's default
+export GPU_UTIL="${GPU_UTIL:-0.90}"
 # environment of the kernel's install cell
 export LITELLM_LOCAL_MODEL_COST_MAP=True TRANSFORMERS_NO_TF=1 VLLM_WORKER_MULTIPROC_METHOD=spawn \
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 VLLM_ENGINE_READY_TIMEOUT_S=1200 VLLM_NO_USAGE_STATS=1 \
@@ -25,7 +27,7 @@ from adk_submission import VllmConfig, VllmServer, discover_adapters
 from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS
 adapters = discover_adapters(os.environ["BUNDLE"], adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS) if os.environ["BUNDLE"] else None
 cfg = VllmConfig(model=os.environ["MODEL_DIR"], port=int(os.environ["PORT"]), host="127.0.0.1", tool_call_parser="gemma4",
-    reasoning_parser="gemma4", max_model_len=32768, dtype="bfloat16", gpu_memory_utilization=0.90, enable_auto_tool_choice=True,
+    reasoning_parser="gemma4", max_model_len=32768, dtype="bfloat16", gpu_memory_utilization=float(os.environ["GPU_UTIL"]), kv_cache_dtype=(os.environ["KV_DTYPE"] or None), enable_auto_tool_choice=True,
     enable_lora=True, max_loras=8, max_lora_rank=128, tensor_parallel_size=1, startup_timeout=60 * 20)
 server = VllmServer(cfg, adapter_manifest=adapters)
 if os.environ.get("DRY_RUN") == "1":

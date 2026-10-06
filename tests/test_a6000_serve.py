@@ -62,3 +62,11 @@ def test_windows_dirs_removed_from_path():
     r = subprocess.run(["bash", "-c", "PATH=/mnt/c/Windows:/usr/bin:/bin:/mnt/c/x; " + t.split("PATH=", 1)[1].split("export PATH")[0].join(["PATH=", ""]) + " echo $PATH"],
                        capture_output=True, text=True)
     assert "/mnt/" not in r.stdout and "/usr/bin" in r.stdout
+
+
+def test_kv_dtype_and_utilisation_knobs(tmp_path):
+    _need_adk()
+    out = _dry(tmp_path, KV_DTYPE="fp8", GPU_UTIL="0.95").stdout
+    assert "--kv-cache-dtype fp8" in out and "--gpu-memory-utilization 0.95" in out
+    default = _dry(tmp_path).stdout
+    assert "--kv-cache-dtype" not in default and "--gpu-memory-utilization 0.9" in default

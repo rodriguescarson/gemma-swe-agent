@@ -118,3 +118,40 @@ def test_items_dir_is_configurable_for_the_probe_levels(tmp_path):
     (tmp_path / "probe_T2" / "v6p" / "t1" / "task_results.jsonl").write_text("{}\n")
     assert race.pending([("t1", "v6p"), ("t2", "v6p")], str(tmp_path), items_dir="probe_T2") == [("t2", "v6p")]
     assert race.pending([("t1", "v6p")], str(tmp_path)) == [("t1", "v6p")]          # default dir untouched
+
+
+# ------------------------------------------------------------------------------- addendum 2 (per-arm scale, stage 1a)
+def test_arm_scale_parsing_and_use():
+    assert race.parse_arm_scales(["v6p=0.6", "v4h2=1.0"]) == {"v6p": 0.6, "v4h2": 1.0}
+    assert race.parse_arm_scales([]) == {}
+    s = race.item_script("v6p", "t1", port=8001, scale=race.scale_for("v6p", {"v6p": 0.6}, 1.0))
+    assert "G4_L4_SCALE=0.6" in s
+    assert race.scale_for("v4h2", {"v6p": 0.6}, 1.0) == 1.0
+
+
+def test_arm_scale_from_s():
+    assert p2.arm_scale(1.05) == 1.0 and p2.arm_scale(1.15) == 1.0
+    assert math.isclose(p2.arm_scale(1.6), 1 / 1.6) and p2.arm_scale(9.0) == 0.2 and p2.arm_scale(float("nan")) == 1.0
+
+
+def test_decide_picks_the_level_with_the_smaller_projected_hours():
+    # m = mean item wall s at that level, S = effective slowdown, per arm; the think arm is assumed (v6p-like, m 360)
+    per = {1: {"v4h2": {"S": 1.03, "m": 150}, "v6p": {"S": 1.40, "m": 250}},
+           2: {"v4h2": {"S": 1.10, "m": 160}, "v6p": {"S": 1.57, "m": 285}}}
+    d = p2.decide(per, n_tasks=100)
+    f1 = 100 * (150 * 1.0 + 250 * 1.40 + 360 * 1.40) / 1 / 3600
+    f2 = 100 * (160 * 1.0 + 285 * 1.57 + 360 * 1.57) / 2 / 3600
+    assert d["C"] == 2 and math.isclose(d["H"][1], f1) and math.isclose(d["H"][2], f2)
+    assert d["scales"] == {"v4h2": 1.0, "v6p": 1 / 1.57, "v6p-think": 1 / 1.57}
+
+
+def test_decide_tie_goes_to_the_smaller_c():
+    per = {1: {"v4h2": {"S": 1.0, "m": 100}, "v6p": {"S": 1.0, "m": 100}}, 2: {"v4h2": {"S": 1.0, "m": 250}, "v6p": {"S": 1.0, "m": 250}}}
+    assert p2.decide(per, n_tasks=10, think_m=100)["C"] == 1
+
+
+def test_plan_stage_ladder():
+    assert p2.plan_stage_ladder({200: 11.0, 100: 5.5, 50: 2.7}) == 200
+    assert p2.plan_stage_ladder({200: 20.0, 100: 10.0, 50: 5.0}) == 100
+    assert p2.plan_stage_ladder({200: 40.0, 100: 20.0, 50: 10.0}) == 50
+    assert p2.plan_stage_ladder({200: 90.0, 100: 45.0, 50: 22.0}) == 50          # even 50 over 12 h: stage 1a anyway
