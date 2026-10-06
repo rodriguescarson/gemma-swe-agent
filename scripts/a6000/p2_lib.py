@@ -33,18 +33,22 @@ def slowdown(rows):
 
 
 def choose_concurrency(s):
-    """s: {T: effective slowdown} for T in 1..4 -> (C, scale). Highest T within 1.15; if even T=2 is above it, run T=2 with the
-    harness clock scale 1/S(2) (cap and command timeout x S(2))."""
+    """s: {T: effective slowdown} for T in 1..4 -> (C, scale). Highest T within 1.15; if even T=2 is above it (addendum 1), the T in
+    {2, 3, 4} with the most L4-equivalent work per wall second (T / S(T); a tie goes to the smaller T), harness clock scale 1/S(T)
+    (cap and command timeout x S(T))."""
     if 2 in s and not s[2] <= SLOWDOWN_MAX:                     # NaN (no calls measured) counts as too slow
-        v = s[2]
-        return 2, (min(SCALE_MAX, max(SCALE_MIN, 1.0 / v)) if v == v else 1.0)
+        cand = [t for t in (2, 3, 4) if t in s and s[t] == s[t] and s[t] > 0]
+        if not cand:
+            return 2, 1.0
+        t = max(cand, key=lambda x: (round(x / s[x], 9), -x))
+        return t, min(SCALE_MAX, max(SCALE_MIN, 1.0 / s[t]))
     ok = [t for t, v in s.items() if v <= SLOWDOWN_MAX]
     return (max(ok) if ok else min(s)), 1.0
 
 
 def project_hours(m_seconds, c, scale, n_tasks):
-    """n_tasks x (v4h2 m + v6p m + v6p-think THINK_ITEM_S/scale) / C, in hours. scale < 1 stretches the cap (G4_L4_SCALE = 1/S)."""
-    return n_tasks * (2 * m_seconds + THINK_ITEM_S / scale) / c / 3600
+    """n_tasks x (v4h2 m + v6p m + v6p-think THINK_ITEM_S) x S / C, in hours, S = 1/scale (addendum 1: every item stretched by S)."""
+    return n_tasks * (2 * m_seconds + THINK_ITEM_S) / scale / c / 3600
 
 
 def plan_stage(hours):

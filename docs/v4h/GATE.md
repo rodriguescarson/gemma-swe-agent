@@ -555,3 +555,16 @@ Also reported for every contrast: the paired counts on tasks where neither arm h
 
 **Hygiene.** Stop at 100 GB free disk. vLLM, the proxy, the dockerd I started and all monitors are stopped when the work ends; nvidia-smi must list no
 compute process. No tokens in git, logs or messages; weights and run directories stay out of git (scripts, tests, the report and result rows go in).
+
+### P2 addendum 1 (written while the probe runs, before any probe level's S(T) was read; the main text above is unchanged)
+Observed before writing this: a 1-task plumbing smoke (v6p, last id, T = 1) measured S(1) = 1.40, and vLLM's startup log reports "Available KV cache
+memory: 21.22 GiB" = **23,168 tokens** of KV cache on this card (maximum concurrency 4.37x at 32k tokens; Gemma-4-31B's KV per token is large; on the
+scorer's 4xL4 TP=4 the same model has several times more). Reading: GPU compute is already saturated (100% utilisation, 297 W of 300 W); the limit on
+concurrency is KV memory, so more streams cause preemption and recompute rather than more throughput. Consequences, both decided now:
+1. No probe levels above 4 are added (T = 6 and 8 were considered; they cannot help while the cache holds ~23k tokens).
+2. Rule 2 is amended: when S(2) > 1.15, run at the T in {2, 3, 4} that maximises T / S(T) (L4-equivalent work per wall second; a tie goes to the smaller T),
+   with G4_L4_SCALE = 1 / S(T) (cap and command timeout x S(T)), instead of fixing T = 2. When S(2) <= 1.15 rule 1 stands unchanged.
+3. Projection under a scale: H = 200 x (2 m + 360 s) x S(T) / T / 3600 (every item stretched by S, conservative); stage rule unchanged (> 12 h -> first 100 only).
+Stated limits: one scale (measured on v6p, the heaviest arm: three parallel fixers) applies to every arm; v4h2 is a single stream and is slowed less, so its
+stretched cap is relatively generous. That biases against a BETTER verdict for v6p / v6p-think, never for one. The server settings stay exactly as
+probed (gpu_memory_utilization 0.90, the kernel's value); no fp8 KV cache (it would change numerics).

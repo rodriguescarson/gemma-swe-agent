@@ -35,11 +35,12 @@ def test_choose_concurrency_takes_the_highest_level_within_1_15():
     assert p2.choose_concurrency({1: 1.0, 2: 1.15, 3: 1.2, 4: 1.3}) == (2, 1.0)      # 1.15 is allowed
 
 
-def test_choose_concurrency_when_two_is_too_slow_runs_two_and_scales_the_cap():
-    c, scale = p2.choose_concurrency({1: 1.05, 2: 1.32, 3: 1.6, 4: 1.9})
-    assert c == 2 and math.isclose(scale, 1 / 1.32)           # G4_L4_SCALE = 1/S(2): cap and command timeout x S(2)
-    c, scale = p2.choose_concurrency({1: 1.3, 2: 1.4, 3: 1.6, 4: 1.9})
+def test_choose_concurrency_when_two_is_too_slow_maximises_work_per_second_and_scales_the_cap():
+    c, scale = p2.choose_concurrency({1: 1.05, 2: 1.32, 3: 1.6, 4: 1.9})        # T/S: 2/1.32=1.52  3/1.6=1.88  4/1.9=2.11 -> 4
+    assert c == 4 and math.isclose(scale, 1 / 1.9)
+    c, scale = p2.choose_concurrency({1: 1.3, 2: 1.4, 3: 2.4, 4: 3.4})          # 2/1.4=1.43  3/2.4=1.25  4/3.4=1.18 -> 2
     assert c == 2 and math.isclose(scale, 1 / 1.4)
+    assert p2.choose_concurrency({1: 1.0, 2: 1.4, 3: 2.1, 4: 2.8})[0] == 2        # all equal 1.43: tie -> the smaller T
 
 
 def test_choose_concurrency_with_missing_or_nan_levels_does_not_crash():
@@ -54,7 +55,7 @@ def test_scale_is_clamped_to_the_helpers_range():
 def test_projection_hours():
     h = p2.project_hours(m_seconds=200, c=2, scale=1.0, n_tasks=200)
     assert math.isclose(h, 200 * (2 * 200 + 360) / 2 / 3600)
-    assert math.isclose(p2.project_hours(200, 2, 1 / 1.5, 200), 200 * (2 * 200 + 360 * 1.5) / 2 / 3600)
+    assert math.isclose(p2.project_hours(200, 2, 1 / 1.5, 200), 200 * (2 * 200 + 360) * 1.5 / 2 / 3600)   # addendum 1: every item x S
 
 
 def test_plan_stage():
