@@ -87,3 +87,59 @@ def test_p4_purge_drops_only_infra_error_rows(tmp_path):
     assert pg.purge(str(f)) == 2
     assert [json.loads(l)["id"] for l in f.read_text().splitlines()] == ["a", "c"]
     assert pg.purge(str(tmp_path / "missing.jsonl")) == 0
+
+
+# ---------------------------------------------------------------- the missing-PID restart bug (21:48 duplicate runner)
+import json, os, signal, subprocess, time
+
+
+def _run_supervisor(tmp_path, plan, state, seconds, log_name="log.md"):
+    (tmp_path / "plan.json").write_text(json.dumps(plan)); (tmp_path / "state.json").write_text(json.dumps(state))
+    env = dict(os.environ, AUTOPILOT_LOG=str(tmp_path / log_name), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1")
+    p = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "a6000" / "autopilot.py"), "--plan", str(tmp_path / "plan.json"), "--state", str(tmp_path / "state.json")],
+                         env=env, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(seconds)
+    os.killpg(p.pid, signal.SIGKILL)
+    return (tmp_path / log_name).read_text() if (tmp_path / log_name).exists() else ""
+
+
+def _plan(marker):
+    return {"open": True, "steps": [{"name": "t1", "total": 1, "docker": False, "cmd": ["sleep", marker], "proxy": None,
+                                     "stats": {"type": "results_jsonl", "file": "/nonexistent.jsonl"}, "post": []}]}
+
+
+def _count(marker):
+    return len(subprocess.run(["pgrep", "-fx", f"sleep {marker}"], capture_output=True, text=True).stdout.split())
+
+
+def test_a_fresh_supervisor_records_the_childs_pid_in_the_state_file(tmp_path):
+    marker = "31337"
+    try:
+        _run_supervisor(tmp_path, _plan(marker), {"done": [], "restarts": {}, "launch_epoch": time.time(), "results": {}}, 4)
+        st = json.loads((tmp_path / "state.json").read_text())
+        assert st.get("child_step") == "t1" and isinstance(st.get("child"), int)         # without this a restarted supervisor cannot adopt
+        assert os.path.exists(f"/proc/{st['child']}") and _count(marker) == 1
+    finally:
+        subprocess.run(["pkill", "-fx", f"sleep {marker}"])
+
+
+def test_a_restarted_supervisor_adopts_the_running_child_and_starts_no_duplicate(tmp_path):
+    marker = "31338"
+    child = subprocess.Popen(["sleep", marker], start_new_session=True)
+    try:
+        log = _run_supervisor(tmp_path, _plan(marker), {"done": [], "restarts": {}, "launch_epoch": time.time(), "results": {}, "child": child.pid, "child_step": "t1"}, 4)
+        assert f"adopted running pid {child.pid}" in log and "started pid" not in log
+        assert _count(marker) == 1                                                     # still exactly one: no second runner
+    finally:
+        subprocess.run(["pkill", "-fx", f"sleep {marker}"])
+        child.wait()
+
+
+def test_adopted_poll_follows_the_pid():
+    spec5 = importlib.util.spec_from_file_location("autopilot_mod", ROOT / "scripts" / "a6000" / "autopilot.py")
+    mod = importlib.util.module_from_spec(spec5); spec5.loader.exec_module(mod)
+    p = subprocess.Popen(["sleep", "30"])
+    a = mod.Adopted(p.pid)
+    assert a.poll() is None
+    p.kill(); p.wait()
+    assert a.poll() == 0

@@ -18,7 +18,8 @@ NO_PUSH = bool(os.environ.get("AUTOPILOT_NO_PUSH"))   # tests
 G4 = Path.home() / "g4"
 PY = str(G4 / "venv" / "bin" / "python")
 ENV = dict(os.environ, PATH="/usr/bin:" + ":".join(p for p in os.environ.get("PATH", "").split(":") if not p.startswith("/mnt/")))
-TICK, STOP_CHECK_S, HEALTH_S = 30, 300, 3600
+TICK, STOP_CHECK_S, HEALTH_S = int(os.environ.get("AUTOPILOT_TICK") or 30), 300, 3600
+SKIP_SERVICES = bool(os.environ.get("AUTOPILOT_SKIP_SERVICES"))   # tests: never touch dockerd / vLLM
 
 
 def now_iso(t=None):
@@ -188,9 +189,9 @@ def run_step(step, st, state_path):
         left = lib.time_left_s(st["launch_epoch"], time.time())
         if left <= 0:
             return "hardstop"
-        if not ensure_docker() and step.get("docker"):
+        if not SKIP_SERVICES and not ensure_docker() and step.get("docker"):
             log_line(f"- {now_iso()} | step={name} | EVENT dockerd would not start"); return "failed"
-        if not ensure_vllm():
+        if not SKIP_SERVICES and not ensure_vllm():
             log_line(f"- {now_iso()} | step={name} | EVENT vLLM would not start"); return "failed"
         proxy = start_proxy(step.get("proxy"), st)
         adopt = st.get("child") if st.get("child_step") == name else None
@@ -209,9 +210,9 @@ def run_step(step, st, state_path):
             time.sleep(TICK)
             if lib.time_left_s(st["launch_epoch"], time.time()) <= 0:
                 kill_group(child); kill_group(proxy); return "hardstop"
-            if not vllm_ok():
+            if not SKIP_SERVICES and not vllm_ok():
                 problem = "vLLM unhealthy"; break
-            if step.get("docker") and not docker_ok():
+            if not SKIP_SERVICES and step.get("docker") and not docker_ok():
                 problem = "dockerd unhealthy"; break
             if proxy is not None and proxy.poll() is not None:
                 problem = "pace proxy died"; break

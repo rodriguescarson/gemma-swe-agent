@@ -36,13 +36,13 @@ def classify(r):
     return tags
 
 
-def load_rows(out, arm, ids=None):
+def load_rows(out, arm, ids=None, exclude=None):
     rows = {}
     for f in sorted(glob.glob(os.path.join(out, "items", arm, "*", "task_results.jsonl"))):
         for line in open(f):
             if line.strip():
                 r = json.loads(line)
-                if ids is None or r["instance_id"] in ids:
+                if (ids is None or r["instance_id"] in ids) and not (exclude and (arm, r["instance_id"]) in exclude):
                     rows[r["instance_id"]] = r
     return rows
 
@@ -90,11 +90,11 @@ def helper_report(out, arm):
         return {"error": repr(e)[:80]}
 
 
-def summarize(out, arms, ids=None):
+def summarize(out, arms, ids=None, exclude=None):
     res = {}
     ids = set(ids) if ids is not None else None
     for arm in arms:
-        rows = load_rows(out, arm, ids)
+        rows = load_rows(out, arm, ids, exclude)
         tags = {t: classify(r) for t, r in rows.items()}
         n = len(rows)
         secs = [float(r.get("duration_seconds") or 0) for r in rows.values()]
@@ -113,9 +113,11 @@ def summarize(out, arms, ids=None):
     return res
 
 
-def contrast(out, arm, base, ids=None):
+def contrast(out, arm, base, ids=None, exclude=None):
     ids = set(ids) if ids is not None else None
     a, b = load_rows(out, arm, ids), load_rows(out, base, ids)
+    bad_tasks = {t for (x, t) in (exclude or ()) if x in (arm, base)}      # a contended item removes the whole task from this pairing
+    a = {t: r for t, r in a.items() if t not in bad_tasks}; b = {t: r for t, r in b.items() if t not in bad_tasks}
     bad = lambda r: "infra" in classify(r)
     common = [t for t in a if t in b and not bad(a[t]) and not bad(b[t])]
     wins = sum(bool(a[t].get("resolved")) and not b[t].get("resolved") for t in common)

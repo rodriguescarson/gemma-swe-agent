@@ -68,6 +68,10 @@ def test_wilson_and_sign_test():
     assert math.isclose(p2.sign_p(5, 0), 0.0625) and p2.sign_p(0, 0) == 1.0 and math.isclose(p2.sign_p(10, 1), 0.01171875)
 
 
+def test_wilson_lower_bound_never_negative():
+    assert p2.wilson(0, 7)[0] == 0.0 and p2.wilson(7, 7)[1] == 1.0
+
+
 def test_verdicts():
     assert p2.verdict(wins=9, losses=2, cap_gap=0.0) == "BETTER"             # net +7, p = 0.065
     assert p2.verdict(wins=2, losses=9, cap_gap=0.0) == "WORSE"

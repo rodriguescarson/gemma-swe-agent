@@ -19,8 +19,8 @@ ARMS = ["v4h2", "v6p", "v6p-think"]
 CHOICE = Path.home() / "g4" / "runs" / "autopilot_choice.json"
 
 
-def section(label, out, ids, arms, base):
-    s = rep.summarize(out, arms, ids=ids)
+def section(label, out, ids, arms, base, exclude=None):
+    s = rep.summarize(out, arms, ids=ids, exclude=exclude)
     lines = [f"**{label}: {len(ids)} ids, arms {', '.join(arms)}; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), "
              f"1 sample per task per arm, paired, never a Kaggle result.**", "",
              "| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |", "|---|---|---|---|---|---|---|---|---|"]
@@ -33,7 +33,7 @@ def section(label, out, ids, arms, base):
     for arm in arms:
         if arm == base:
             continue
-        c = rep.contrast(out, arm, base, ids=ids)
+        c = rep.contrast(out, arm, base, ids=ids, exclude=exclude)
         contrasts[arm] = {"wins": c["wins"], "losses": c["losses"]}
         lines.append(f"| {arm} vs {base} | {c['n']} | {c['wins']} | {c['losses']} | {c['p']:.3f} | {c['cap_gap']:+.2f} | {c['verdict']} | "
                      f"{c['n_nocap']} ({c['wins_nocap']}/{c['losses_nocap']}) |")
@@ -43,20 +43,42 @@ def section(label, out, ids, arms, base):
     return "\n".join(lines) + "\n", contrasts
 
 
+def load_contended(path):
+    try:
+        d = json.loads(Path(path).read_text())
+        return {tuple(x) for x in d["items"]}, d.get("why", "")
+    except (FileNotFoundError, ValueError, KeyError):
+        return set(), ""
+
+
+def both_tables(label, out, ids, arms, base, contended_path):
+    """The stage table over all items and, when a contended-items file lists any of this stage's items, again without them."""
+    text, _ = section(label, out, ids, arms, base)
+    ex, why = load_contended(contended_path)
+    ex = {(a, t) for a, t in ex if t in set(ids)}
+    body = f"##### all items\n{text}"
+    if ex:
+        t2, _ = section(label + " without contended items", out, ids, arms, base, exclude=ex)
+        body += f"\n##### without contended items ({', '.join(f'{a}/{t}' for a, t in sorted(ex))}; {why})\n{t2}"
+    return body
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("out"); ap.add_argument("--label", required=True)
     ap.add_argument("--from", dest="lo", type=int, default=0); ap.add_argument("--to", type=int, required=True)
     ap.add_argument("--pooled-from", type=int); ap.add_argument("--choose", choices=["p4", "p3"]); ap.add_argument("--no-append", action="store_true")
     ap.add_argument("--ids", default=str(ROOT / "data" / "heldout1k" / "s200_valid_ids.txt"))
+    ap.add_argument("--contended", default=str(ROOT / "docs" / "a6000" / "contended_items.json"))
     a = ap.parse_args(argv)
     all_ids = [l.strip() for l in open(a.ids) if l.strip()]
     ids = all_ids[a.lo:a.to]
     text, contrasts = section(a.label, a.out, ids, ARMS, "v4h2")
-    body = f"\n### P2 {a.label} RESULT ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n{text}"
+    body = f"\n### P2 {a.label} RESULT ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n{both_tables(a.label, a.out, ids, ARMS, 'v4h2', a.contended)}"
     if a.pooled_from is not None:
         pids = all_ids[a.pooled_from:a.to]
-        ptext, pc = section(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, ARMS, "v4h2")
+        _, pc = section(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, ARMS, "v4h2")
+        ptext = both_tables(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, ARMS, "v4h2", a.contended)
         prev_ids = all_ids[a.pooled_from:a.lo]
         _, prev = section("previous stage", a.out, prev_ids, ARMS, "v4h2")
         het = {arm: lib.pool(prev[arm], contrasts[arm])["heterogeneous"] for arm in contrasts}
