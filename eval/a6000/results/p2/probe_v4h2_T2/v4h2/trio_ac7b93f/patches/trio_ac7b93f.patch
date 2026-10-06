@@ -1,0 +1,134 @@
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 91b607f..0de3ad8 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -58,6 +58,12 @@ repos:
+         pass_filenames: false
+         additional_dependencies: ["astor", "attrs", "black", "ruff"]
+         files: ^src\/trio\/_core\/(_run|(_i(o_(common|epoll|kqueue|windows)|nstrumentation)))\.py$
++      - id: sync-pre-commit
++        name: sync test-requirements with pre-commit
++        language: python
++        entry: python src/trio/_tools/sync_pre_commit.py
++        pass_filenames: false
++        additional_dependencies: ["PyYAML"]
+   - repo: https://github.com/astral-sh/uv-pre-commit
+     rev: 0.7.2
+     hooks:
+diff --git a/src/trio/_tools/sync_pre_commit.py b/src/trio/_tools/sync_pre_commit.py
+new file mode 100644
+index 0000000..0dc6e73
+--- /dev/null
++++ b/src/trio/_tools/sync_pre_commit.py
+@@ -0,0 +1,90 @@
++import yaml
++import re
++import sys
++from pathlib import Path
++
++PRE_COMMIT_CONFIG = Path(".pre-commit-config.yaml")
++TEST_REQUIREMENTS_IN = Path("test-requirements.in")
++
++# Mapping from pre-commit repo URL (substring) to the package name in test-requirements.in
++# We use a mapping because the repo URL might be different from the package name.
++TOOL_MAPPING = {
++    "black-pre-commit-mirror": "black",
++    "ruff-pre-commit": "ruff",
++    "codespell-project/codespell": "codespell",
++}
++
++def main():
++    if not PRE_COMMIT_CONFIG.exists() or not TEST_REQUIREMENTS_IN.exists():
++        print("Error: .pre-commit-config.yaml or test-requirements.in not found.")
++        sys.exit(1)
++
++    with open(PRE_COMMIT_CONFIG, "r") as f:
++        config = yaml.safe_load(f)
++
++    # Extract versions from pre-commit config
++    versions = {}
++    for repo in config.get("repos", []):
++        repo_url = repo.get("repo", "")
++        rev = repo.get("rev", "")
++        for pattern, package in TOOL_MAPPING.items():
++            if pattern in repo_url:
++                # Remove 'v' prefix if present (e.g., v0.11.8 -> 0.11.8)
++                version = rev[1:] if rev.startswith("v") else rev
++                versions[package] = version
++
++    # Read test-requirements.in
++    with open(TEST_REQUIREMENTS_IN, "r") as f:
++        lines = f.readlines()
++
++    changed = False
++    new_lines = []
++    for line in lines:
++        # Search for package name at the start of the line or after whitespace
++        # We want to preserve markers (e.g., ; implementation_name == "cpython")
++        found_package = None
++        for package in versions:
++            # Use regex to find package name at the start of the line
++            # It should be followed by a space, a semicolon, a comparison op, or end of line
++            if re.match(rf"^\s*{re.escape(package)}(?!\w)", line):
++                found_package = package
++                break
++        
++        if found_package:
++            version = versions[found_package]
++            # Keep existing markers and comments
++            # Split by space or semicolon to isolate the package name part
++            # This is a bit tricky. Let's try to replace the version part.
++            
++            # Simple regex approach: replace the part from package name to before markers/comments
++            # Match: ^\s*package(\s*(>=|<=|==|>|<).*?)?(\s*;)
++            # We want to replace the version part.
++            
++            # Let's capture everything after the package name
++            match = re.match(rf"^\s*{re.escape(found_package)}(.*)", line)
++            if match:
++                rest = match.group(1)
++                # Remove existing version constraints (e.g., >= 0.8.0)
++                rest = re.sub(r"^\s*(>=|<=|==|>|<)\s*[\d\.]+", "", rest)
++                # Reconstruct the line with the new version
++                # Preserve original indentation
++                indent = line[:line.find(found_package)]
++                new_line = f"{indent}{found_package} == {version}{rest}\n"
++                if new_line != line:
++                    new_lines.append(new_line)
++                    changed = True
++                    continue
++        
++        new_lines.append(line)
++
++    if changed:
++        with open(TEST_REQUIREMENTS_IN, "w") as f:
++            f.writelines(new_lines)
++        print("Updated test-requirements.in to match .pre-commit-config.yaml")
++        sys.exit(1)
++    else:
++        print("test-requirements.in is already in sync with .pre-commit-config.yaml")
++        sys.exit(0)
++
++if __name__ == "__main__":
++    main()
+diff --git a/test-requirements.in b/test-requirements.in
+index bf64c56..95f8bc6 100644
+--- a/test-requirements.in
++++ b/test-requirements.in
+@@ -10,13 +10,13 @@ jedi; implementation_name == "cpython"                  # for jedi code completi
+ cryptography>=41.0.0  # cryptography<41 segfaults on pypy3.10
+ 
+ # Tools
+-black; implementation_name == "cpython"
++    black == 25.1.0; implementation_name == "cpython"
+ mypy  # Would use mypy[faster-cache], but orjson has build issues on pypy
+ orjson; implementation_name == "cpython" and python_version < "3.14"    # orjson does not yet install on 3.14
+-ruff >= 0.8.0
++    ruff == 0.11.8
+ astor          # code generation
+ uv >= 0.2.24
+-codespell
++    codespell == 2.4.1
+ pre-commit
+ 
+ # https://github.com/python-trio/trio/pull/654#issuecomment-420518745
