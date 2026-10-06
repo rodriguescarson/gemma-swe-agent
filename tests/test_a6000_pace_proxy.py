@@ -71,3 +71,21 @@ def test_end_to_end_through_a_real_socket():
     assert json.load(urllib.request.urlopen(req))["usage"]["completion_tokens"] == 1
     assert json.loads(log.read_text().splitlines()[-1])["status"] == 200
     px.shutdown(); up.shutdown(); log.unlink()
+
+
+def test_model_name_is_rewritten_upstream_and_echoed_back():
+    seen = {}
+
+    def up(body):
+        seen["model"] = body["model"]
+        return 200, {"model": "/home/jc/g4/model", "usage": {"prompt_tokens": 10, "completion_tokens": 1}, "choices": []}
+    clock = iter([0.0, 99.0])
+    status, resp, _ = pp.handle(up, dict(BODY, model="gemma-4-31b-it-qat-w4a16-ct"), pp.Pacer(), sleep=lambda s: None,
+                                now=lambda: next(clock), upstream_model="/home/jc/g4/model")
+    assert seen["model"] == "/home/jc/g4/model" and resp["model"] == "gemma-4-31b-it-qat-w4a16-ct"
+
+
+def test_serve_takes_a_bind_host_and_a_model_rewrite():
+    import inspect
+    sig = inspect.signature(pp.serve)
+    assert "host" in sig.parameters and "upstream_model" in sig.parameters

@@ -33,12 +33,15 @@ def post_upstream(base):
     return go
 
 
-def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic):
-    """(status, response, log row). upstream(body) -> (status, dict)."""
+def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream_model=None):
+    """(status, response, log row). upstream(body) -> (status, dict). upstream_model: the name vLLM serves (its path); the harness's
+    own alias is replaced on the way in and echoed back on the way out, as scripts/or_proxy.py does."""
     if body.get("stream"):
         return 400, {"error": {"message": "pace_proxy: streaming not supported"}}, {"status": 400, "err": "stream"}
     t0 = now()
-    status, resp = upstream(body)
+    status, resp = upstream(dict(body, model=upstream_model) if upstream_model else body)
+    if upstream_model and isinstance((resp or {}).get("model"), str) and body.get("model"):
+        resp["model"] = body["model"]
     usage = (resp or {}).get("usage") or {}
     elapsed = now() - t0
     row = {"status": status, "latency_s": round(elapsed, 3), "prompt": usage.get("prompt_tokens"), "completion": usage.get("completion_tokens")}
@@ -50,7 +53,7 @@ def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic):
     return status, resp, row
 
 
-def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep):
+def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None):
     pacer, lock, up = Pacer(), threading.Lock(), post_upstream(upstream_base)
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -73,7 +76,7 @@ def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep):
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
             try:
-                status, resp, row = handle(up, json.loads(self.rfile.read(n) or b"{}"), pacer, sleep)
+                status, resp, row = handle(up, json.loads(self.rfile.read(n) or b"{}"), pacer, sleep, upstream_model=upstream_model)
             except Exception as e:
                 status, resp, row = 500, {"error": {"message": f"pace_proxy: {e}"}}, {"status": 500, "err": repr(e)}
             row["t"] = round(time.time(), 3)
@@ -91,9 +94,15 @@ def main():
     ap.add_argument("--listen", type=int, default=8001)
     ap.add_argument("--upstream", default="http://127.0.0.1:8000")
     ap.add_argument("--log", default=str(Path.home() / "g4" / "runs" / "pace_proxy.jsonl"))
+    ap.add_argument("--host", default="127.0.0.1", help="bind address; use the docker bridge gateway (172.18.0.1) for containers")
+    ap.add_argument("--rewrite-model", action="store_true", help="send the upstream's own model id, echo the caller's name back")
     a = ap.parse_args()
-    srv = serve(a.listen, a.upstream, a.log)
-    print(f"pace_proxy :{a.listen} -> {a.upstream} log={a.log}", flush=True)
+    um = None
+    if a.rewrite_model:
+        with urllib.request.urlopen(a.upstream.rstrip("/") + "/v1/models", timeout=60) as r:
+            um = json.load(r)["data"][0]["id"]
+    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um)
+    print(f"pace_proxy {a.host}:{a.listen} -> {a.upstream} model={um} log={a.log}", flush=True)
     srv.serve_forever()
 
 
