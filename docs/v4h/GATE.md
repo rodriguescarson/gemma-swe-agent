@@ -588,3 +588,12 @@ ABANDONED UNREAD, and its numbers are superseded for every decision below (they 
    interleaved, then stop). Projected finish time = launch time + H_stage, reported before launching.
 Everything else in the P2 pre-registration (arms, interleaving, gates, reading rule, hygiene) stands; stage 1a is read with the same rule and says it is the
 weakest reading (n = 50: BETTER needs net >= +5 and p < 0.10, which at n = 50 needs a large effect).
+
+### P2 addendum 3 (2026-10-06, before any run on the new server): fp8 e4m3 KV does not exist on this card
+Addendum 2's server attempt (kv_cache_dtype = fp8, gpu_memory_utilization 0.95) failed at engine start: Triton "type fp8e4nv not supported in this
+architecture. The supported fp8 dtypes are ('fp8e4b15', 'fp8e5')" (RTX A6000 = Ampere, no e4m3 hardware path). The only fp8 KV variant this card supports is
+**fp8_e5m2** (2 mantissa bits, coarser than e4m3: a larger numeric deviation from the scorer's bf16 KV). Decision, within addendum 2's intent (about double the
+KV tokens, screen-only): try KV_DTYPE = fp8_e5m2 at 0.95 (then 0.93, 0.90); keep it only if it starts, the tool-call smoke passes, and the first probe level
+shows a sane run (no error rows, solved rows possible). If any of that fails, fall back to bf16 KV at the highest utilisation that starts and say so.
+Because e5m2 is lossy, this race is a screen on a degraded-numerics server: the three arms share the same server, so a ranking is still paired, but
+absolute solve rates are not comparable with Kaggle or with the earlier proxy races (stated in the report).
