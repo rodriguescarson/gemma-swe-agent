@@ -36,7 +36,7 @@ against the repo's L4 model (router.l4_model_s, 0.102 + 0.02815 x completion + 0
 | run | calls | measured s | L4-model s | measured / model |
 |---|---|---|---|---|
 | A6000, v5h2, 5 tasks | 275 | 541.2 | 487.0 | 1.11 (per task 1.09-1.13) |
-| real 4xL4, v4h2g, same 5 tasks | 209 | 810.2 | 779.0 | 1.04 |
+| real 4xL4, v4h2g, same 5 tasks | 211 | 810.0 | 779.0 | 1.04 |
 | real 4xL4, v4h2g, all 74 | 3027 | 9085.0 | 8494.9 | 1.07 (median per task 1.00) |
 So the model reproduces the real L4 to ~4-7%, and the A6000 takes **about 1.04-1.11x the L4 time for the same calls (slightly SLOWER, not
 faster)**; per task, A6000 ratio divided by the real-L4 ratio of the same task: 1.14, 1.12, 1.12, 1.08, 0.96 (median 1.12).
