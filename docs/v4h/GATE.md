@@ -568,3 +568,23 @@ concurrency is KV memory, so more streams cause preemption and recompute rather 
 Stated limits: one scale (measured on v6p, the heaviest arm: three parallel fixers) applies to every arm; v4h2 is a single stream and is slowed less, so its
 stretched cap is relatively generous. That biases against a BETTER verdict for v6p / v6p-think, never for one. The server settings stay exactly as
 probed (gpu_memory_utilization 0.90, the kernel's value); no fp8 KV cache (it would change numerics).
+
+### P2 addendum 2 (Carson's instruction, written before levels T = 1 and T = 3 of the first probe were read; read so far: T = 4 S = 2.34, T = 2 S = 1.57)
+That probe ran on the kernel's server (bf16 KV, gpu_memory_utilization 0.90, 23,168 KV tokens). Its levels T = 1 and T = 3 were still running and are
+ABANDONED UNREAD, and its numbers are superseded for every decision below (they stay in the repo as the baseline of the KV-capacity finding).
+1. **Screen-only deviation: more KV.** vLLM is restarted with kv_cache_dtype = fp8 and gpu_memory_utilization = 0.95 (serve.sh KV_DTYPE / GPU_UTIL), to
+   roughly double the KV tokens. If 0.95 does not start, 0.93, then 0.90. If fp8 KV does not start, or the one-tool-call smoke (smoke_chat.py) fails on it,
+   fall back to bf16 KV at the highest utilisation that starts and say so. fp8 KV changes the numerics slightly versus the scorer's default KV dtype, so every
+   result of this race is a screen on a modified server (stated in the report). The probe is re-run on THAT server at T = 1 and T = 2 and only those numbers
+   are used (the same last 4 ids, a fresh proxy log per level).
+2. **Per-arm cap scaling.** S is measured separately per arm, arm-pure: v4h2 and v6p at T = 1 and T = 2; v6p-think once, at the chosen C (its extra level
+   runs after C is chosen; until then it is assumed to behave like v6p with m = 360 s). Each arm's screening cap is scaled by ITS OWN S at the chosen C:
+   G4_L4_SCALE_arm = 1 / S_arm(C) when S_arm(C) > 1.15, else 1.0 (clamped to 0.2..5; cap and command timeout x S; bundles unchanged; the pace proxy still
+   holds faster replies to the model time). Limit stated now: the race mixes arms, so an arm's real load differs from its arm-pure probe (a v4h2 item paired
+   with a v6p item sees 4 streams, not 2).
+3. **Concurrency and stage, from projected wall time.** For C in {1, 2}: m_arm(C) = mean wall seconds of an item of that arm at T = C in the probe;
+   f_arm(C) = 1 / scale_arm(C); H_n(C) = n x sum over the three arms of (m_arm f_arm) / C / 3600. The race runs at the C with the smaller H (a tie goes to
+   the smaller C). Stage: all 200 ids if H_200 <= 12 h; else the first 100 if H_100 <= 12 h; else **the first 50 ids tonight as stage 1a** (all three arms,
+   interleaved, then stop). Projected finish time = launch time + H_stage, reported before launching.
+Everything else in the P2 pre-registration (arms, interleaving, gates, reading rule, hygiene) stands; stage 1a is read with the same rule and says it is the
+weakest reading (n = 50: BETTER needs net >= +5 and p < 0.10, which at n = 50 needs a large effect).
