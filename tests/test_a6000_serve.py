@@ -41,9 +41,11 @@ def test_dry_run_matches_kernel_settings_with_tp1(tmp_path):
 
 def test_dry_run_starts_nothing(tmp_path):
     _need_adk()
+    pids = lambda: set(subprocess.run(["pgrep", "-f", "[v]llm.entrypoints"], capture_output=True, text=True).stdout.split())
+    before = pids()
     r = _dry(tmp_path)
     assert "DRY_RUN" in r.stdout
-    assert subprocess.run(["pgrep", "-f", "vllm.entrypoints"], capture_output=True).returncode != 0
+    assert pids() == before          # no new server process (another vLLM may legitimately be running)
 
 
 def test_port_override(tmp_path):
