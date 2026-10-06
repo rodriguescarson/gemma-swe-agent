@@ -4,3 +4,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 `step | done/total | solved | empty | errors | median secs | cap hits | GPU util | disk free | server restarts`.
 
 ## Health
+- 2026-10-06T21:44:04Z | LAUNCH stage 1a; HARD STOP 2026-10-08T09:44:04Z
