@@ -676,3 +676,13 @@ What had been seen of stage 1a before this addendum: the 22:48 interim (v4h2 2/7
 or any item with an infrastructure/harness error, or the probe did not run. Passing the gate says only that the bundle runs; it is not a result and the probe items are never part of any table (they are the last 4 ids, outside stages 1a and 1b).
 
 (Timestamp correction for addendum 7: written and pushed at 2026-10-06 23:28 UTC, not ~23:35.)
+
+### P2 addendum 8 (Carson's amendment to the v6p-b gate, 2026-10-06 ~23:45 UTC, before the v6p-b probe; no stage 1a result read)
+The v6p-b gate of addendum 7 gets two more conditions. v6p-b is also **dropped from stage 1b** (which then runs v4h2 and v6p only) when:
+1. `scripts/analyze_helper_reachability.py` run on the 4 probe items finds "can't open file" in **more than 1 item**; or
+2. the per-fixer ledger shows **no counted calls on any item** (the caps never engaged: no fixer helper call of any probe item was counted).
+**Report:** the ledger count per fixer for each probe item (and the refusals: SHARE SPENT, STOP), written to OUT/probe_gate.json and echoed to the log.
+**How the ledger is read (a stated implementation choice):** the ledger directory lives in the item's sandbox tmp and is deleted when the harness cleans the sandbox, so the counts are taken from what survives: every
+counted helper call prints `[fixer K: helper call n/7 ...]` into the tool result stored in the item's trace, and every refusal prints SHARE SPENT or STOP, so the per-fixer count of an item is the largest n printed for K in
+that item's trace. p2_race also copies the real ledger directory out beside the item (`<task>.ledger`) before the sandbox is removed, best effort; when that copy exists its `K.call.*` files are counted instead.
+All earlier conditions of addendum 7 stand (3 or more empty patches, 2 or more tool-call-budget errors, any infrastructure/harness error, or no probe).
