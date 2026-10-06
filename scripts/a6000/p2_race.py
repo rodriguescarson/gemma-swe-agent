@@ -65,6 +65,16 @@ def scale_from_probe(path, arm, fallback):
         return fallback
 
 
+def drop_failed_arms(arms, gate_path, required):
+    """Arms listed in `required` that have no passing probe gate are dropped from the race (addendum 7): -> (kept, dropped)."""
+    try:
+        g = json.loads(Path(gate_path).read_text())
+    except (FileNotFoundError, ValueError):
+        g = {}
+    dropped = [a for a in arms if a in required and not g.get(a, {}).get("ok", False)]
+    return [a for a in arms if a not in dropped], dropped
+
+
 def scale_for(arm, scales, default):
     return scales.get(arm, default)
 
@@ -104,6 +114,7 @@ def main(argv=None):
     ap.add_argument("--arms", nargs="+", default=["v4h2", "v6p", "v6p-think"])
     ap.add_argument("--conc", type=int, required=True); ap.add_argument("--scale", type=float, default=1.0)
     ap.add_argument("--arm-scale", nargs="*", default=[], help="ARM=SCALE per arm (G4_L4_SCALE); --scale is the default")
+    ap.add_argument("--require-probe-ok", nargs="*", default=[], metavar="ARM", help="drop these arms unless OUT/probe_gate.json says their probe passed")
     ap.add_argument("--arm-scale-from-probe", nargs="*", default=[], metavar="ARM[=FALLBACK]", help="take the arm's scale from OUT/probe_summary.json (T = 2)")
     ap.add_argument("--port", type=int, default=8001); ap.add_argument("--label", default="p2")
     ap.add_argument("--items-dir", default="items"); ap.add_argument("--keep", action="store_true", help="reuse a running container, leave it running")
@@ -111,6 +122,9 @@ def main(argv=None):
     a = ap.parse_args(argv)
     arm_scales = parse_arm_scales(a.arm_scale)
     out = Path(a.out).resolve(); out.mkdir(parents=True, exist_ok=True)
+    a.arms, dropped = drop_failed_arms(a.arms, str(out / "probe_gate.json"), a.require_probe_ok)
+    if dropped:
+        (out / "race.log").open("a").write(f"DROPPED arms without a passing probe gate: {dropped}\n")
     for spec in a.arm_scale_from_probe:
         arm, _, fb = spec.partition("=")
         arm_scales[arm] = scale_from_probe(str(out / "probe_summary.json"), arm, float(fb) if fb else a.scale)

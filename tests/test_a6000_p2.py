@@ -211,3 +211,53 @@ def test_arm_scale_can_come_from_a_probe_summary(tmp_path):
     assert race.scale_from_probe(str(f), "v6p-b", fallback=0.61) == 1.0         # S <= 1.15: no stretch
     f.write_text(json.dumps({"results": [{"arm": "v6p-b", "T": 2, "S": float("nan"), "m": None}]}))
     assert race.scale_from_probe(str(f), "v6p-b", fallback=0.61) == 0.61        # unusable probe: the fallback
+
+
+# ------------------------------------------------------------------ the v6p-b probe gate (addendum 7)
+def _gate_mod():
+    spec = importlib.util.spec_from_file_location("p2_probe_gate", ROOT / "scripts" / "a6000" / "p2_probe_gate.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def _probe_item(out, arm, task, patch=10, error=None, T=2):
+    import json
+    d = out / f"probe_{arm}_T{T}" / arm / task; d.mkdir(parents=True)
+    (d / "task_results.jsonl").write_text(json.dumps({"instance_id": task, "resolved": False, "agent_patch_size": patch, "error": error}) + "\n")
+
+
+def test_gate_passes_a_probe_that_produced_patches_and_stayed_in_budget(tmp_path):
+    g = _gate_mod()
+    for i, (p, e) in enumerate([(10, None), (0, None), (30, "Agent exceeded session timeout (8.0 min)"), (5, None)]):
+        _probe_item(tmp_path, "v6p-b", f"t{i}", patch=p, error=e)
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ok"] is True and r["empty"] == 1 and r["n"] == 4
+
+
+def test_gate_fails_on_three_empty_patches_or_two_budget_exhaustions_or_an_infrastructure_error(tmp_path):
+    g = _gate_mod()
+    for i in range(4):
+        _probe_item(tmp_path, "v6p-b", f"t{i}", patch=0 if i < 3 else 5)
+    assert g.gate(str(tmp_path), "v6p-b")["ok"] is False
+    t2 = tmp_path / "b"; t2.mkdir()
+    for i in range(4):
+        _probe_item(t2, "v6p-b", f"t{i}", patch=5, error="Agent exceeded tool call budget (70 calls)" if i < 2 else None)
+    r = g.gate(str(t2), "v6p-b"); assert r["ok"] is False and "budget" in " ".join(r["reasons"])
+    t3 = tmp_path / "c"; t3.mkdir()
+    for i in range(4):
+        _probe_item(t3, "v6p-b", f"t{i}", patch=5, error="litellm.APIConnectionError: Connection error." if i == 0 else None)
+    assert g.gate(str(t3), "v6p-b")["ok"] is False
+
+
+def test_gate_fails_when_the_probe_did_not_run(tmp_path):
+    assert _gate_mod().gate(str(tmp_path), "v6p-b")["ok"] is False
+
+
+def test_a_failed_gate_drops_the_arm_from_the_race(tmp_path):
+    import json
+    (tmp_path / "probe_gate.json").write_text(json.dumps({"v6p-b": {"ok": False}}))
+    assert race.drop_failed_arms(["v4h2", "v6p", "v6p-b"], str(tmp_path / "probe_gate.json"), ["v6p-b"]) == (["v4h2", "v6p"], ["v6p-b"])
+    (tmp_path / "probe_gate.json").write_text(json.dumps({"v6p-b": {"ok": True}}))
+    assert race.drop_failed_arms(["v4h2", "v6p", "v6p-b"], str(tmp_path / "probe_gate.json"), ["v6p-b"]) == (["v4h2", "v6p", "v6p-b"], [])
+    assert race.drop_failed_arms(["v4h2", "v6p"], str(tmp_path / "missing.json"), ["v6p-b"]) == (["v4h2", "v6p"], [])      # arm not in the race: nothing to drop
+    assert race.drop_failed_arms(["v4h2", "v6p-b"], str(tmp_path / "missing.json"), ["v6p-b"]) == (["v4h2"], ["v6p-b"])    # no gate result for a required arm: dropped
