@@ -54,3 +54,26 @@ def test_paired_contrast_excludes_error_rows_and_reports_cap_gap(tmp_path):
     c = rep.contrast(str(tmp_path), "v6p", "v4h2")
     assert c["n"] == 11 and c["wins"] == 8 and c["losses"] == 1 and c["verdict"] in ("BETTER", "NO EVIDENCE")
     assert abs(c["cap_gap"] - 2 / 12) < 1e-9
+
+
+def test_summarize_and_contrast_can_be_limited_to_a_set_of_ids(tmp_path):
+    for i in range(6):
+        put(tmp_path, "v4h2", f"t{i}", resolved=(i == 0))
+        put(tmp_path, "v6p", f"t{i}", resolved=(i in (0, 1, 2, 3)))
+    s = rep.summarize(str(tmp_path), ["v6p"], ids=["t0", "t1", "t2"])
+    assert s["v6p"]["n"] == 3 and s["v6p"]["solved"] == 3
+    c = rep.contrast(str(tmp_path), "v6p", "v4h2", ids=["t0", "t1", "t2"])
+    assert c["n"] == 3 and c["wins"] == 2 and c["losses"] == 0
+
+
+def test_markdown_section_has_a_row_per_arm_and_a_verdict_per_contrast(tmp_path):
+    spec3 = importlib.util.spec_from_file_location("p2_results_md", ROOT / "scripts" / "a6000" / "p2_results_md.py")
+    md = importlib.util.module_from_spec(spec3); spec3.loader.exec_module(md)
+    for i in range(10):
+        put(tmp_path, "v4h2", f"t{i}", resolved=(i < 2), secs=300.0)
+        put(tmp_path, "v6p", f"t{i}", resolved=(i < 9), secs=320.0)
+        put(tmp_path, "v6p-think", f"t{i}", resolved=(i < 2), secs=330.0, error=CAP if i > 6 else None)
+    text, contrasts = md.section("stage 1a", str(tmp_path), [f"t{i}" for i in range(10)], ["v4h2", "v6p", "v6p-think"], "v4h2")
+    assert "| v4h2 |" in text and "| v6p |" in text and "| v6p-think |" in text and "BETTER" in text
+    assert contrasts["v6p"] == {"wins": 7, "losses": 0}
+    assert "A6000 screen" in text

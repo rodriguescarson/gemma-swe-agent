@@ -23,6 +23,17 @@ def first_ids(path, n):
     return ids[:n] if n else ids
 
 
+def done_ids(path):
+    try:
+        return {json.loads(l)["id"] for l in open(path) if l.strip()}
+    except FileNotFoundError:
+        return set()
+
+
+def remaining(ids, done):
+    return [i for i in ids if i not in done]
+
+
 def budget_for(bundle):
     return read_budget(bundle)[0]
 
@@ -37,6 +48,7 @@ def main(argv=None):
     ap.add_argument("--ids", default=str(ROOT / "data" / "kaggle_valid_ids.txt"))
     ap.add_argument("--n", type=int, default=None, help="first N ids of the file")
     ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--resume", action="store_true", help="append to OUT/results.jsonl and skip ids already in it")
     a = ap.parse_args(argv)
     os.environ.update(ENV)
     import asyncio, concurrent.futures, subprocess
@@ -52,9 +64,11 @@ def main(argv=None):
     bundle, out_dir = Path(a.bundle).resolve(), Path(a.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     budget = budget_for(str(bundle))
-    ids = set(first_ids(a.ids, a.n))
+    done = done_ids(str(out_dir / "results.jsonl")) if a.resume else set()
+    wanted = remaining(first_ids(a.ids, a.n), done)
+    ids = set(wanted)
     tasks = [t for t in load_tasks(DATA / "tasks.jsonl") if t.instance_id in ids]
-    order = {i: k for k, i in enumerate(first_ids(a.ids, a.n))}
+    order = {i: k for k, i in enumerate(wanted)}
     tasks.sort(key=lambda t: order[t.instance_id])
     declared = validate_single_declared_model(bundle)
     adapters = discover_adapters(str(bundle), adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS)
@@ -92,7 +106,7 @@ def main(argv=None):
     subprocess.run(f"{sys.executable} -m pip freeze > {out_dir}/pip_freeze.txt", shell=True)
     print(len(tasks), "tasks", budget, flush=True)
     t0 = time.time()
-    with open(out_dir / "results.jsonl", "w") as out:
+    with open(out_dir / "results.jsonl", "a" if a.resume else "w") as out:
         for i, t in enumerate(tasks, 1):
             s = time.time()
             try:

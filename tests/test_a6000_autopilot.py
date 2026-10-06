@@ -74,3 +74,16 @@ def test_purge_removes_only_infra_error_items(tmp_path):
     assert n == 2
     assert not (tmp_path / "items" / "v6p" / "a").exists() and not (tmp_path / "items" / "v6p" / "a.out").exists()
     assert (tmp_path / "items" / "v6p" / "b").exists() and (tmp_path / "items" / "v4h2" / "c").exists() and not (tmp_path / "items" / "v4h2" / "d").exists()
+
+
+def test_p4_purge_drops_only_infra_error_rows(tmp_path):
+    spec4 = importlib.util.spec_from_file_location("p4_purge", ROOT / "scripts" / "a6000" / "p4_purge.py")
+    pg = importlib.util.module_from_spec(spec4); spec4.loader.exec_module(pg)
+    import json
+    f = tmp_path / "results.jsonl"
+    rows = [{"id": "a", "err": None}, {"id": "b", "err": "EXC APIConnectionError('Connection error.')"}, {"id": "c", "err": "Agent exceeded session timeout (5.0 min)"},
+            {"id": "d", "err": "litellm.InternalServerError: 503"}]
+    f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert pg.purge(str(f)) == 2
+    assert [json.loads(l)["id"] for l in f.read_text().splitlines()] == ["a", "c"]
+    assert pg.purge(str(tmp_path / "missing.jsonl")) == 0

@@ -38,3 +38,36 @@ def test_uses_subprocess_sandbox_and_no_docker():
 def test_result_row_has_the_kernels_fields():
     row = _load().result_row(None, "t1", True, 0, 12, 3.14159, None, "diff")
     assert list(row) == ["cfg", "id", "resolved", "exit", "calls", "secs", "err", "patch"] and row["secs"] == 3.1
+
+
+def test_done_ids_and_remaining_support_resume(tmp_path):
+    m = _load()
+    f = tmp_path / "results.jsonl"
+    f.write_text(json.dumps({"id": "a", "resolved": True}) + "\n" + json.dumps({"id": "b", "resolved": False}) + "\n")
+    assert m.done_ids(str(f)) == {"a", "b"}
+    assert m.done_ids(str(tmp_path / "missing.jsonl")) == set()
+    assert m.remaining(["a", "b", "c", "d"], {"a", "b"}) == ["c", "d"]
+
+
+def _load_p4():
+    spec = importlib.util.spec_from_file_location("p4_run", ROOT / "scripts" / "a6000" / "p4_run.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    return m
+
+
+def test_p4_arm_comes_from_the_choice_file_default_v6p(tmp_path):
+    m = _load_p4()
+    assert m.chosen_arm(str(tmp_path / "none.json")) == "v6p"
+    f = tmp_path / "c.json"; f.write_text(json.dumps({"p4_arm": "v6p-think"}))
+    assert m.chosen_arm(str(f)) == "v6p-think"
+
+
+def test_p4_judge_markdown_labels_it_an_a6000_screen(tmp_path):
+    spec = importlib.util.spec_from_file_location("p4_judge", ROOT / "scripts" / "a6000" / "p4_judge.py")
+    j = importlib.util.module_from_spec(spec); spec.loader.exec_module(j)
+    base = ROOT / "eval" / "kaggle" / "g4-l4-v4h2g-p312" / "results.jsonl"
+    out = tmp_path / "p4"; out.mkdir()
+    (out / "ARM").write_text("v6p")
+    (out / "results.jsonl").write_text(base.read_text())             # identical to the L4 baseline: 34 solved, net 0 -> DROP
+    text = j.markdown(str(out), proxy_log=None)
+    assert "A6000 screen" in text and "never a Kaggle result" in text and "DROP" in text and "solved 34/74" in text
