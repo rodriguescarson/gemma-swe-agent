@@ -53,7 +53,7 @@ def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream
     return status, resp, row
 
 
-def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None):
+def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None, capture_path=None):
     pacer, lock, up = Pacer(), threading.Lock(), post_upstream(upstream_base)
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -75,13 +75,18 @@ def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, ups
 
         def do_POST(self):
             n = int(self.headers.get("Content-Length") or 0)
+            body_in = {}
             try:
-                status, resp, row = handle(up, json.loads(self.rfile.read(n) or b"{}"), pacer, sleep, upstream_model=upstream_model)
+                body_in = json.loads(self.rfile.read(n) or b"{}")
+                status, resp, row = handle(up, body_in, pacer, sleep, upstream_model=upstream_model)
             except Exception as e:
                 status, resp, row = 500, {"error": {"message": f"pace_proxy: {e}"}}, {"status": 500, "err": repr(e)}
             row["t"] = round(time.time(), 3)
             with lock, open(log_path, "a") as f:
                 f.write(json.dumps(row) + "\n")
+            if capture_path is not None and status == 200:
+                with lock, open(capture_path, "a") as f:        # the exact request the harness sent and the exact reply (train/build_sft.py input)
+                    f.write(json.dumps({"t": row["t"], "body": body_in, "response": resp}) + "\n")
             self._send(status, resp)
 
     srv = ThreadingHTTPServer((host, port), H)
@@ -95,13 +100,14 @@ def main():
     ap.add_argument("--upstream", default="http://127.0.0.1:8000")
     ap.add_argument("--log", default=str(Path.home() / "g4" / "runs" / "pace_proxy.jsonl"))
     ap.add_argument("--host", default="127.0.0.1", help="bind address; use the docker bridge gateway (172.18.0.1) for containers")
+    ap.add_argument("--capture", default=None, help="append {t, body, response} per successful call (SFT raw material)")
     ap.add_argument("--rewrite-model", action="store_true", help="send the upstream's own model id, echo the caller's name back")
     a = ap.parse_args()
     um = None
     if a.rewrite_model:
         with urllib.request.urlopen(a.upstream.rstrip("/") + "/v1/models", timeout=60) as r:
             um = json.load(r)["data"][0]["id"]
-    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um)
+    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um, capture_path=a.capture)
     print(f"pace_proxy {a.host}:{a.listen} -> {a.upstream} model={um} log={a.log}", flush=True)
     srv.serve_forever()
 

@@ -99,14 +99,47 @@ def ensure_vllm():
     return False
 
 
-def start_proxy(spec):
+def proxy_up(spec):
+    try:
+        return urllib.request.urlopen(f"http://{spec['host']}:{spec['listen']}/v1/models", timeout=4).status == 200
+    except Exception:
+        return False
+
+
+def start_proxy(spec, st=None):
     if not spec:
         return None
+    if proxy_up(spec) and st and st.get("proxy_pid"):
+        return Adopted(st["proxy_pid"])                 # left by an earlier supervisor
     Path(spec["log"]).parent.mkdir(parents=True, exist_ok=True)
     p = subprocess.Popen([PY, str(HERE / "pace_proxy.py"), "--listen", str(spec["listen"]), "--host", spec["host"], "--rewrite-model", "--log", spec["log"]],
                          env=ENV, stdout=open(spec["log"] + ".out", "a"), stderr=subprocess.STDOUT, start_new_session=True)
     time.sleep(3)
+    if st is not None:
+        st["proxy_pid"] = p.pid
     return p
+
+
+class Adopted:
+    """A step process started by an earlier supervisor (its own session): poll() is None while the pid lives; the return code is unknown."""
+    returncode = None
+
+    def __init__(self, pid):
+        self.pid = pid
+
+    def poll(self):
+        try:
+            os.kill(self.pid, 0)
+            return None
+        except ProcessLookupError:
+            return 0
+        except PermissionError:
+            return None
+
+    def wait(self, timeout=None):
+        t0 = time.time()
+        while self.poll() is None and (timeout is None or time.time() - t0 < timeout):
+            time.sleep(1)
 
 
 def kill_group(p):
@@ -152,10 +185,17 @@ def run_step(step, st, state_path):
             log_line(f"- {now_iso()} | step={name} | EVENT dockerd would not start"); return "failed"
         if not ensure_vllm():
             log_line(f"- {now_iso()} | step={name} | EVENT vLLM would not start"); return "failed"
-        proxy = start_proxy(step.get("proxy"))
-        child = subprocess.Popen(step["cmd"], cwd=step.get("cwd") or str(ROOT), env=dict(ENV, **step.get("env", {})), stdout=open(G4 / f"step_{name}.log", "a"),
-                                 stderr=subprocess.STDOUT, start_new_session=True)
-        log_line(f"- {now_iso()} | step={name} | EVENT started pid {child.pid} (restarts so far {restarts}; hard stop in {left / 3600:.1f} h)", push=False)
+        proxy = start_proxy(step.get("proxy"), st)
+        adopt = st.get("child") if st.get("child_step") == name else None
+        if adopt and Adopted(adopt).poll() is None:
+            child = Adopted(adopt)
+            log_line(f"- {now_iso()} | step={name} | EVENT adopted running pid {adopt}", push=False)
+        else:
+            child = subprocess.Popen(step["cmd"], cwd=step.get("cwd") or str(ROOT), env=dict(ENV, **step.get("env", {})), stdout=open(G4 / f"step_{name}.log", "a"),
+                                     stderr=subprocess.STDOUT, start_new_session=True)
+            log_line(f"- {now_iso()} | step={name} | EVENT started pid {child.pid} (restarts so far {restarts}; hard stop in {left / 3600:.1f} h)", push=False)
+        st["child"], st["child_step"] = child.pid, name
+        json.dump(st, open(state_path, "w"))
         t_stop = t_health = time.time()
         problem = None
         while child.poll() is None:
@@ -193,7 +233,11 @@ def run_step(step, st, state_path):
                 sh(step["purge"])
             continue
         kill_group(proxy)
-        if child.returncode == 0:
+        if isinstance(child, Adopted) and not st.get("confirmed_" + name):
+            st["confirmed_" + name] = True                     # exit code unknown: the command is resumable, run it again to confirm
+            json.dump(st, open(state_path, "w"))
+            continue
+        if child.returncode == 0 or isinstance(child, Adopted):
             if step.get("purge") and reruns_after_infra == 0:
                 r = sh(step["purge"])
                 if "purged 0" not in r.stdout and "purged" in r.stdout:
@@ -205,6 +249,29 @@ def run_step(step, st, state_path):
         log_line(f"- {now_iso()} | step={name} | EVENT step exited rc={child.returncode}; restart {restarts}/3")
         if restarts > 3:
             return "failed"
+
+
+def finalize(plan_path, why):
+    """END: finalize hooks (plan['finalize']), stop everything, check the GPU, DONE line."""
+    try:
+        plan = json.loads(Path(plan_path).read_text())
+    except Exception:
+        plan = {}
+    for hook in plan.get("finalize", []):
+        r = sh(hook, cwd=ROOT)
+        log_line(f"- {now_iso()} | FINALIZE {' '.join(hook[:3])} rc={r.returncode}", push=False)
+    kill_vllm()
+    sh(["/usr/bin/docker", "rm", "-f", "g4-probe", "g4-p3"])
+    for pid in sh(["pgrep", "-f", "pace_proxy.py"]).stdout.split():
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception:
+            pass
+    sh(["sudo", "-n", "pkill", "-x", "dockerd"])
+    time.sleep(10)
+    apps = sh(["nvidia-smi", "--query-compute-apps=pid,name", "--format=csv,noheader"]).stdout.strip()
+    log_line(f"- {now_iso()} | END cleanup ({why}): nvidia-smi compute apps: {apps or 'none'}")
+    log_line(f"- DONE {now_iso()} ({why})")
 
 
 def main(argv=None):
@@ -227,7 +294,7 @@ def main(argv=None):
         s = stats_for(step) if step.get("stats") else {"done": 0, "solved": 0}
         log_line(f"- {now_iso()} | step={step['name']} | END {res}: done={s['done']}/{step['total']} solved={s['solved']}")
         if res == "hardstop":
-            json.dump(st, open(a.state, "w")); return 4
+            json.dump(st, open(a.state, "w")); finalize(a.plan, "hard stop"); return 4
         if res == "blocked":
             json.dump(st, open(a.state, "w")); return 3
         plan_now = json.loads(Path(a.plan).read_text())          # post hooks are re-read: they can be added while the step runs
@@ -237,7 +304,7 @@ def main(argv=None):
             log_line(f"- {now_iso()} | step={step['name']} | POST {' '.join(hook[:3])} rc={r.returncode}", push=False)
         st["done"].append(step["name"]); json.dump(st, open(a.state, "w"))
         git_push(f"autopilot: step {step['name']} {res}")
-    log_line(f"- {now_iso()} | DONE all steps")
+    finalize(a.plan, "all steps finished")
     return 0
 
 

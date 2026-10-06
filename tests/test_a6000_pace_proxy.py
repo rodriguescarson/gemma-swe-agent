@@ -89,3 +89,23 @@ def test_serve_takes_a_bind_host_and_a_model_rewrite():
     import inspect
     sig = inspect.signature(pp.serve)
     assert "host" in sig.parameters and "upstream_model" in sig.parameters
+
+
+def test_capture_file_gets_the_exact_request_and_reply(tmp_path):
+    class Up(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            raw = json.dumps({"model": "/m", "usage": {"prompt_tokens": 10, "completion_tokens": 1}, "choices": [{"message": {"content": "hi"}}]}).encode()
+            self.send_response(200); self.send_header("Content-Length", str(len(raw))); self.end_headers(); self.wfile.write(raw)
+    up = ThreadingHTTPServer(("127.0.0.1", 0), Up); threading.Thread(target=up.serve_forever, daemon=True).start()
+    cap = tmp_path / "cap.jsonl"
+    px = pp.serve(0, f"http://127.0.0.1:{up.server_address[1]}", tmp_path / "log.jsonl", host="127.0.0.1", sleep=lambda s: None,
+                  upstream_model="/m", capture_path=cap)
+    threading.Thread(target=px.serve_forever, daemon=True).start()
+    body = {"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "hello"}]}
+    req = urllib.request.Request(f"http://127.0.0.1:{px.server_address[1]}/v1/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    urllib.request.urlopen(req).read()
+    row = json.loads(cap.read_text().splitlines()[0])
+    assert row["body"] == body and row["response"]["choices"][0]["message"]["content"] == "hi" and row["response"]["model"] == body["model"] and "t" in row
+    px.shutdown(); up.shutdown()

@@ -118,3 +118,6 @@ def plan_stage_ladder(h_by_n):
         if h_by_n[n] <= WALL_LIMIT_H:
             return n
     return 50
+
+# Per-arm G4_L4_SCALE from the arm-pure probe (docs/v4h/GATE.md, P2 addendum 4): 1 / S at C = 2, so the effective cap is 300 s / scale = 400 / 487 / 418 s.
+ARM_SCALE = {"v4h2": 0.7499170185625382, "v6p": 0.6156688916658797, "v6p-think": 0.7184229714777164}

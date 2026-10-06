@@ -184,3 +184,10 @@ def test_scale_below_one_stretches_the_cap_to_300s_times_S():
 def test_the_item_script_hands_the_scale_to_the_harness_env_only():
     s = race.item_script("v6p", "t1", port=8001, scale=p2.arm_scale(1.6242496795545336))
     assert "G4_L4_SCALE=0.61566" in s and "--max-time-minutes 5.0" in s     # run_eval divides; the flag stays the bundle's own 5.0
+
+
+def test_arm_scales_are_the_probe_values_and_give_the_registered_caps():
+    assert math.isclose(p2.ARM_SCALE["v4h2"], 0.7499170185625382) and math.isclose(p2.ARM_SCALE["v6p"], 0.6156688916658797)
+    assert math.isclose(p2.ARM_SCALE["v6p-think"], 0.7184229714777164)
+    caps = {a: 300 / s for a, s in p2.ARM_SCALE.items()}
+    assert round(caps["v4h2"]) == 400 and round(caps["v6p"]) == 487 and round(caps["v6p-think"]) == 418
