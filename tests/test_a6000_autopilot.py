@@ -52,7 +52,7 @@ def test_pooling_adds_the_paired_counts_and_flags_heterogeneity():
 
 def test_infra_error_detection():
     f = ap.is_infra_error
-    assert f("litellm.APIConnectionError: OpenAIException - Connection error.")
+    assert f("litellm.APIError: Key limit exceeded") and f("litellm.APIConnectionError: OpenAIException - Connection error.")
     assert f("litellm.InternalServerError: 503 Service Unavailable") and f("Connection refused")
     assert not f(None) and not f("Agent exceeded session timeout (5.0 min)") and not f("Agent exceeded turns budget (150 turns)")
     assert not f("Tool 'python3 /tmp/swe/edit.py' not found")           # a bundle behaviour (the heredoc-as-tool-name crash), not infrastructure

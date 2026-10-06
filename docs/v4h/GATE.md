@@ -636,3 +636,13 @@ Projection (p2_lib.decide): 100 ids x 3 arms 17.2 h, 200 ids 34.4 h, **50 ids 8.
 server/network error are purged and re-run. If more than 15% of a step's items error (judged from 10 items) or its median task time is under 60 s, the step stops, is diagnosed and fixed test-first, and resumes once;
 if it fails again the reason is logged and the next step starts. A health line goes to docs/a6000/P2_LOG.md and is pushed every 60 minutes. Disk free must stay >= 100 GB. At the end: vLLM, proxies, dockerd and monitors stopped,
 nvidia-smi clean, one final table per step and a "DONE <time>" line in P2_LOG.md.
+
+### P2 addendum 5 (2026-10-06 22:20 UTC, during stage 1a, after the first 8 items; classification only, applied to every arm and every stage alike)
+The first v6p-think item that ended with "Failed to apply test_patch: git apply ..." (arrow_1278a21: the agent's own patch collides with the test patch, so the verification step
+cannot run) was being counted as an *error* and dropped from the pairing, which would flatter any arm that writes colliding files. The scorer counts such a task unsolved. Rule, fixed here:
+- **verify failure** (error text "Failed to apply test_patch"): the arm's own failure; counts as unsolved, stays in the pairing, reported in its own column, not an "error" for the 15% stop rule.
+- **infrastructure row** (model-server / network error: APIError, APIConnection, Connection error/refused, 502/503, Service Unavailable, Max retries, Read timed out, RemoteProtocolError;
+  or a harness exception "EXC ..."): re-run (purged and queued again) and excluded from the pairing if it is still there at the end; listed.
+- every other error (for example "Tool '...' not found", turns budget) is the arm's own failure: unsolved, in the pairing, counted as an "error" for health and the stop rule.
+This refines "sandbox setup failure" in the P2 pre-registration (a failed setup that is the harness's fault is an infrastructure row; a verification failure caused by the agent's patch is not).
+Also recorded: the stretched cap works as registered (a v6p-think item ended "Agent exceeded session timeout (6.959688 min)" = 5 min / 0.7184 = 417.6 s).

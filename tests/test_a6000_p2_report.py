@@ -20,6 +20,22 @@ def put(out, arm, task, resolved=False, secs=100.0, error=None, patch=10, calls=
         (d / "traces" / f"trace_{task}.json").write_text(json.dumps({"steps": steps}))
 
 
+def test_verify_failures_are_the_arms_own_failure_not_infrastructure(tmp_path):
+    c = rep.classify
+    v = {"resolved": False, "error": "Failed to apply test_patch: git apply /tmp/sbx_x/work: patch does not apply", "agent_patch_size": 3066}
+    assert c(v) == {"verify"}                                           # an unsolved task, neither an error nor excluded from the pairing
+    assert c({"resolved": False, "error": "Tool 'python3 /tmp/swe/edit.py' not found", "agent_patch_size": 0}) == {"error", "empty"}
+    assert "infra" in c({"resolved": False, "error": "litellm.APIConnectionError: Connection error.", "agent_patch_size": 0})
+    assert "infra" in c({"resolved": False, "error": "EXC RuntimeError('x')", "agent_patch_size": 0})
+    for i in range(4):
+        put(tmp_path, "v4h2", f"t{i}", resolved=(i == 0))
+        put(tmp_path, "v6p", f"t{i}", resolved=False, error=("Failed to apply test_patch: boom" if i == 1 else None))
+    c1 = rep.contrast(str(tmp_path), "v6p", "v4h2")
+    assert c1["n"] == 4 and c1["losses"] == 1                          # the verify failure stays in the pairing (v4h2 solved t0; v6p did not)
+    put(tmp_path, "v6p", "t2", resolved=False, error="litellm.APIConnectionError: x")
+    assert rep.contrast(str(tmp_path), "v6p", "v4h2")["n"] == 3        # an infrastructure row is dropped from the pairing
+
+
 def test_classify():
     c = rep.classify
     assert c({"resolved": True, "error": None, "agent_patch_size": 5}) == {"solved", }

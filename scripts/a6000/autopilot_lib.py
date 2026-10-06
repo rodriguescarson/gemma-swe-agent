@@ -50,7 +50,7 @@ def pool(a, b):
     return {"wins": a["wins"] + b["wins"], "losses": a["losses"] + b["losses"], "net": na + nb, "heterogeneous": abs(na - nb) >= 5}
 
 import re
-_INFRA = re.compile(r"APIConnection|Connection error|ConnectError|Connection refused|Service Unavailable|BadGateway|Bad Gateway|"
+_INFRA = re.compile(r"APIError|APIConnection|Connection error|ConnectError|Connection refused|Service Unavailable|BadGateway|Bad Gateway|"
                     r"InternalServerError|Max retries exceeded|Read timed out|RemoteProtocolError|ServerDisconnected", re.I)
 
 

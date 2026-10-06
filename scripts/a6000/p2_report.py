@@ -11,8 +11,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE)); sys.path.insert(0, str(HERE.parent))
 from p2_lib import sign_p, verdict, wilson  # noqa: E402
+from autopilot_lib import is_infra_error  # noqa: E402
 
-CAP_TEXT, BUDGET_TEXT = "session timeout", "budget"
+CAP_TEXT, BUDGET_TEXT, VERIFY_TEXT = "session timeout", "budget", "Failed to apply test_patch"
 
 
 def classify(r):
@@ -20,7 +21,16 @@ def classify(r):
     if r.get("resolved"):
         tags.add("solved")
     if err:
-        tags.add("cap" if CAP_TEXT in err else "budget" if BUDGET_TEXT in err else "error")
+        if CAP_TEXT in err:
+            tags.add("cap")
+        elif BUDGET_TEXT in err:
+            tags.add("budget")
+        elif VERIFY_TEXT in err:
+            tags.add("verify")           # the agent's patch collides with the test patch: the scorer counts it unsolved
+        else:
+            tags.add("error")
+            if is_infra_error(err) or err.startswith("EXC"):
+                tags.add("infra")        # model server / network / harness exception: re-run, and excluded from the pairing
     if not r.get("agent_patch_size"):
         tags.add("empty")
     return tags
@@ -89,7 +99,8 @@ def summarize(out, arms, ids=None):
         n = len(rows)
         secs = [float(r.get("duration_seconds") or 0) for r in rows.values()]
         d = {"n": n, "solved": sum("solved" in t for t in tags.values()), "empty": sum("empty" in t for t in tags.values()),
-             "errors": sum("error" in t for t in tags.values()), "cap": sum("cap" in t for t in tags.values()),
+             "errors": sum("error" in t for t in tags.values()), "infra": sum("infra" in t for t in tags.values()),
+             "verify": sum("verify" in t for t in tags.values()), "cap": sum("cap" in t for t in tags.values()),
              "budget": sum("budget" in t for t in tags.values()), "median_s": statistics.median(secs) if secs else None,
              "loops": loops(out, arm)}
         d["ci"] = wilson(d["solved"], n)
@@ -105,7 +116,7 @@ def summarize(out, arms, ids=None):
 def contrast(out, arm, base, ids=None):
     ids = set(ids) if ids is not None else None
     a, b = load_rows(out, arm, ids), load_rows(out, base, ids)
-    bad = lambda r: "error" in classify(r)
+    bad = lambda r: "infra" in classify(r)
     common = [t for t in a if t in b and not bad(a[t]) and not bad(b[t])]
     wins = sum(bool(a[t].get("resolved")) and not b[t].get("resolved") for t in common)
     losses = sum(bool(b[t].get("resolved")) and not a[t].get("resolved") for t in common)
