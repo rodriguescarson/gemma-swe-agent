@@ -139,22 +139,22 @@ def main():
     ap.add_argument("--allow-small", action="store_true", help="skip the 10k-row floor check (for a format probe)")
     ap.add_argument("--lr", type=float, default=None, help="learning_rate override (v11b: 5e-5)")
     a = ap.parse_args()
-    c = client()
     if a.status:
-        runs = c.autoscientist.list(limit=50)
+        runs = client().autoscientist.list(limit=50)
         runs = runs.model_dump() if hasattr(runs, "model_dump") else runs
         for r in runs.get("runs", runs.get("data", [])):
             if r.get("id") == a.status:
                 print(json.dumps(r, indent=1, default=str)); return
         print("run not found in the last 50"); return
     if a.download:
-        print(json.dumps(download(c, a.download, a.out), indent=1)); return
+        print(json.dumps(download(client(), a.download, a.out), indent=1)); return
     if not a.rows or not a.name:
         ap.error("rows and --name are required to upload")
     n = check_rows(a.rows)
     print(f"{n} rows in {a.rows}")
     if n < MIN_ROWS and not a.allow_small:
         raise SystemExit(f"{n} rows < {MIN_ROWS}: Adaption refuses 31B training below that; pass --allow-small only for a format probe on a small base")
+    c = client()      # after the local row checks: they refuse without the SDK or a key (A6000 box, 2026-10-07)
     ds = a.dataset_id
     if not ds:
         clean = a.rows + ".upload.parquet"

@@ -3,6 +3,8 @@ row floor; no network."""
 import json, subprocess, sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 from train import adaption_train as A  # noqa: E402
@@ -50,6 +52,20 @@ def test_cli_refuses_small_sets_without_flag_and_never_launches_by_default(tmp_p
     assert 'if not a.launch:' in src and 'c.autoscientist.create(**payload)' in src.split("if not a.launch:")[1]
 
 
+def test_cli_refuses_small_sets_before_it_needs_the_sdk_or_a_key(tmp_path):
+    """The CLI built the Adaption client (SDK import, API key) before its row floor, so a machine without the SDK died
+    in a traceback instead of refusing (A6000 box, 2026-10-07). The local row checks come first."""
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text(json.dumps({"prompt": "p", "completion": "c"}) + "\n")
+    stub = tmp_path / "stub"; stub.mkdir()
+    (stub / "adaption.py").write_text("raise ImportError('adaption SDK not installed (test stub)')\n")
+    env = {k: v for k, v in __import__("os").environ.items() if k != "ADAPTION_API_KEY"}
+    env.update(PYTHONPATH=str(stub), HOME=str(tmp_path))       # no SDK, no key in the env or the ~/Projects key file
+    p = subprocess.run([sys.executable, str(ROOT / "train" / "adaption_train.py"), str(rows), "--name", "probe"],
+                       capture_output=True, text=True, env=env)
+    assert p.returncode != 0 and "10000" in p.stdout + p.stderr and "Traceback" not in p.stderr, p.stderr[-1500:]
+
+
 def test_download_unpacks_a_zstd_tarball(tmp_path, monkeypatch):
     """2026-10-03: the run artefact is a zstd-compressed tar (magic 28 b5 2f fd), not gzip; tarfile alone fails with
     'invalid header'. download() must detect zstd and unpack it (zstd CLI or the zstandard module)."""
@@ -59,7 +75,8 @@ def test_download_unpacks_a_zstd_tarball(tmp_path, monkeypatch):
     tar = tmp_path / "a.tar"
     with tarfile.open(tar, "w") as t:
         for f in src.iterdir(): t.add(f, arcname=f.name)
-    assert shutil.which("zstd"), "zstd CLI needed for this test"
+    if not shutil.which("zstd"):
+        pytest.skip("zstd CLI not installed (the test compresses its tarball with it)")
     subprocess.run(["zstd", "-q", "-f", str(tar), "-o", str(tmp_path / "a.tar.zst")], check=True)
     blob = (tmp_path / "a.tar.zst").read_bytes()
     assert blob[:4] == b"\x28\xb5\x2f\xfd"
