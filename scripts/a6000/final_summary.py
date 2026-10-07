@@ -12,7 +12,7 @@ import p2_results_md as md  # noqa: E402
 G4 = Path.home() / "g4" / "runs"
 
 
-def summary_text(p2_out, p4_out, p3_out, ids=None):
+def summary_text(p2_out, p4_out, p3_out, ids=None, runs_root=None):
     ids = ids or [l.strip() for l in open(ROOT / "data" / "heldout1k" / "s200_valid_ids.txt") if l.strip()]
     parts = [f"\n## FINAL SUMMARY ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())}) - every number is an A6000 screen, never a Kaggle result\n"]
     a, b, both = ids[:50], ids[50:100], ids[:100]
@@ -22,11 +22,14 @@ def summary_text(p2_out, p4_out, p3_out, ids=None):
             parts.append(f"#### {label}\n{t}")
         else:
             parts.append(f"#### {label}\nnot run\n")
-    try:
-        import p4_judge
-        parts.append(p4_judge.markdown(p4_out, proxy_log=str(G4 / "p4_proxy.jsonl")))
-    except Exception:
-        parts.append("#### P4\nnot run (no results)\n")
+    root = Path(runs_root) if runs_root else G4
+    p4_dirs = sorted(p for p in root.glob("p4*") if p.is_dir() and (p / "results.jsonl").exists()) or [Path(p4_out)]
+    for d in p4_dirs:
+        try:
+            import p4_judge
+            parts.append(p4_judge.markdown(str(d), proxy_log=str(root / f"{d.name}_proxy.jsonl")))
+        except Exception:
+            parts.append(f"#### P4 ({d.name})\nnot run (no results)\n")
     cap = Path(p3_out) / "capture.jsonl"
     parts.append("#### P3\n" + (f"see the P3 data report above (capture file {cap.stat().st_size / 1e6:.0f} MB)\n" if cap.exists() else "not run (no capture)\n"))
     return "\n".join(parts)

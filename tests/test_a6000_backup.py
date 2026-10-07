@@ -58,3 +58,18 @@ def test_probe_gate_result_is_backed_up(tmp_path):
     src, dst = tmp_path / "runs", tmp_path / "repo"
     mk(src / "p2" / "probe_gate.json")
     assert "p2/probe_gate.json" in {str(d.relative_to(dst)) for s, d in bk.plan(str(src), str(dst))}
+
+
+def test_a_second_p4_run_dir_and_its_proxy_log_are_backed_up(tmp_path):
+    src, dst = tmp_path / "runs", tmp_path / "repo"
+    mk(src / "p4_v7" / "results.jsonl"); mk(src / "p4_v7" / "ARM"); mk(src / "p4_v7" / "results" / "traces" / "trace_a.json"); mk(src / "p4_v7_proxy.jsonl")
+    mk(src / "p4_v7" / "results" / "logs" / "a.log")
+    rels = {str(d.relative_to(dst)) for s, d in bk.plan(str(src), str(dst))}
+    assert {"p4_v7/results.jsonl", "p4_v7/ARM", "p4_v7/results/traces/trace_a.json", "p4_v7_proxy.jsonl"} <= rels and not any("/logs/" in r for r in rels)
+
+
+def test_p3_per_pass_results_are_backed_up_but_captures_never(tmp_path):
+    src, dst = tmp_path / "runs", tmp_path / "repo"
+    mk(src / "p3" / "s1" / "task_results.jsonl"); mk(src / "p3" / "capture_s1.jsonl"); mk(src / "p3" / "pairs_raw.jsonl")
+    rels = {str(d.relative_to(dst)) for s, d in bk.plan(str(src), str(dst))}
+    assert "p3/s1/task_results.jsonl" in rels and "p3/pairs_raw.jsonl" in rels and not any("capture" in r for r in rels)

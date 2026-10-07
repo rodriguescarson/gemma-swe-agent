@@ -360,3 +360,29 @@ def test_gate_report_also_counts_the_locators_helper_calls(tmp_path):
     r = g.gate(str(tmp_path), "v6p-b")
     assert r["ledger"]["t0"]["locator"] == 3 and r["ledger"]["t0"]["a"] == 2
     assert r["ledger_total"] == 2                                       # the 'caps engaged' condition is about the fixers, as registered in addendum 8
+
+
+# ------------------------------------------------------------------ passes (P3 with v7: 4 samples per task, PROMPTS P6/P3)
+def test_items_with_passes_carry_a_pass_number_and_a_distinct_results_dir():
+    items = p2.build_items(["a", "b"], ["v7"], passes=2)
+    assert items == [("a", "v7", 1), ("a", "v7", 2), ("b", "v7", 1), ("b", "v7", 2)]
+    assert p2.build_items(["a"], ["v7"]) == [("a", "v7")]                                  # the default is unchanged
+    assert race.results_name("a", 1, passes=1) == "a" and race.results_name("a", 2, passes=4) == "a__s2" and race.results_name("a", 1, passes=4) == "a__s1"
+
+
+def test_item_script_uses_the_pass_results_dir_and_the_pass_port():
+    s = race.item_script("v7", "t1", port=8003, scale=1.0, rdir="t1__s2")
+    assert "--results-dir /out/items/v7/t1__s2" in s and "--task-ids t1 " in s and "/out/items/v7/t1__s2.out" in s and "host.docker.internal:8003" in s
+    assert "/tmp/sbx_v7_t1__s2" in s                                                       # sandboxes of two passes of one task never collide
+
+
+def test_pending_with_passes_skips_only_finished_pass_dirs(tmp_path):
+    (tmp_path / "items" / "v7" / "a__s1").mkdir(parents=True)
+    (tmp_path / "items" / "v7" / "a__s1" / "task_results.jsonl").write_text("{}\n")
+    items = p2.build_items(["a"], ["v7"], passes=2)
+    assert race.pending(items, str(tmp_path), passes=2) == [("a", "v7", 2)]
+
+
+def test_pass_port_mapping():
+    assert race.port_for(8003, 1, [8003, 8004, 8005, 8006]) == 8003 and race.port_for(8003, 3, [8003, 8004, 8005, 8006]) == 8005
+    assert race.port_for(8001, 1, []) == 8001 and race.port_for(8001, 2, []) == 8001            # no per-pass ports: the base port

@@ -12,12 +12,13 @@ WALL_LIMIT_H = 12.0
 SCALE_MIN, SCALE_MAX = 0.2, 5.0     # the helpers' clock_scale range (scripts/run_eval.py)
 
 
-def build_items(ids, arms):
-    """(task, arm) in task order; the arm order of task i is the arm list rotated by i."""
+def build_items(ids, arms, passes=1):
+    """(task, arm) in task order; the arm order of task i is the arm list rotated by i. With passes > 1: (task, arm, pass), the passes of one task adjacent."""
     out = []
     for i, t in enumerate(ids):
         k = i % len(arms)
-        out += [(t, a) for a in arms[k:] + arms[:k]]
+        for a in arms[k:] + arms[:k]:
+            out += [(t, a, p) for p in range(1, passes + 1)] if passes > 1 else [(t, a)]
     return out
 
 

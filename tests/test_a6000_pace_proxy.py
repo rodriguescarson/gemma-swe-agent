@@ -109,3 +109,18 @@ def test_capture_file_gets_the_exact_request_and_reply(tmp_path):
     row = json.loads(cap.read_text().splitlines()[0])
     assert row["body"] == body and row["response"]["choices"][0]["message"]["content"] == "hi" and row["response"]["model"] == body["model"] and "t" in row
     px.shutdown(); up.shutdown()
+
+
+def test_seed_override_replaces_the_requests_seed_upstream_only():
+    seen = {}
+
+    def up(body):
+        seen.update(body)
+        return 200, {"usage": {"prompt_tokens": 1, "completion_tokens": 1}, "choices": []}
+    clock = iter([0.0, 99.0])
+    body = dict(BODY, seed=42, temperature=0.2)
+    pp.handle(up, body, pp.Pacer(), sleep=lambda s: None, now=lambda: next(clock), seed_override=45)
+    assert seen["seed"] == 45 and seen["temperature"] == 0.2 and body["seed"] == 42          # the caller's body is not mutated
+    clock = iter([0.0, 99.0])
+    pp.handle(up, dict(BODY), pp.Pacer(), sleep=lambda s: None, now=lambda: next(clock), seed_override=None)
+    assert "seed" not in seen or seen["seed"] == 45                                           # no override: untouched (seen still holds the old value)

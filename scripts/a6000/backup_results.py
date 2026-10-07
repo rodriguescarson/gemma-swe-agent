@@ -5,7 +5,7 @@
 Copies new or changed files from ~/g4/runs/{p2,p3,p4,p4_proxy.jsonl} into eval/a6000/results/ (per-item rows, summaries, patches, test outputs, traces; the run files
 and proxy logs), then commits and pushes under the same lock as the supervisor. Never copied: container logs, P3's raw capture and SFT rows (GBs; they stay on this box),
 P3 traces, anything over 8 MB. Item directories are written by root inside the container but are world-readable."""
-import argparse, fnmatch, os, shutil, subprocess, sys, time
+import argparse, fnmatch, os, re, shutil, subprocess, sys, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +33,7 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
     def want(rel):
         top = rel.split("/")[0]
         name = rel.split("/")[-1]
-        if top == "p4_proxy.jsonl":
+        if re.fullmatch(r"p4(_\w+)?_proxy\.jsonl", top):
             return True
         if top == "p2":
             r = rel[3:]
@@ -43,19 +43,20 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
         if top == "p3":
             r = rel[3:]
             if "/" not in r:
-                return name in ("ARM", "rebalance_report.json", "validate_report.json", "proxy.jsonl")
+                return name in ("ARM", "rebalance_report.json", "validate_report.json", "proxy.jsonl", "pairs_raw.jsonl")
+            if re.fullmatch(r"s\d+/task_results\.jsonl", r):
+                return True
             return _p2_like(r, p3=True)
-        if top == "p4":
-            r = rel[3:]
+        if re.fullmatch(r"p4(_\w+)?", top):
+            r = rel[len(top) + 1:]
             if "/" not in r:
                 return name in ("results.jsonl", "ARM")
             return r.startswith("results/") and not r.startswith("results/logs/")
         return False
 
-    for top in ("p2", "p3", "p4"):
+    tops = [p.name for p in src_root.iterdir() if p.is_dir() and (p.name in ("p2", "p3") or re.fullmatch(r"p4(_\w+)?", p.name))] if src_root.exists() else []
+    for top in sorted(tops):
         base = src_root / top
-        if not base.exists():
-            continue
         for dirpath, _, files in os.walk(base):
             for f in files:
                 s = Path(dirpath) / f
@@ -72,11 +73,11 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
                 if d.exists() and d.stat().st_size == size:
                     continue
                 out.append((s, d))
-    s = src_root / "p4_proxy.jsonl"
-    if s.exists() and s.stat().st_size <= max_bytes:
-        d = dst_root / "p4_proxy.jsonl"
-        if not (d.exists() and d.stat().st_size == s.stat().st_size):
-            out.append((s, d))
+    for s in sorted(src_root.glob("p4*_proxy.jsonl")):
+        if s.stat().st_size <= max_bytes:
+            d = dst_root / s.name
+            if not (d.exists() and d.stat().st_size == s.stat().st_size):
+                out.append((s, d))
     return out
 
 

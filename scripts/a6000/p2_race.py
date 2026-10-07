@@ -85,21 +85,34 @@ def budget_flags(bundle):
             f"--max-turns {b['max_turns']} --timeout-seconds {b['timeout_seconds']}")
 
 
-def item_script(arm, task, port, scale, items="items"):
-    """One (task, arm) item inside the container; the model name stays the harness's own (the proxy rewrites it)."""
+def results_name(task, k, passes=1):
+    """The results dir of pass k of a task: the task id alone for a single pass, <task>__s<k> when there are several."""
+    return task if passes <= 1 else f"{task}__s{k}"
+
+
+def port_for(base, k, pass_ports):
+    return pass_ports[k - 1] if pass_ports and k - 1 < len(pass_ports) else base
+
+
+def item_script(arm, task, port, scale, items="items", rdir=None):
+    """One (task, arm) item inside the container; the model name stays the harness's own (the proxy rewrites it). rdir: the results dir name (a pass of the task)."""
+    rdir = rdir or task
     flags = budget_flags(str(ROOT / "submissions" / arm))
-    return (f"set -u; [ -d /tmp/bundle_{arm} ] || cp -r /g4/submissions/{arm} /tmp/bundle_{arm}; mkdir -p /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task} /out/{items}/{arm}; cd /tmp/run_{arm}_{task}; "
+    return (f"set -u; [ -d /tmp/bundle_{arm} ] || cp -r /g4/submissions/{arm} /tmp/bundle_{arm}; mkdir -p /tmp/sbx_{arm}_{rdir} /tmp/run_{arm}_{rdir} /out/{items}/{arm}; cd /tmp/run_{arm}_{rdir}; "
             f"export PYTHONDONTWRITEBYTECODE=1 UV_LINK_MODE=copy G4_WHEELHOUSE=/root/h/wheels G4_COMPACTION=1 G4_L4_SCALE={scale} "
-            f"G4_NO_EDITABLE=1 LITELLM_LOCAL_MODEL_COST_MAP=True OPENAI_API_KEY=EMPTY OPENAI_BASE_URL=http://host.docker.internal:{port}/v1 TMPDIR=/tmp/sbx_{arm}_{task}; "
+            f"G4_NO_EDITABLE=1 LITELLM_LOCAL_MODEL_COST_MAP=True OPENAI_API_KEY=EMPTY OPENAI_BASE_URL=http://host.docker.internal:{port}/v1 TMPDIR=/tmp/sbx_{arm}_{rdir}; "
             f"python /g4/scripts/pallets/run_eval_pallets.py eval --tasks /root/h/tasks.jsonl --snapshots-dir /root/h/snapshots "
-            f"--submission-dir /tmp/bundle_{arm} --results-dir /out/{items}/{arm}/{task} --sandbox subprocess {flags} --concurrency 1 "
-            f"--display quiet --task-ids {task} > /out/{items}/{arm}/{task}.out 2>&1; rc=$?; "
-            f"L=$(find /tmp/sbx_{arm}_{task} -type d -path '*swe/budget' 2>/dev/null | head -1); [ -n \"$L\" ] && cp -r \"$L\" /out/{items}/{arm}/{task}.ledger; "
-            f"rm -rf /tmp/sbx_{arm}_{task} /tmp/run_{arm}_{task}; exit $rc")
+            f"--submission-dir /tmp/bundle_{arm} --results-dir /out/{items}/{arm}/{rdir} --sandbox subprocess {flags} --concurrency 1 "
+            f"--display quiet --task-ids {task} > /out/{items}/{arm}/{rdir}.out 2>&1; rc=$?; "
+            f"L=$(find /tmp/sbx_{arm}_{rdir} -type d -path '*swe/budget' 2>/dev/null | head -1); [ -n \"$L\" ] && cp -r \"$L\" /out/{items}/{arm}/{rdir}.ledger; "
+            f"rm -rf /tmp/sbx_{arm}_{rdir} /tmp/run_{arm}_{rdir}; exit $rc")
 
 
-def pending(items, out, items_dir="items"):
-    return [(t, a) for t, a in items if not (Path(out) / items_dir / a / t / "task_results.jsonl").is_file()]
+def pending(items, out, items_dir="items", passes=1):
+    out = Path(out)
+    if passes > 1:
+        return [it for it in items if not (out / items_dir / it[1] / results_name(it[0], it[2], passes) / "task_results.jsonl").is_file()]
+    return [(t, a) for t, a in items if not (out / items_dir / a / t / "task_results.jsonl").is_file()]
 
 
 def ids_list(path, n=None, from_end=None):
@@ -119,6 +132,8 @@ def main(argv=None):
     ap.add_argument("--require-probe-ok", nargs="*", default=[], metavar="ARM", help="drop these arms unless OUT/probe_gate.json says their probe passed")
     ap.add_argument("--arm-scale-from-probe", nargs="*", default=[], metavar="ARM[=FALLBACK]", help="take the arm's scale from OUT/probe_summary.json (T = 2)")
     ap.add_argument("--port", type=int, default=8001); ap.add_argument("--label", default="p2")
+    ap.add_argument("--passes", type=int, default=1, help="samples per task (P3): results dirs <task>__s<k>")
+    ap.add_argument("--pass-ports", type=int, nargs="*", default=[], help="proxy port per pass (one proxy per pass: its own seed and capture)")
     ap.add_argument("--items-dir", default="items"); ap.add_argument("--keep", action="store_true", help="reuse a running container, leave it running")
     ap.add_argument("--cpus", default="24"); ap.add_argument("--mem", default="64g")
     a = ap.parse_args(argv)
@@ -131,7 +146,7 @@ def main(argv=None):
         arm, _, fb = spec.partition("=")
         arm_scales[arm] = scale_from_probe(str(out / "probe_summary.json"), arm, float(fb) if fb else a.scale)
     ids = ids_list(a.ids, a.n, a.ids_from_end)
-    items = pending(build_items(ids, a.arms), str(out), a.items_dir)
+    items = pending(build_items(ids, a.arms, a.passes), str(out), a.items_dir, a.passes)
     (out / "ids.txt").write_text("".join(i + "\n" for i in ids))
     name = f"g4-{a.label}"
     live = subprocess.run([DOCKER, "exec", name, "test", "-d", "/root/h"], capture_output=True).returncode == 0
@@ -159,15 +174,19 @@ def main(argv=None):
             with lock:
                 if idx[0] >= len(items):
                     return
-                task, arm = items[idx[0]]; idx[0] += 1
+                it = items[idx[0]]; idx[0] += 1
+            task, arm = it[0], it[1]
+            k = it[2] if len(it) > 2 else 1
+            rdir = results_name(task, k, a.passes)
             t0 = time.time()
-            p = subprocess.run([DOCKER, "exec", name, "bash", "-c", item_script(arm, task, a.port, scale_for(arm, arm_scales, a.scale), a.items_dir)], capture_output=True, text=True)
+            p = subprocess.run([DOCKER, "exec", name, "bash", "-c", item_script(arm, task, port_for(a.port, k, a.pass_ports), scale_for(arm, arm_scales, a.scale), a.items_dir, rdir)],
+                               capture_output=True, text=True)
             t1 = time.time()
             with lock:
                 done[0] += 1
                 with open(out / ("items.jsonl" if a.items_dir == "items" else a.items_dir + ".jsonl"), "a") as f:
-                    f.write(json.dumps({"arm": arm, "task": task, "t0": round(t0, 1), "t1": round(t1, 1), "wall_s": round(t1 - t0, 1), "rc": p.returncode}) + "\n")
-                log.write(f"{time.strftime('%H:%M:%S')} {done[0]}/{len(items)} {arm} {task} rc={p.returncode} {t1 - t0:.0f}s\n"); log.flush()
+                    f.write(json.dumps({"arm": arm, "task": task, "pass": k, "t0": round(t0, 1), "t1": round(t1, 1), "wall_s": round(t1 - t0, 1), "rc": p.returncode}) + "\n")
+                log.write(f"{time.strftime('%H:%M:%S')} {done[0]}/{len(items)} {arm} {rdir} rc={p.returncode} {t1 - t0:.0f}s\n"); log.flush()
 
     ths = [threading.Thread(target=worker) for _ in range(a.conc)]
     [t.start() for t in ths]; [t.join() for t in ths]

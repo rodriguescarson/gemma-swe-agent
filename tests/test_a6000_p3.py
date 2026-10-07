@@ -79,3 +79,46 @@ def test_p4_judge_reports_slowdown_over_clean_windows_and_says_how_much_was_cont
     s = j.slowdown_summary(rows)
     assert abs(s["clean"] - 1.15) < 0.05 and s["all"] > 20 and s["contended_windows"] == 3 and s["windows"] == 9
     assert "clean windows" in j.slowdown_text(s) and "contended" in j.slowdown_text(s)
+
+
+# ------------------------------------------------------------------ P3 with v7: 4 passes per task (PROMPTS P6 / P3)
+def test_p3_race_args_with_passes_use_one_port_per_pass():
+    run = _mod("p3_run")
+    a = run.race_args("/o", "v7", 8003, passes=4)
+    assert a[a.index("--passes") + 1] == "4" and a[a.index("--pass-ports") + 1:a.index("--pass-ports") + 5] == ["8003", "8004", "8005", "8006"]
+    assert "--arms" in a and a[a.index("--arms") + 1] == "v7"
+    assert run.pass_seed(42, 1) == 42 and run.pass_seed(42, 4) == 45                     # pass 1 keeps the bundle's seed, later passes shift it
+
+
+def test_merge_results_per_pass_and_pair_arguments(tmp_path):
+    b = _mod("p3_build")
+    for t, k, solved in (("a", 1, True), ("a", 2, False), ("b", 1, False), ("b", 2, False)):
+        d = tmp_path / "items" / "v7" / f"{t}__s{k}"; d.mkdir(parents=True)
+        (d / "task_results.jsonl").write_text(json.dumps({"instance_id": t, "resolved": solved}) + "\n")
+    for k in (1, 2):
+        (tmp_path / f"capture_s{k}.jsonl").write_text('{"t": 1}\n')
+    per = b.merge_results_per_pass(str(tmp_path), passes=2)
+    assert per == {1: 2, 2: 2} and (tmp_path / "s1" / "task_results.jsonl").exists() and (tmp_path / "s2" / "task_results.jsonl").exists()
+    cmds = b.commands(str(tmp_path), "/h/tasks.jsonl", passes=2)
+    sft = cmds["sft"]
+    assert sft.count("--pair") == 2 and f"{tmp_path}/capture_s1.jsonl={tmp_path}/s1/task_results.jsonl" in sft and "--capture" not in sft
+    attempts = b.attempts_from(str(tmp_path / "results_all.jsonl"))
+    assert attempts == {"a": [True, False], "b": [False, False]} and b.pair_count(attempts) == 1
+    raw = b.pairs_raw(attempts)
+    assert raw == [{"task": "a", "solved_passes": [1], "failed_passes": [2]}]
+
+
+def test_single_pass_build_still_uses_capture_and_results(tmp_path):
+    b = _mod("p3_build")
+    cmds = b.commands("/p3", "/h/tasks.jsonl", passes=1)
+    assert "--capture /p3/capture.jsonl" in " ".join(cmds["sft"]) and "--pair" not in " ".join(cmds["sft"])
+
+
+def test_final_summary_lists_every_p4_run_dir(tmp_path):
+    fs = _mod("final_summary")
+    for name in ("p4", "p4_v7"):
+        d = tmp_path / name; (d / "results").mkdir(parents=True)
+        (d / "ARM").write_text("v5h2" if name == "p4" else "v7")
+        (d / "results.jsonl").write_text((ROOT / "eval" / "kaggle" / "g4-l4-v4h2g-p312" / "results.jsonl").read_text())
+    text = fs.summary_text(str(tmp_path / "p2"), str(tmp_path / "p4"), str(tmp_path / "no_p3"), ids=["t0"], runs_root=str(tmp_path))
+    assert text.count("P4 A6000 screen RESULT") == 2 and "v7 on the public 74" in text and "v5h2 on the public 74" in text

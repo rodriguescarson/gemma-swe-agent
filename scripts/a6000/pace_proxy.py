@@ -33,13 +33,18 @@ def post_upstream(base):
     return go
 
 
-def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream_model=None):
+def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream_model=None, seed_override=None):
     """(status, response, log row). upstream(body) -> (status, dict). upstream_model: the name vLLM serves (its path); the harness's
     own alias is replaced on the way in and echoed back on the way out, as scripts/or_proxy.py does."""
     if body.get("stream"):
         return 400, {"error": {"message": "pace_proxy: streaming not supported"}}, {"status": 400, "err": "stream"}
     t0 = now()
-    status, resp = upstream(dict(body, model=upstream_model) if upstream_model else body)
+    fwd = dict(body)
+    if upstream_model:
+        fwd["model"] = upstream_model
+    if seed_override is not None:
+        fwd["seed"] = seed_override                     # P3 passes: one proxy per pass, each with its own seed; the bundle's sampling is otherwise untouched
+    status, resp = upstream(fwd)
     if upstream_model and isinstance((resp or {}).get("model"), str) and body.get("model"):
         resp["model"] = body["model"]
     usage = (resp or {}).get("usage") or {}
@@ -53,7 +58,7 @@ def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream
     return status, resp, row
 
 
-def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None, capture_path=None):
+def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None, capture_path=None, seed_override=None):
     pacer, lock, up = Pacer(), threading.Lock(), post_upstream(upstream_base)
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -78,7 +83,7 @@ def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, ups
             body_in = {}
             try:
                 body_in = json.loads(self.rfile.read(n) or b"{}")
-                status, resp, row = handle(up, body_in, pacer, sleep, upstream_model=upstream_model)
+                status, resp, row = handle(up, body_in, pacer, sleep, upstream_model=upstream_model, seed_override=seed_override)
             except Exception as e:
                 status, resp, row = 500, {"error": {"message": f"pace_proxy: {e}"}}, {"status": 500, "err": repr(e)}
             row["t"] = round(time.time(), 3)
@@ -101,13 +106,14 @@ def main():
     ap.add_argument("--log", default=str(Path.home() / "g4" / "runs" / "pace_proxy.jsonl"))
     ap.add_argument("--host", default="127.0.0.1", help="bind address; use the docker bridge gateway (172.18.0.1) for containers")
     ap.add_argument("--capture", default=None, help="append {t, body, response} per successful call (SFT raw material)")
+    ap.add_argument("--seed", type=int, default=None, help="override the sampling seed of every forwarded request (P3 passes)")
     ap.add_argument("--rewrite-model", action="store_true", help="send the upstream's own model id, echo the caller's name back")
     a = ap.parse_args()
     um = None
     if a.rewrite_model:
         with urllib.request.urlopen(a.upstream.rstrip("/") + "/v1/models", timeout=60) as r:
             um = json.load(r)["data"][0]["id"]
-    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um, capture_path=a.capture)
+    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um, capture_path=a.capture, seed_override=a.seed)
     print(f"pace_proxy {a.host}:{a.listen} -> {a.upstream} model={um} log={a.log}", flush=True)
     srv.serve_forever()
 
