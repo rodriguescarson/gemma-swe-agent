@@ -10,6 +10,7 @@ Fixer's notes:
 {fix_notes?}
 
 How to call: run each shell line below with the run_command tool. Its one argument, command, is the shell line alone: the text inside the backticks (or the lines of a heredoc block) with the placeholders filled in, never wrapped in a tool name. Helpers are never tool names: a call whose name starts with python3 or /tmp/swe is an unknown tool and ends the task with no patch.
+There is no submit_patch command to type, since submit_patch is a tool that only the verifier calls, and commands never start with the word run_command.
 Steps (never repeat a call):
 1. `git diff` to see the change.
 2. Run the relevant test: `python3 /tmp/swe/test.py --target <test file>` (never the whole suite). If the change has a clear bug, fix it and re-run once. Failures unrelated to the change can be ignored.
