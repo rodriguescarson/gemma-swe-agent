@@ -132,3 +132,55 @@ ALWAYS (append to any prompt if needed)
 - Keep the GPU busy or stop vLLM: never leave it idle for hours. Stop it when a prompt's work ends.
 - Watch disk (`df -h ~`): stop at 100 GB free; clean only what you created.
 - Nothing outside ~/g4 and Docker. No tokens in git, logs or messages.
+
+
+-------------------------------------------------------------------------
+P5. FAILURE FORENSICS: what is failing and why (CPU only, run while stage 1b continues)
+-------------------------------------------------------------------------
+Repo ~/g4/gemma-swe-agent, branch wip/gemma-agent. Do not stop, pause or restart any running step, proxy, vLLM
+or the supervisor; this is read-only analysis of files on disk plus unit tests. Use no GPU.
+
+Carson suspects that part of the failure rate is OUR bugs (helper scripts erroring, prompts naming tools or flags
+that do not exist, outdated SKILL.md, harness rejections) rather than model behaviour. Settle that with evidence
+from the stored traces, one mechanism at a time, with counts and task ids. Stage 1a traces are under
+~/g4/runs/p2/items/<arm>/<task>/traces/ (arms v4h2, v6p, v6p-think), P4 (v5h2, public 74) under ~/g4/runs/p4/,
+probes under ~/g4/runs/p2/probe_*; results.jsonl next to each. Read docs/v4h/GATE.md "P2 addendum 10" first (the
+locator budget finding) so you do not redo it.
+
+1. TOOL AND HELPER ERRORS. For every tool call in every trace, classify its observation: ok | helper traceback
+   (which helper: install.py, locate.py, view.py, edit.py, test.py, check.py, repro.py, select_best.py,
+   repo_map.py) | usage/argument error from a helper ("usage:", "unrecognized arguments", "error: the following
+   arguments") | "can't open file" | harness rejection (unknown tool name, schema/argument validation, "Function
+   ... not found", file_path given as a list) | command timeout | sandbox execution error | empty output | other.
+   Table per arm: mechanism, calls, tasks affected, example task + the exact call and the first 300 chars of the
+   reply. Every helper traceback or usage error is a bug of ours: list each distinct one with the helper, the
+   line, and the prompt line that led the model to call it that way.
+2. PROMPT vs REALITY. For each bundle that ran (v4h2, v5h2, v6p, v6p-think, v6p-b): extract every helper
+   invocation shown in prompts/*.md and skills/swe-tools/SKILL.md, and RUN each one (with placeholder args) against
+   the bundle's own scripts in a scratch git repo: does it parse, do the flags exist, does the output match what
+   the prompt tells the model to expect (e.g. "REPRO PASS", "ALREADY SHOWN", the locate.py result format)?
+   List every mismatch. Also: tools named in a prompt that the stage's yaml does not declare, and tools declared
+   but never used.
+3. LOOPS. For every task with an identical call repeated >= 5 times in a row: the stage, the exact call, what the
+   tool returned each time (identical? an error? truncated? our "repeat" message?), and what the model's text said
+   between calls if anything. Group by what the tool returned: if a loop follows a helper error or an empty/
+   truncated reply, that is ours to fix; if the reply was a normal, useful result repeated, that is model behaviour.
+4. EMPTY PATCHES. For every empty-patch task: which stage ended the task (budget exhausted at which stage, cap hit,
+   verifier never ran, selector found all candidates empty, fixers never produced a diff, edit.py refused the
+   edit, git diff empty because edits went to a test file and were reverted). Counts per cause per arm.
+5. v6p PIPELINE CHECK. For each v6p task: did the locator write /tmp/repro.py, did it FAIL on the unedited code as
+   required, did each fixer create its /tmp/wK copy, how many of the three diffs were non-empty, what did
+   select_best.py print, did it apply a diff to /workspace, did the verifier call submit_patch. Count every step;
+   name the first step that is broken most often.
+6. THE L4 LOSSES. For the public tasks v4h2g solved on Kaggle L4 (eval/kaggle/g4-l4-v4h2g-p312/results.jsonl) and
+   v5h2 did not in P4: per task, where the two trajectories diverge (first differing tool call) and why (view.py
+   instead of read_file, temperature, a helper error, a cap). Same for the stage 1a tasks v4h2 solved and v6p did not.
+7. ENVIRONMENT. Report the exact versions in play (python in the sandbox, pytest, vllm, transformers, google-adk,
+   adk_submission, swegemma) against the Kaggle wheelhouse pins, and every place DEVIATIONS.md says the A6000
+   differs from the Kaggle notebook. Then run the FULL repo test suite (PYTHONDONTWRITEBYTECODE=1 venv/bin/python
+   -m pytest -q tests) to the end and list every failure with its first assertion line; it was killed earlier to
+   launch sooner, so it has not passed on this box.
+8. OUTPUT. Write docs/a6000/FAILURE_FORENSICS.md: one ranked table (mechanism, tasks affected per arm, ours vs
+   harness vs model, example task, proposed fix, confidence), then the detail per section above. Fix nothing in
+   the bundles yet. Commit the doc and any analysis scripts (tests first for scripts), push to wip/gemma-agent,
+   and end with the top 5 findings in plain words: what is failing most, why, and whether it is our code.
