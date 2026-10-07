@@ -1,0 +1,995 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "user",
+      "message": "You are evaluating a software engineering task for repository fastapi/fastapi.\n\nProblem Statement:\n\ud83d\udc1b Fix OpenAPI duplication of `anyOf` refs for app-level responses with specified `content` and `model` as `Union`\n\n## Summary\r\n\r\nFixes an issue where defining app-level `responses={...}` with a `Union` of Pydantic models **and** specifying `[\"content\"][...][\"examples\"]` causes the generated OpenAPI schema to accumulate duplicate `$ref` entries in the `anyOf` array.\r\n\r\n\r\n\r\n## Minimal reproducible example\r\n\r\n<details open>\r\n<summary> <code>app.py</code> </summary>\r\n\r\n```python\r\nfrom fastapi import FastAPI\r\nfrom pydantic import BaseModel\r\n\r\n\r\nclass ModelA(BaseModel):\r\n    a: str\r\n\r\n\r\nclass ModelB(BaseModel):\r\n    b: str\r\n\r\n\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'model': ModelA | ModelB,\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}}\r\n            }}\r\n        }\r\n    }\r\n)\r\n\r\n\r\n@app.get('/route1')\r\ndef route1():\r\n    return \"test\"\r\n\r\n@app.get('/route2')\r\ndef route2():\r\n    return \"test\"\r\n\r\n@app.get('/route3')\r\ndef route2():\r\n    return \"test\"\r\n```\r\n</details>\r\n\r\n<details open>\r\n<summary>Generated <code>/openapi.json</code> excerpt (<code>paths[\"/route1\"][\"get\"][\"responses\"]</code>)</summary>\r\n\r\n```json\r\n{\r\n  \"500\": {\r\n    \"description\": \"Internal Server Error\",\r\n    \"content\": {\r\n      \"application/json\": {\r\n        \"schema\": {\r\n          \"anyOf\": [\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" }\r\n          ]\r\n        }\r\n       }\r\n     }\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAs you can see, the `$ref`s are duplicated three times within `anyOf`. \r\n\r\nThis appears to be an unintended behavior, since FastAPI\u2019s documentation does not indicate that specifying both a `model` and `content` is prohibited. The generated schema is still valid, but the duplication grows with teh route count and produces excessively large `anyOf` lists for bigger applications.\r\n\r\n\r\n<details open>\r\n<summary> <h2>Root Cause</h2> </summary>\r\n\r\n[Relevant Code Snippet](https://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L416)\r\n\r\nFirst, `additional_response` is taken from the `route` object:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L379\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n    'model': ModelA | ModelB,\r\n    'content': {\"application/json\": {\r\n        'examples': {\"Case A\": {\"value\": \"a\"}}\r\n    }}\r\n}\r\n```\r\n</details>\r\n\r\n `additional_response` is *shallowly* `.copy()`ed into `process_response`:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L380\r\n\r\nNow, `id(process_response['content']) == id(additional_response['content'])`, so when `process_response['content']` is modified, the `route.responses` object inadvertently modified as well. And, since the response was defined within `FastAPI(...)`, all the routes share the same `route.responses` object.\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L401-L406\r\n\r\n`deep_dict_update()` will combine `anyOf` segments together:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/utils.py#L227-L242\r\n\r\nWhen this method is called the second time (for the second route), `additional_response` will now already contain the schema definition from the first route:\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n  'model': ModelA | ModelB,\r\n  'content': {\"application/json\": {\r\n      'examples': {\"Case A\": {\"value\": \"a\"}}\r\n  }},\r\n  'schema\": {\r\n    \"anyOf\": [\r\n      { \"$ref\": \"#/components/schemas/ModelA\" },\r\n      { \"$ref\": \"#/components/schemas/ModelB\" }\r\n    ]\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAnd, for each subsequent route, the additional \"anyOf\" elements will keep appending to the same array.\r\n\r\n</details>\r\n\r\n<details open>\r\n<summary> <h2> Workaround (before fix) </h2> </summary>\r\n\r\nDefine the schema manually instead of using `model`:\r\n\r\n```python\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}},\r\n                'schema': {\r\n                    \"anyOf\": [\r\n                        model.model_json_schema() for model in [ModelA, ModelB]\r\n                    ]\r\n                }\r\n            }}\r\n        }\r\n    }\r\n)\r\n```\r\n\r\n</details>\r\n\r\n## Additional Information\r\n<details>\r\n<summary> Full <code>openapi.json</code> </summary>\r\n\r\n```json\r\n{\r\n  \"openapi\": \"3.1.0\",\r\n  \"info\": {\r\n    \"title\": \"FastAPI\",\r\n    \"version\": \"0.1.0\"\r\n  },\r\n  \"paths\": {\r\n    \"/route1\": {\r\n      \"get\": {\r\n        \"summary\": \"Route1\",\r\n        \"operationId\": \"route1_route1_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route2\": {\r\n      \"get\": {\r\n        \"summary\": \"Route2\",\r\n        \"operationId\": \"route2_route2_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route3\": {\r\n      \"get\": {\r\n        \"summary\": \"Route3\",\r\n        \"operationId\": \"route3_route3_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    }\r\n  },\r\n  \"components\": {\r\n    \"schemas\": {\r\n      \"ModelA\": {\r\n        \"properties\": {\r\n          \"a\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"A\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"a\"\r\n        ],\r\n        \"title\": \"ModelA\"\r\n      },\r\n      \"ModelB\": {\r\n        \"properties\": {\r\n          \"b\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"B\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"b\"\r\n        ],\r\n        \"title\": \"ModelB\"\r\n      }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n</details>\n\n## Task Budget (Session terminates when any budget is exhausted)\n- Time allowance: 5.0 minutes\n- Tool calls allowance: 70 calls\n- Max loop iterations: 150 turns\n\n## Execution Environment Rules\n- Single command timeout: 180 seconds (commands exceeding this fail without ending the session)\n- Command output limit: 5000 characters\n- File view limit: 150 lines per read_file call\n- File character limit: 10000 characters per read_file call\n- Environment is offline (no network/PyPI access). All repository and test dependencies are ALREADY pre-installed. Do NOT attempt to run pip install or download packages.\n\n## Instructions:\n0. All source code is under `/workspace`. Do NOT search outside `/workspace` (e.g. `/usr/`, `/wheels/`, system site-packages). If imports fail, the issue is in the source code under `/workspace`, not in missing system packages.\n1. Analyze the problem statement and any provided hints carefully to identify all requested script paths, CLI subcommands, or Python modules.\n2. Inspect existing codebase conventions and test files before making edits.\n3. Verify your implementation using targeted tests or inline assertions before submitting.\n4. Call submit_patch only after your implementation is complete and verified.\n5. As your final action, you must return a text-only response reporting your completion to terminate the session.\n## Code Intelligence Tools\nThis repository has pre-built code graph and embedding data. Use these tools for fast, targeted navigation:\n- `search_similar_code(query)`: Find semantically similar functions/classes by keyword.\n- `get_code_neighbors(node)`: Find callers, callees, and definitions related to a symbol.\n- `get_code_subgraph(nodes)`: Get the induced subgraph for a set of symbols.\n\n## Workspace Layout\nThe repository is located at `/workspace`. Here is the directory tree (up to 3 levels):\n```\n.\n./.git\n./.github\n./.github/DISCUSSION_TEMPLATE\n./.github/DISCUSSION_TEMPLATE/questions.yml\n./.github/DISCUSSION_TEMPLATE/translations.yml\n./.github/FUNDING.yml\n./.github/ISSUE_TEMPLATE\n./.github/ISSUE_TEMPLATE/config.yml\n./.github/ISSUE_TEMPLATE/privileged.yml\n./.github/dependabot.yml\n./.github/labeler.yml\n./.github/workflows\n./.github/workflows/add-to-project.yml\n./.github/workflows/build-docs.yml\n./.github/workflows/contributors.yml\n./.github/workflows/deploy-docs.yml\n./.github/workflows/detect-conflicts.yml\n./.github/workflows/issue-manager.yml\n./.github/workflows/label-approved.yml\n./.github/workflows/labeler.yml\n./.github/workflows/latest-changes.yml\n./.github/workflows/notify-translations.yml\n./.github/workflows/people.yml\n./.github/workflows/pre-commit.yml\n./.github/workflows/publish.yml\n./.github/workflows/smokeshow.yml\n./.github/workflows/sponsors.yml\n./.github/workflows/test-redistribute.yml\n./.github/workflows/test.yml\n./.github/workflows/topic-repos.yml\n./.github/workflows/translate.yml\n./.gitignore\n./.pre-commit-config.yaml\n./CITATION.cff\n./CONTRIBUTING.md\n./LICENSE\n./README.md\n./SECURITY.md\n./conftest.py\n./docs\n./docs/de\n./docs/de/docs\n./docs/de/llm-prompt.md\n./docs/de/mkdocs.yml\n./docs/en\n./docs/en/data\n./docs/en/docs\n./docs/en/mkdocs.env.yml\n./docs/en/mkdocs.yml\n./docs/en/overrides\n./docs/es\n./docs/es/docs\n./docs/es/llm-prompt.md\n./docs/es/mkdocs.yml\n./docs/fr\n./docs/fr/docs\n./docs/fr/llm-prompt.md\n./docs/fr/mkdocs.yml\n./docs/ja\n./docs/ja/docs\n./docs/ja/llm-prompt.md\n./docs/ja/mkdocs.yml\n./docs/ko\n./docs/ko/docs\n./docs/ko/llm-prompt.md\n./docs/ko/mkdocs.yml\n./docs/language_names.yml\n./docs/missing-translation.md\n./docs/pt\n./docs/pt/docs\n./docs/pt/llm-prompt.md\n./docs/pt/mkdocs.yml\n./docs/ru\n./docs/ru/docs\n./docs/ru/llm-prompt.md\n./docs/ru/mkdocs.yml\n./docs/tr\n./docs/tr/docs\n./docs/tr/llm-prompt.md\n./docs/tr/mkdocs.yml\n./docs/uk\n./docs/uk/docs\n./docs/uk/llm-prompt.md\n./docs/uk/mkdocs.yml\n./docs/zh\n./docs/zh-hant\n./docs/zh-hant/docs\n./docs/zh-hant/llm-prompt.md\n./docs/zh-hant/mkdocs.yml\n./docs/zh/docs\n./docs/zh/llm-prompt.md\n./docs/zh/mkdocs.yml\n./docs_src\n./docs_src/additional_responses\n./docs_src/additional_responses/__init__.py\n./docs_src/additional_responses/tutorial001_py39.py\n./docs_src/additional_responses/tutorial002_py310.py\n./docs_src/additional_responses/tutorial002_py39.py\n./docs_src/additional_responses/tutorial003_py39.py\n./docs_src/additional_responses/tutorial004_py310.py\n./docs_src/additional_responses/tutorial004_py39.py\n./docs_src/additional_status_codes\n./docs_src/additional_status_codes/__init__.py\n./docs_src/additional_status_codes/tutorial001_an_py310.py\n./docs_src/additional_status_codes/tutorial001_an_py39.py\n./docs_src/additional_status_codes/tutorial001_py310.py\n./docs_src/additional_status_codes/tutorial001_py39.py\n./docs_src/advanced_middleware\n./docs_src/advanced_middleware/__init__.py\n./docs_src/advanced_middleware/tutorial001_py39.py\n./docs_src/advanced_middleware/tutorial002_py39.py\n./docs_src/advanced_middleware/tutorial003_py39.py\n./docs_src/app_testing\n./docs_src/app_testing/__init__.py\n./docs_src/app_testing/app_a_py39\n./docs_src/app_testing/app_b_an_py310\n./docs_src/app_testing/app_b_an_py39\n./docs_src/app_testing/app_b_py310\n./docs_src/app_testing/app_b_py39\n./docs_src/app_testing/tutorial001_py39.py\n./docs_src/app_testing/tutorial002_py39.py\n./docs_src/app_testing/tutorial003_py39.py\n./docs_src/app_testing/tutorial004_py39.py\n./docs_src/async_tests\n./docs_src/async_tests/__init__.py\n./docs_src/async_tests/app_a_py39\n./docs_src/authentication_error_status_code\n./docs_src/authentication_error_status_code/__init__.py\n./docs_src/authentication_error_status_code/tutorial001_an_py39.py\n./docs_src/background_tasks\n./docs_src/background_tasks/__init__.py\n./docs_src/background_tasks/tutorial001_py39.py\n./docs_src/background_tasks/tutorial002_an_py310.py\n./docs_src/background_tasks/tutorial002_an_py39.py\n./docs_src/background_tasks/tutorial002_py310.py\n./docs_src/background_tasks/tutorial002_py39.py\n./docs_src/behind_a_proxy\n./docs_src/behind_a_proxy/__init__.py\n./docs_src/behind_a_proxy/tutorial001_01_py39.py\n./docs_src/behind_a_proxy/tutorial001_py39.py\n./docs_src/behind_a_proxy/tutorial002_py39.py\n./docs_src/behind_a_proxy/tutorial003_py39.py\n./docs_src/behind_a_proxy/tutorial004_py39.py\n./docs_src/bigger_applications\n./docs_src/bigger_applications/__init__.py\n./docs_src/bigger_applications/app_an_py39\n./docs_src/bigger_applications/app_py39\n./docs_src/body\n./docs_src/body/__init__.py\n```\n",
+      "extra": {
+        "event_type": "task_prompt",
+        "elapsed_s": 0.6276841163635254,
+        "timestamp": 1791402845.6185825,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1",
+          "function_name": "run_skill_script",
+          "arguments": {
+            "file_path": "install.py",
+            "skill_name": "swe-tools"
+          },
+          "extra": {
+            "elapsed_s": 7.436375141143799,
+            "timestamp": 1791402852.4272735,
+            "author": "setup",
+            "usage": {
+              "prompt_tokens": 6327,
+              "completion_tokens": 31,
+              "cached_tokens": 0,
+              "total_tokens": 6358
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"skill_name\": \"swe-tools\", \"file_path\": \"install.py\", \"stdout\": \"installed: ['_ws.py', 'check.py', 'edit.py', 'locate.py', 'test.py', 'view.py'] | helpers in ['/tmp/swegemma_sandbox_7425c72d-ddd_n6crg4yl/tmp/swe', '/tmp/swe']\\nusage: python3 /tmp/swe/edit.py FILE <<'EOF' (SEARCH/REPLACE block) | python3 /tmp/swe/locate.py \\\"<identifiers and keywords>\\\" | python3 /tmp/swe/test.py --target tests/test_x.py[::name] | python3 /tmp/swe/check.py --mode preflight|save|restore\\n\", \"stderr\": \"\", \"status\": \"success\"}",
+        "extra": {
+          "tool_name": "run_skill_script",
+          "elapsed_s": 7.463090896606445,
+          "timestamp": 1791402852.4539893,
+          "author": "setup"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6327,
+        "completion_tokens": 31,
+        "cached_tokens": 0,
+        "total_tokens": 6358
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 7.436375141143799,
+        "timestamp": 1791402852.4272735,
+        "author": "setup"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "message": "READY",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 6565,
+        "completion_tokens": 6,
+        "cached_tokens": 0,
+        "total_tokens": 6571
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 7.9304139614105225,
+        "timestamp": 1791402852.9213123,
+        "author": "setup"
+      }
+    },
+    {
+      "step_id": 4,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_4",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/locate.py \"process_response additional_response deep_dict_update\""
+          },
+          "extra": {
+            "elapsed_s": 13.243526935577393,
+            "timestamp": 1791402858.2344253,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 4520,
+              "completion_tokens": 37,
+              "cached_tokens": 0,
+              "total_tokens": 4557
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"workspace=/tmp/swegemma_sandbox_7425c72d-ddd_n6crg4yl/workspace symbols=6576\\n1. fastapi/utils.py  score=73.5\\n     def deep_dict_update  L131-146\\n     def create_model_field  L71-97\\n2. docs_src/python_types/tutorial008_py39.py  score=13.2\\n     def process_items  L1-4\\n3. docs_src/middleware/tutorial001_py39.py  score=12.6\\n     async def add_process_time_header  L9-14\\n4. fastapi/openapi/utils.py  score=11.4\\n     def get_openapi_path  L259-442\\n     def get_openapi_security_definitions  L78-101\\n     def get_openapi  L476-567\\n5. fastapi/dependencies/utils.py  score=10.7\\n     async def request_body_to_args  L916-963\\n     def request_params_to_args  L743-823\\n     class SolvedDependency  L555-560\\n     async def _extract_form_body  L869-913\\n6. fastapi/routing.py  score=9.9\\n     def APIRouter.__init__  L691-929\\n     def APIRouter.include_router  L1191-1433\\n     class APIRouter  L664-4508\\n     def APIRouter.api_route  L1032-1092\\n7. fastapi/applications.py  score=10.4\\n     def FastAPI.middleware  L4578-4622\\n     def FastAPI.include_router  L1336-1539\\n     def FastAPI.add_api_route  L1137-1194\\n     def FastAPI.api_route  L1196-1254\\n8. docs_src/extra_data_types/tutorial001_py310.py  score=9.1\\n     async def read_items  L10-27\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 14.076253175735474,
+          "timestamp": 1791402859.0671515,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 4520,
+        "completion_tokens": 37,
+        "cached_tokens": 0,
+        "total_tokens": 4557
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 13.243526935577393,
+        "timestamp": 1791402858.2344253,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 5,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_6",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "run_skill_script skill_name=\"swe-tools\" file_path=\"scripts/install.py\""
+          },
+          "extra": {
+            "elapsed_s": 15.995531558990479,
+            "timestamp": 1791402860.98643,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 5164,
+              "completion_tokens": 41,
+              "cached_tokens": 0,
+              "total_tokens": 5205
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"/bin/bash: line 1: run_skill_script: command not found\\n\", \"details\": {\"stdout\": \"\", \"stderr\": \"/bin/bash: line 1: run_skill_script: command not found\\n\", \"exit_code\": 127}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 15.999387979507446,
+          "timestamp": 1791402860.9902864,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5164,
+        "completion_tokens": 41,
+        "cached_tokens": 0,
+        "total_tokens": 5205
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 15.995531558990479,
+        "timestamp": 1791402860.98643,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 6,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_8",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/view.py fastapi/openapi/utils.py 370 420"
+          },
+          "extra": {
+            "elapsed_s": 17.59619927406311,
+            "timestamp": 1791402862.5870976,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 5295,
+              "completion_tokens": 43,
+              "cached_tokens": 0,
+              "total_tokens": 5338
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"370|                     status_code, {}\\n371|                 ).setdefault(\\\"content\\\", {}).setdefault(route_response_media_type, {})[\\n372|                     \\\"schema\\\"\\n373|                 ] = response_schema\\n374|             if route.responses:\\n375|                 operation_responses = operation.setdefault(\\\"responses\\\", {})\\n376|                 for (\\n377|                     additional_status_code,\\n378|                     additional_response,\\n379|                 ) in route.responses.items():\\n380|                     process_response = additional_response.copy()\\n381|                     process_response.pop(\\\"model\\\", None)\\n382|                     status_code_key = str(additional_status_code).upper()\\n383|                     if status_code_key == \\\"DEFAULT\\\":\\n384|                         status_code_key = \\\"default\\\"\\n385|                     openapi_response = operation_responses.setdefault(\\n386|                         status_code_key, {}\\n387|                     )\\n388|                     assert isinstance(process_response, dict), (\\n389|                         \\\"An additional response must be a dict\\\"\\n390|                     )\\n391|                     field = route.response_fields.get(additional_status_code)\\n392|                     additional_field_schema: Optional[dict[str, Any]] = None\\n393|                     if field:\\n394|                         additional_field_schema = get_schema_from_model_field(\\n395|                             field=field,\\n396|                             model_name_map=model_name_map,\\n397|                             field_mapping=field_mapping,\\n398|                             separate_input_output_schemas=separate_input_output_schemas,\\n399|                         )\\n400|                         media_type = route_response_media_type or \\\"application/json\\\"\\n401|                         additional_schema = (\\n402|                             process_response.setdefault(\\\"content\\\", {})\\n403|                             .setdefault(media_type, {})\\n404|                             .setdefault(\\\"schema\\\", {})\\n405|                         )\\n406|                         deep_dict_update(additional_schema, additional_field_schema)\\n407|                     status_text: Optional[str] = status_code_ranges.get(\\n408|                         str(additional_status_code).upper()\\n409|                     ) or http.client.responses.get(int(additional_status_code))\\n410|                     description = (\\n411|                         process_response.get(\\\"description\\\")\\n412|                         or openapi_response.get(\\\"description\\\")\\n413|                         or status_text\\n414|                         or \\\"Additional Response\\\"\\n415|                     )\\n416|                     deep_dict_update(openapi_response, process_response)\\n417|                     openapi_response[\\\"description\\\"] = description\\n418|             http422 = \\\"422\\\"\\n419|             all_route_params = get_flat_params(route.dependant)\\n420|             if (all_route_params or route.body_field) and not any(\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 17.617363214492798,
+          "timestamp": 1791402862.6082616,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5295,
+        "completion_tokens": 43,
+        "cached_tokens": 0,
+        "total_tokens": 5338
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 17.59619927406311,
+        "timestamp": 1791402862.5870976,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 7,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_10",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/view.py fastapi/utils.py 220 250"
+          },
+          "extra": {
+            "elapsed_s": 19.76352286338806,
+            "timestamp": 1791402864.7544212,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 6153,
+              "completion_tokens": 41,
+              "cached_tokens": 0,
+              "total_tokens": 6194
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"PAST END: fastapi/utils.py has 164 lines, so view a range inside 1-164 next\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 19.78468608856201,
+          "timestamp": 1791402864.7755845,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6153,
+        "completion_tokens": 41,
+        "cached_tokens": 0,
+        "total_tokens": 6194
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 19.76352286338806,
+        "timestamp": 1791402864.7544212,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 8,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_12",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/view.py fastapi/utils.py 130 150"
+          },
+          "extra": {
+            "elapsed_s": 21.150777101516724,
+            "timestamp": 1791402866.1416755,
+            "author": "locator",
+            "usage": {
+              "prompt_tokens": 6255,
+              "completion_tokens": 37,
+              "cached_tokens": 0,
+              "total_tokens": 6292
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"130| \\n131| def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:\\n132|     for key, value in update_dict.items():\\n133|         if (\\n134|             key in main_dict\\n135|             and isinstance(main_dict[key], dict)\\n136|             and isinstance(value, dict)\\n137|         ):\\n138|             deep_dict_update(main_dict[key], value)\\n139|         elif (\\n140|             key in main_dict\\n141|             and isinstance(main_dict[key], list)\\n142|             and isinstance(update_dict[key], list)\\n143|         ):\\n144|             main_dict[key] = main_dict[key] + update_dict[key]\\n145|         else:\\n146|             main_dict[key] = value\\n147| \\n148| \\n149| def get_value_or_default(\\n150|     first_item: Union[DefaultPlaceholder, DefaultType],\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 21.17135453224182,
+          "timestamp": 1791402866.162253,
+          "author": "locator"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6255,
+        "completion_tokens": 37,
+        "cached_tokens": 0,
+        "total_tokens": 6292
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 21.150777101516724,
+        "timestamp": 1791402866.1416755,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 9,
+      "source": "agent",
+      "message": "FILES: fastapi/openapi/utils.py:380\nROOT CAUSE: `additional_response` is shallowly copied using `.copy()`. When `process_response[\"content\"]` is modified (via `setdefault` and `deep_dict_update` at lines 402-406), the original `route.responses` object is mutated. Since app-level responses are shared across routes, the `anyOf` list in the schema accumulates duplicates for every route processed.\nCHANGE: Replace `process_response = additional_response.copy()` with a deep copy to prevent mutation of the shared `route.responses` object. I will use `copy.deepcopy(additional_response)`.\nTEST: A new test case reproducing the minimal example provided in the issue, verifying that `anyOf` refs are not duplicated in the generated OpenAPI JSON when multiple routes share an app-level response with both `model` (Union) and `content`.",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 6617,
+        "completion_tokens": 206,
+        "cached_tokens": 0,
+        "total_tokens": 6823
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 28.518894910812378,
+        "timestamp": 1791402873.5097933,
+        "author": "locator"
+      }
+    },
+    {
+      "step_id": 10,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_15",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "cat > /tmp/repro.py <<'EOF'\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of = responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"]\n\nprint(f\"Number of anyOf elements: {len(any_of)}\")\nassert len(any_of) == 2, f\"Expected 2 elements in anyOf, got {len(any_of)}\"\nEOF\n\ntimeout 30 python3 /tmp/repro.py\n"
+          },
+          "extra": {
+            "elapsed_s": 43.17407202720642,
+            "timestamp": 1791402888.1649704,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 5360,
+              "completion_tokens": 314,
+              "cached_tokens": 0,
+              "total_tokens": 5674
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_7425c72d-ddd_n6crg4yl/tmp/repro.py\\\", line 39, in <module>\\n    assert len(any_of) == 2, f\\\"Expected 2 elements in anyOf, got {len(any_of)}\\\"\\n           ^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 elements in anyOf, got 6\\n\", \"details\": {\"stdout\": \"Number of anyOf elements: 6\\n\", \"stderr\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_7425c72d-ddd_n6crg4yl/tmp/repro.py\\\", line 39, in <module>\\n    assert len(any_of) == 2, f\\\"Expected 2 elements in anyOf, got {len(any_of)}\\\"\\n           ^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 elements in anyOf, got 6\\n\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 43.42275810241699,
+          "timestamp": 1791402888.4136565,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5360,
+        "completion_tokens": 314,
+        "cached_tokens": 0,
+        "total_tokens": 5674
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 43.17407202720642,
+        "timestamp": 1791402888.1649704,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 11,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_17",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/view.py fastapi/openapi/utils.py 370 420\n"
+          },
+          "extra": {
+            "elapsed_s": 45.44412159919739,
+            "timestamp": 1791402890.43502,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 5959,
+              "completion_tokens": 44,
+              "cached_tokens": 0,
+              "total_tokens": 6003
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"ALREADY SHOWN: fastapi/openapi/utils.py lines 370-420 are unchanged since you saw them, so edit now with python3 /tmp/swe/edit.py or view different lines instead\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 45.46454691886902,
+          "timestamp": 1791402890.4554453,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5959,
+        "completion_tokens": 44,
+        "cached_tokens": 0,
+        "total_tokens": 6003
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 45.44412159919739,
+        "timestamp": 1791402890.43502,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 12,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_19",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/edit.py fastapi/openapi/utils.py <<'EOF'\n<<<<<<< SEARCH\nimport copy\n=======\nimport copy\nEOF\n>>>>>>> REPLACE\nEOF\n"
+          },
+          "extra": {
+            "elapsed_s": 47.63074994087219,
+            "timestamp": 1791402892.6216483,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 6083,
+              "completion_tokens": 60,
+              "cached_tokens": 0,
+              "total_tokens": 6143
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"/bin/bash: -c: line 7: syntax error near unexpected token `>>'\\n/bin/bash: -c: line 7: `>>>>>>> REPLACE'\\n\", \"details\": {\"stdout\": \"ERROR: the edit ended early (no ======= or no >>>>>>> REPLACE line arrived, often because a line EOF inside the block ended the heredoc), so nothing changed; put EOF once, as the last line, and send the whole edit again now\\n\", \"stderr\": \"/bin/bash: -c: line 7: syntax error near unexpected token `>>'\\n/bin/bash: -c: line 7: `>>>>>>> REPLACE'\\n\", \"exit_code\": 2}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 47.65120506286621,
+          "timestamp": 1791402892.6421034,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6083,
+        "completion_tokens": 60,
+        "cached_tokens": 0,
+        "total_tokens": 6143
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 47.63074994087219,
+        "timestamp": 1791402892.6216483,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 13,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_21",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/view.py fastapi/openapi/utils.py 1 50\n"
+          },
+          "extra": {
+            "elapsed_s": 49.26624941825867,
+            "timestamp": 1791402894.2571478,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 6322,
+              "completion_tokens": 41,
+              "cached_tokens": 0,
+              "total_tokens": 6363
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"1| import http.client\\n2| import inspect\\n3| import warnings\\n4| from collections.abc import Sequence\\n5| from typing import Any, Optional, Union, cast\\n6| \\n7| from fastapi import routing\\n8| from fastapi._compat import (\\n9|     ModelField,\\n10|     Undefined,\\n11|     get_compat_model_name_map,\\n12|     get_definitions,\\n13|     get_schema_from_model_field,\\n14|     lenient_issubclass,\\n15| )\\n16| from fastapi.datastructures import DefaultPlaceholder\\n17| from fastapi.dependencies.models import Dependant\\n18| from fastapi.dependencies.utils import (\\n19|     _get_flat_fields_from_params,\\n20|     get_flat_dependant,\\n21|     get_flat_params,\\n22|     get_validation_alias,\\n23| )\\n24| from fastapi.encoders import jsonable_encoder\\n25| from fastapi.exceptions import FastAPIDeprecationWarning\\n26| from fastapi.openapi.constants import METHODS_WITH_BODY, REF_PREFIX\\n27| from fastapi.openapi.models import OpenAPI\\n28| from fastapi.params import Body, ParamTypes\\n29| from fastapi.responses import Response\\n30| from fastapi.types import ModelNameMap\\n31| from fastapi.utils import (\\n32|     deep_dict_update,\\n33|     generate_operation_id_for_path,\\n34|     is_body_allowed_for_status_code,\\n35| )\\n36| from pydantic import BaseModel\\n37| from starlette.responses import JSONResponse\\n38| from starlette.routing import BaseRoute\\n39| from typing_extensions import Literal\\n40| \\n41| validation_error_definition = {\\n42|     \\\"title\\\": \\\"ValidationError\\\",\\n43|     \\\"type\\\": \\\"object\\\",\\n44|     \\\"properties\\\": {\\n45|         \\\"loc\\\": {\\n46|             \\\"title\\\": \\\"Location\\\",\\n47|             \\\"type\\\": \\\"array\\\",\\n48|             \\\"items\\\": {\\\"anyOf\\\": [{\\\"type\\\": \\\"string\\\"}, {\\\"type\\\": \\\"integer\\\"}]},\\n49|         },\\n50|         \\\"msg\\\": {\\\"title\\\": \\\"Message\\\", \\\"type\\\": \\\"string\\\"},\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 49.28645372390747,
+          "timestamp": 1791402894.277352,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6322,
+        "completion_tokens": 41,
+        "cached_tokens": 0,
+        "total_tokens": 6363
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 49.26624941825867,
+        "timestamp": 1791402894.2571478,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 14,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_23",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/edit.py fastapi/openapi/utils.py <<'EOF'\n<<<<<<< SEARCH\nfrom typing_extensions import Literal\n=======\nimport copy\nfrom typing_extensions import Literal\n>>>>>>> REPLACE\nEOF\n"
+          },
+          "extra": {
+            "elapsed_s": 52.23611831665039,
+            "timestamp": 1791402897.2270167,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 6971,
+              "completion_tokens": 69,
+              "cached_tokens": 0,
+              "total_tokens": 7040
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"OK fastapi/openapi/utils.py: lines 39-39 replaced (1 -> 2 lines)\\nNow:\\n36| from pydantic import BaseModel\\n37| from starlette.responses import JSONResponse\\n38| from starlette.routing import BaseRoute\\n39| import copy\\n40| from typing_extensions import Literal\\n41| \\n42| validation_error_definition = {\\n43|     \\\"title\\\": \\\"ValidationError\\\",\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 52.26406812667847,
+          "timestamp": 1791402897.2549665,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6971,
+        "completion_tokens": 69,
+        "cached_tokens": 0,
+        "total_tokens": 7040
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 52.23611831665039,
+        "timestamp": 1791402897.2270167,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 15,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_25",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/edit.py fastapi/openapi/utils.py <<'EOF'\n<<<<<<< SEARCH\n        process_response = additional_response.copy()\n=======\n        process_response = copy.deepcopy(additional_response)\n>>>>>>> REPLACE\nEOF\n"
+          },
+          "extra": {
+            "elapsed_s": 55.01849722862244,
+            "timestamp": 1791402900.0093956,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 7182,
+              "completion_tokens": 74,
+              "cached_tokens": 0,
+              "total_tokens": 7256
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"OK fastapi/openapi/utils.py: lines 381-381 replaced (1 -> 1 lines, matched by strip)\\nNow:\\n378|                     additional_status_code,\\n379|                     additional_response,\\n380|                 ) in route.responses.items():\\n381|                     process_response = copy.deepcopy(additional_response)\\n382|                     process_response.pop(\\\"model\\\", None)\\n383|                     status_code_key = str(additional_status_code).upper()\\n384|                     if status_code_key == \\\"DEFAULT\\\":\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 55.04977035522461,
+          "timestamp": 1791402900.0406687,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7182,
+        "completion_tokens": 74,
+        "cached_tokens": 0,
+        "total_tokens": 7256
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 55.01849722862244,
+        "timestamp": 1791402900.0093956,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 16,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_27",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "timeout 30 python3 /tmp/repro.py\n"
+          },
+          "extra": {
+            "elapsed_s": 56.223602533340454,
+            "timestamp": 1791402901.214501,
+            "author": "fixer",
+            "usage": {
+              "prompt_tokens": 7436,
+              "completion_tokens": 28,
+              "cached_tokens": 0,
+              "total_tokens": 7464
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"Number of anyOf elements: 2\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 56.42149877548218,
+          "timestamp": 1791402901.4123971,
+          "author": "fixer"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7436,
+        "completion_tokens": 28,
+        "cached_tokens": 0,
+        "total_tokens": 7464
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 56.223602533340454,
+        "timestamp": 1791402901.214501,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 17,
+      "source": "agent",
+      "message": "I have fixed the issue where app-level responses with both a `model` (as a `Union`) and `content` caused duplicate `$ref` entries in the `anyOf` array of the generated OpenAPI schema.\n\nThe root cause was a shallow copy (`.copy()`) of the `additional_response` dictionary in `fastapi/openapi/utils.py`. Since app-level responses are shared across all routes, modifying the `content` dictionary (which happened during schema generation) mutated the shared object, leading to cumulative duplication for each route.\n\nI replaced the shallow copy with `copy.deepcopy(additional_response)` to ensure that each route processes its own independent copy of the response definition.\n\n**Changes:**\n- Modified `fastapi/openapi/utils.py`:\n    - Added `import copy`.\n    - Changed `process_response = additional_response.copy()` to `process_response = copy.deepcopy(additional_response)`.\n\nThe fix was verified using the provided minimal reproducible example, which now correctly produces 2 elements in the `anyOf` array instead of 6.",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 7509,
+        "completion_tokens": 236,
+        "cached_tokens": 0,
+        "total_tokens": 7745
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 64.57837080955505,
+        "timestamp": 1791402909.5692692,
+        "author": "fixer"
+      }
+    },
+    {
+      "step_id": 18,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_30",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "git diff"
+          },
+          "extra": {
+            "elapsed_s": 70.2711353302002,
+            "timestamp": 1791402915.2620337,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 5573,
+              "completion_tokens": 16,
+              "cached_tokens": 0,
+              "total_tokens": 5589
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"diff --git a/fastapi/openapi/utils.py b/fastapi/openapi/utils.py\\nindex 75ff2610..6b58c8e5 100644\\n--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -36,6 +36,7 @@ from fastapi.utils import (\\n from pydantic import BaseModel\\n from starlette.responses import JSONResponse\\n from starlette.routing import BaseRoute\\n+import copy\\n from typing_extensions import Literal\\n \\n validation_error_definition = {\\n@@ -377,7 +378,7 @@ def get_openapi_path(\\n                     additional_status_code,\\n                     additional_response,\\n                 ) in route.responses.items():\\n-                    process_response = additional_response.copy()\\n+                    process_response = copy.deepcopy(additional_response)\\n                     process_response.pop(\\\"model\\\", None)\\n                     status_code_key = str(additional_status_code).upper()\\n                     if status_code_key == \\\"DEFAULT\\\":\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 70.27647256851196,
+          "timestamp": 1791402915.267371,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5573,
+        "completion_tokens": 16,
+        "cached_tokens": 0,
+        "total_tokens": 5589
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 70.2711353302002,
+        "timestamp": 1791402915.2620337,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 19,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_32",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "cat > /tmp/repro.py <<'EOF'\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nfrom fastapi.openapi.utils import get_openapi\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\nopenapi_schema = get_openapi(app, app.title, app.version, app.openapi_version, app.description, app.routes)\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_list = responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"]\n\n# Each model in the Union should appear exactly once.\n# ModelA | ModelB -> 2 refs.\nassert len(any_of_list) == 2, f\"Expected 2 refs in anyOf, got {len(any_of_list)}: {any_of_list}\"\nEOF\npython3 /tmp/repro.py; echo EXIT=$?"
+          },
+          "extra": {
+            "elapsed_s": 83.18833446502686,
+            "timestamp": 1791402928.1792328,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 5887,
+              "completion_tokens": 373,
+              "cached_tokens": 0,
+              "total_tokens": 6260
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"EXIT=1\\n\", \"stderr\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_7425c72d-ddd_n6crg4yl/tmp/repro.py\\\", line 35, in <module>\\n    openapi_schema = get_openapi(app, app.title, app.version, app.openapi_version, app.description, app.routes)\\n                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\\nTypeError: get_openapi() takes 0 positional arguments but 6 were given\\n\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 83.39993667602539,
+          "timestamp": 1791402928.390835,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 5887,
+        "completion_tokens": 373,
+        "cached_tokens": 0,
+        "total_tokens": 6260
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 83.18833446502686,
+        "timestamp": 1791402928.1792328,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 20,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_34",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"from fastapi.openapi.utils import get_openapi; import inspect; print(inspect.signature(get_openapi))\""
+          },
+          "extra": {
+            "elapsed_s": 85.53678774833679,
+            "timestamp": 1791402930.527686,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 6431,
+              "completion_tokens": 48,
+              "cached_tokens": 0,
+              "total_tokens": 6479
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"(*, title: str, version: str, openapi_version: str = '3.1.0', summary: Optional[str] = None, description: Optional[str] = None, routes: collections.abc.Sequence[starlette.routing.BaseRoute], webhooks: Optional[collections.abc.Sequence[starlette.routing.BaseRoute]] = None, tags: Optional[list[dict[str, Any]]] = None, servers: Optional[list[dict[str, Union[str, Any]]]] = None, terms_of_service: Optional[str] = None, contact: Optional[dict[str, Union[str, Any]]] = None, license_info: Optional[dict[str, Union[str, Any]]] = None, separate_input_output_schemas: bool = True, external_docs: Optional[dict[str, Any]] = None) -> dict[str, typing.Any]\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 85.71287846565247,
+          "timestamp": 1791402930.7037768,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6431,
+        "completion_tokens": 48,
+        "cached_tokens": 0,
+        "total_tokens": 6479
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 85.53678774833679,
+        "timestamp": 1791402930.527686,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 21,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_36",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "cat > /tmp/repro.py <<'EOF'\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nfrom fastapi.openapi.utils import get_openapi\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\nopenapi_schema = get_openapi(\n    title=app.title,\n    version=app.version,\n    openapi_version=app.openapi_version,\n    description=app.description,\n    routes=app.routes\n)\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of_list = responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"]\n\n# Each model in the Union should appear exactly once.\n# ModelA | ModelB -> 2 refs.\nassert len(any_of_list) == 2, f\"Expected 2 refs in anyOf, got {len(any_of_list)}: {any_of_list}\"\nEOF\npython3 /tmp/repro.py; echo EXIT=$?"
+          },
+          "extra": {
+            "elapsed_s": 99.42809796333313,
+            "timestamp": 1791402944.4189963,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 6710,
+              "completion_tokens": 394,
+              "cached_tokens": 0,
+              "total_tokens": 7104
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"EXIT=0\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 99.63288283348083,
+          "timestamp": 1791402944.6237812,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6710,
+        "completion_tokens": 394,
+        "cached_tokens": 0,
+        "total_tokens": 7104
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 99.42809796333313,
+        "timestamp": 1791402944.4189963,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 22,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_38",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 /tmp/swe/check.py --mode preflight"
+          },
+          "extra": {
+            "elapsed_s": 101.0077555179596,
+            "timestamp": 1791402945.998654,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7140,
+              "completion_tokens": 28,
+              "cached_tokens": 0,
+              "total_tokens": 7168
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"DIFF:\\nfastapi/openapi/utils.py | 3 ++-\\n 1 file changed, 2 insertions(+), 1 deletion(-)\\nPROBLEMS:\\nnone\\nREADY to submit_patch\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 101.0473108291626,
+          "timestamp": 1791402946.0382092,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7140,
+        "completion_tokens": 28,
+        "cached_tokens": 0,
+        "total_tokens": 7168
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 101.0077555179596,
+        "timestamp": 1791402945.998654,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 23,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_40",
+          "function_name": "submit_patch",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 101.61615443229675,
+            "timestamp": 1791402946.6070528,
+            "author": "verifier",
+            "usage": {
+              "prompt_tokens": 7250,
+              "completion_tokens": 13,
+              "cached_tokens": 0,
+              "total_tokens": 7263
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"patch_size\": 915, \"files_changed\": 1}",
+        "extra": {
+          "tool_name": "submit_patch",
+          "elapsed_s": 101.62785482406616,
+          "timestamp": 1791402946.6187532,
+          "author": "verifier"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7250,
+        "completion_tokens": 13,
+        "cached_tokens": 0,
+        "total_tokens": 7263
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 101.61615443229675,
+        "timestamp": 1791402946.6070528,
+        "author": "verifier"
+      }
+    },
+    {
+      "step_id": 24,
+      "source": "agent",
+      "message": "The fix replaces a shallow copy with a deep copy in `fastapi/openapi/utils.py` to prevent mutation of shared app-level response definitions, which previously caused duplicate `$ref` entries in the `anyOf` array of the generated OpenAPI schema. This has been verified with a reproduction script.",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 7295,
+        "completion_tokens": 67,
+        "cached_tokens": 0,
+        "total_tokens": 7362
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 103.98821187019348,
+        "timestamp": 1791402948.9791102,
+        "author": "verifier"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 146004,
+    "total_completion_tokens": 2247,
+    "total_cached_tokens": 0,
+    "total_tokens": 148251,
+    "total_steps": 24
+  }
+}
