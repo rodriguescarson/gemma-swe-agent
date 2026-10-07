@@ -75,3 +75,6 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T20:15:54Z | step=v7_p4 | done=28/74 | solved=11 | empty=2 | errors=0 | median_s=91.9 | cap=0 | gpu=100% | disk_free=901GB | restarts=0
 - 2026-10-07T21:15:57Z | step=v7_p4 | done=58/74 | solved=21 | empty=9 | errors=0 | median_s=99.3 | cap=2 | gpu=100% | disk_free=901GB | restarts=0
 - 2026-10-07T22:01:30Z | step=v7_p4 | END done: done=74/74 solved=27
+- 2026-10-07T22:01:33Z | step=v7_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=0
+- 2026-10-07T22:01:33Z | step=v7_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v7 rc=0
+- 2026-10-07T22:01:36Z | step=v7_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
