@@ -87,11 +87,11 @@ def test_the_cap_ledger_lives_in_the_sandbox_tmp_next_to_the_views_log(m):
     for _ in range(3):
         assert "workspace=" in m.run_command('python3 /tmp/swe/locate.py "f"').stdout
     assert m.run_command('python3 /tmp/swe/locate.py "f"').stdout.strip() == SEARCH_CAP
-    for i in range(8):
+    for i in range(14):
         assert m.run_command(f"python3 /tmp/swe/view.py m.py {10 * i + 1}-{10 * i + 5}").stdout.startswith(f"{10 * i + 1}| ")
     assert m.run_command("python3 /tmp/swe/view.py m.py 200 210").stdout.strip() == READ_CAP
     led = json.loads((swe / ".ledger.json").read_text())
-    assert led == {"locate": 3, "view": 8, "edited": False}, led
+    assert led == {"locate": 3, "view": 14, "edited": False}, led
     assert (swe / ".views.json").exists()                                   # the ledger sits next to the views log
     assert json.loads(m.run_command("cat /tmp/swe/.ledger.json").stdout) == led   # the command's /tmp is that dir
     ok = m.run_command("python3 /tmp/swe/edit.py pkg/mod.py --lines 2-2 <<'EOF'\n    return x * 2\nEOF")
