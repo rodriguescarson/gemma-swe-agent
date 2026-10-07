@@ -1132,11 +1132,26 @@ def test_hidden_test_demands_never_in_model_visible_text():
                 assert sentence not in g["plan"], (g["task"], sentence)
 
 
+def test_runnable_flags_match_this_machine():
+    """`runnable` is the live has_snapshot + kpar_ok verdict where the fixtures were built (the Mac: 74 of 74). A
+    checkout without the gitignored snapshots (data/raw/snapshots) or the kpar venvs (~/.cache/g4/kpar) cannot
+    re-derive it, which is not a fixture error (A6000 box, 2026-10-07: 'AssertionError: fastapi_11194', the first task
+    in the file); a task this machine CAN run that the fixture calls unrunnable is a stale fixture and fails."""
+    fx = json.loads(F.TASK_FIXTURES_FILE.read_text())["tasks"]
+    live = {tid: F.runnable(tid) for tid in fx}
+    stale = [tid for tid, (ok, _) in live.items() if ok and not fx[tid]["runnable"]]
+    assert not stale, stale
+    absent = [tid for tid, (ok, _) in live.items() if not ok and fx[tid]["runnable"]]
+    if absent:
+        pytest.skip(f"{len(absent)} of {len(fx)} runnable tasks lack a local snapshot or kpar venv (gitignored), e.g. "
+                    f"{absent[0]}: {live[absent[0]][1]}")
+
+
 def test_every_runnable_task_has_evidence_or_a_reason():
+    """The fixture's own bookkeeping; whether this machine can run each task is test_runnable_flags_match_this_machine."""
     fx = json.loads(F.TASK_FIXTURES_FILE.read_text())["tasks"]
     assert len(fx) == 74
     for tid, f in fx.items():
-        assert f["runnable"] == F.runnable(tid)[0], tid
         if not f["runnable"]:
             assert f["runnable_why"] and f["gradable"] is False and f["gradable_why"].startswith("not measured")
             continue
