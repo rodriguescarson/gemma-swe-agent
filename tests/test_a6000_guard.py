@@ -82,7 +82,8 @@ def test_run_eval_rows_carry_a_finish_time():
 # ------------------------------------------------------------------ the supervisor pauses a contended step, waits for a free GPU, purges and resumes
 def _sup(tmp_path, plan, state, fake_util_file, seconds, extra_env=None):
     (tmp_path / "plan.json").write_text(json.dumps(plan)); (tmp_path / "state.json").write_text(json.dumps(state))
-    env = dict(os.environ, AUTOPILOT_LOG=str(tmp_path / "log.md"), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1",
+    (tmp_path / "g4").mkdir(exist_ok=True)            # autopilot.py writes step logs to ~/g4: a tmp one, never the box's
+    env = dict(os.environ, HOME=str(tmp_path), AUTOPILOT_LOG=str(tmp_path / "log.md"), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1",
                AUTOPILOT_CONT_CHECK_S="2", AUTOPILOT_FREE_POLL_S="1", AUTOPILOT_FREE_SAMPLES="3", AUTOPILOT_FAKE_GPU_UTIL=str(fake_util_file), **(extra_env or {}))
     p = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "a6000" / "autopilot.py"), "--plan", str(tmp_path / "plan.json"), "--state", str(tmp_path / "state.json")],
                          env=env, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -62,6 +62,8 @@ def test_final_summary_survives_steps_that_never_ran(tmp_path):
 
 def test_build_reports_cleanly_when_p3_never_ran(tmp_path, capsys):
     b = _mod("p3_build")
+    if not pathlib.Path(b.PY).exists():         # off the box (no ~/g4/venv): the build steps run under this interpreter
+        b.PY = sys.executable
     assert b.main(["--out", str(tmp_path / "never_created"), "--no-append"]) == 0
     out = capsys.readouterr().out
     assert "P3 did not run" in out and "0" in out

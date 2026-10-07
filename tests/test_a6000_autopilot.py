@@ -103,12 +103,15 @@ def test_p4_purge_drops_only_infra_error_rows(tmp_path):
 
 
 # ---------------------------------------------------------------- the missing-PID restart bug (21:48 duplicate runner)
-import json, os, signal, subprocess, time
+import json, os, shutil, signal, subprocess, time
+
+import pytest
 
 
 def _run_supervisor(tmp_path, plan, state, seconds, log_name="log.md"):
     (tmp_path / "plan.json").write_text(json.dumps(plan)); (tmp_path / "state.json").write_text(json.dumps(state))
-    env = dict(os.environ, AUTOPILOT_LOG=str(tmp_path / log_name), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1")
+    (tmp_path / "g4").mkdir(exist_ok=True)            # autopilot.py writes step logs to ~/g4: a tmp one, never the box's
+    env = dict(os.environ, HOME=str(tmp_path), AUTOPILOT_LOG=str(tmp_path / log_name), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1")
     p = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "a6000" / "autopilot.py"), "--plan", str(tmp_path / "plan.json"), "--state", str(tmp_path / "state.json")],
                          env=env, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(seconds)
@@ -131,7 +134,7 @@ def test_a_fresh_supervisor_records_the_childs_pid_in_the_state_file(tmp_path):
         _run_supervisor(tmp_path, _plan(marker), {"done": [], "restarts": {}, "launch_epoch": time.time(), "results": {}}, 4)
         st = json.loads((tmp_path / "state.json").read_text())
         assert st.get("child_step") == "t1" and isinstance(st.get("child"), int)         # without this a restarted supervisor cannot adopt
-        assert os.path.exists(f"/proc/{st['child']}") and _count(marker) == 1
+        assert os.kill(st["child"], 0) is None and _count(marker) == 1                  # alive (raises if not); /proc is Linux-only
     finally:
         subprocess.run(["pkill", "-fx", f"sleep {marker}"])
 
@@ -161,8 +164,11 @@ def test_adopted_poll_follows_the_pid():
 def test_an_idle_supervisor_with_an_open_plan_still_writes_hourly_health_lines(tmp_path):
     plan = {"open": True, "steps": [{"name": "done_step", "total": 1, "docker": False, "cmd": ["true"], "proxy": None, "stats": {"type": "results_jsonl", "file": "/nonexistent.jsonl"}, "post": []}]}
     state = {"done": ["done_step"], "restarts": {}, "launch_epoch": time.time(), "results": {}}
+    if not shutil.which("nvidia-smi"):
+        pytest.skip("the health line reads GPU utilisation with nvidia-smi (the A6000 box)")
     (tmp_path / "plan.json").write_text(json.dumps(plan)); (tmp_path / "state.json").write_text(json.dumps(state))
-    env = dict(os.environ, AUTOPILOT_LOG=str(tmp_path / "log.md"), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1", AUTOPILOT_HEALTH_S="2", AUTOPILOT_IDLE_S="1")
+    (tmp_path / "g4").mkdir(exist_ok=True)            # disk_free reads ~/g4: a tmp one
+    env = dict(os.environ, HOME=str(tmp_path), AUTOPILOT_LOG=str(tmp_path / "log.md"), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1", AUTOPILOT_HEALTH_S="2", AUTOPILOT_IDLE_S="1")
     p = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "a6000" / "autopilot.py"), "--plan", str(tmp_path / "plan.json"), "--state", str(tmp_path / "state.json")],
                          env=env, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

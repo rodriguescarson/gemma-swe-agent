@@ -20,7 +20,17 @@ def test_syntax_and_strict_mode():
     assert "set -euo pipefail" in S.read_text()
 
 
+def _gnu_paste():
+    """serve.sh filters PATH with `paste -sd:` (no '-'): GNU paste reads stdin, BSD paste (macOS) prints its usage and
+    serve.sh stops at that line, so running it needs the box's Linux userland."""
+    return subprocess.run(["paste", "-sd:"], input="a\nb\n", capture_output=True, text=True).stdout.strip() == "a:b"
+
+
 def _need_adk():
+    if not _gnu_paste():
+        pytest.skip("serve.sh runs on the A6000 box: its PATH filter needs GNU paste (BSD paste wants '-')")
+    if not os.path.exists(PY):
+        pytest.skip(f"the A6000 box's venv is not here: {PY} (G4_PY overrides)")
     if subprocess.run([PY, "-c", "import adk_submission"], capture_output=True).returncode:
         pytest.skip("adk_submission not installed in " + PY)
 
@@ -61,6 +71,8 @@ def test_expandable_segments_not_set_on_wsl():
 def test_windows_dirs_removed_from_path():
     t = S.read_text()
     assert "grep -v '^/mnt/'" in t
+    if not _gnu_paste():
+        pytest.skip("serve.sh runs on the A6000 box: its PATH filter needs GNU paste (BSD paste wants '-')")
     r = subprocess.run(["bash", "-c", "PATH=/mnt/c/Windows:/usr/bin:/bin:/mnt/c/x; " + t.split("PATH=", 1)[1].split("export PATH")[0].join(["PATH=", ""]) + " echo $PATH"],
                        capture_output=True, text=True)
     assert "/mnt/" not in r.stdout and "/usr/bin" in r.stdout
