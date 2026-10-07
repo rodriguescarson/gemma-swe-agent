@@ -12,7 +12,8 @@ TRAINER=${TRAINER:-".venv/bin/python train/adaption_train.py"}; MARKER=${MARKER:
 SINCE=${SINCE_EPOCH:-$(date -u +%s)}; POLL=${READY_POLL_S:-600}; MAX=${READY_MAX_POLLS:-0}
 LOG=${SEQ_LOG:-eval/overnight/progress.log}; mkdir -p "$(dirname "$LOG")" "$(dirname "$MARKER")"
 step() { echo "$(date -u +%FT%TZ) [$(TZ=Asia/Kolkata date +%H:%M)IST] train_when_ready: $*" | tee -a "$LOG"; }
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+# python, not stat: GNU stat reads `-f` as --file-system and prints the file system's status (tests/gnu_stat.py)
+mtime() { python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$1"; }
 [ -f "$MARKER" ] && { step "already launched ($MARKER exists); nothing to do"; exit 0; }
 n=0
 while :; do

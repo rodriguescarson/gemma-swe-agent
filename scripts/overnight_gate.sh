@@ -14,7 +14,8 @@ KAGGLE=${KAGGLE_BIN:-$(command -v kaggle || ls "$HOME"/Library/Python/3.*/bin/ka
 POLL=${GATE_POLL_S:-600}; MAX=${GATE_MAX_POLLS:-0}
 now() { echo "${FAKE_NOW_EPOCH:-$(date -u +%s)}"; }   # FAKE_NOW_EPOCH: tests only
 day_start() { python3 -c "import datetime as d; n=d.datetime.fromtimestamp($(now), d.timezone.utc); print(int(n.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()))"; }
-mtime() { stat -f %m "$1" 2>/dev/null || stat -c %Y "$1"; }
+# python, not stat: GNU stat reads `-f` as --file-system and prints the file system's status (tests/gnu_stat.py)
+mtime() { python3 -c 'import os, sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$1"; }
 n=0
 while :; do
   n=$((n + 1)); reason=""
