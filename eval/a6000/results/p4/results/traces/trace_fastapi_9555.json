@@ -1,0 +1,94 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "user",
+      "message": "You are evaluating a software engineering task for repository fastapi/fastapi.\n\nProblem Statement:\n\u2728 Handle wrapped dependencies\n\nUse the unwrapped call in `solve_dependencies` to determine if a dependency is a coroutine or (async) generator.\r\n\r\nSince non-async dependencies are run in a threadpool, it's generally preferably to use async dependencies. For dependencies that will not change during the lifetime of the server (like settings), it's preferable to use `functools.cache` to avoid duplicate work. There are two issues with this.\r\n\r\nFirst is that `@cache` will cache the coroutine itself not the result, so the first call will succeed; however, subsequent calls will fail with `RuntimeError: cannot reuse already awaited coroutine`. This is fixable with @serhiy-storchaka's `reawaitable` decorator outlined in  https://github.com/python/cpython/issues/90780 .\r\n\r\nThe second issue is that when solving dependencies, FastAPI does not consider the `__wrapped__` attribute, so because the `lru_cache_wrapper` object is not a coroutine, FastAPI will not attempt to await it. In the example below this results in an error `AttributeError: 'coroutine' object has no attribute 'foo'`. This is the issue this PR solves by calling `inspect.unwrap` on the dependency call and using the unwrapped call to determine what type it is.\r\n\r\n```py3\r\nfrom functools import cache\r\nfrom functools import wraps\r\nfrom typing import Awaitable\r\nfrom typing import Callable\r\nfrom typing import Generic\r\nfrom typing import Iterator\r\nfrom typing import ParamSpec\r\nfrom typing import TypeVar\r\n\r\nfrom fastapi import Depends\r\nfrom fastapi import FastAPI\r\nfrom pydantic import BaseSettings\r\n\r\n\r\nP = ParamSpec('P')\r\nT = TypeVar('T')\r\n\r\n\r\n# Based off https://github.com/python/cpython/issues/90780#issuecomment-1093943964\r\nclass Reawaitable(Generic[T]):\r\n    __sentinel = object()\r\n\r\n    def __init__(self, awaitable: Awaitable[T]) -> None:\r\n        self.awaitable = awaitable\r\n        self.result = self.__sentinel\r\n\r\n    def __await__(self) -> Iterator[T]:\r\n        if self.result is self.__sentinel:\r\n            self.result = yield from self.awaitable.__await__()\r\n        return self.result\r\n\r\n\r\ndef reawaitable(func: Callable[P, Awaitable[T]]) -> Callable[P, Reawaitable[T]]:\r\n    @wraps(func)\r\n    def wrapper(*args: P.args, **kwargs: P.kwargs) -> Reawaitable[T]:\r\n        return Reawaitable(func(*args, **kwargs))\r\n    return wrapper\r\n\r\n\r\nclass Settings(BaseSettings):\r\n    foo: str = 'bar'\r\n\r\n\r\napp = FastAPI()\r\n\r\n\r\n@cache\r\n@reawaitable\r\nasync def get_settings() -> Settings:\r\n    return Settings()\r\n\r\n\r\n@app.get('/foo')\r\nasync def foo(settings: Settings = Depends(get_settings)) -> str:\r\n    return settings.foo\r\n```\r\n\r\nIf anyone comes across this in the mean time, a reasonable workaround is to wrap the cached function in an undecorated function. \r\n\r\n```py3\r\nasync def get_settings() -> Settings:\r\n    return await _get_settings()\r\n\r\n\r\n@cache\r\n@reawaitable\r\nasync def _get_settings() -> Settings:\r\n    return Settings()\r\n```\r\n\r\n(Related to #5077)\n\n## Task Budget (Session terminates when any budget is exhausted)\n- Time allowance: 5.0 minutes\n- Tool calls allowance: 70 calls\n- Max loop iterations: 150 turns\n\n## Execution Environment Rules\n- Single command timeout: 180 seconds (commands exceeding this fail without ending the session)\n- Command output limit: 5000 characters\n- File view limit: 150 lines per read_file call\n- File character limit: 10000 characters per read_file call\n- Environment is offline (no network/PyPI access). All repository and test dependencies are ALREADY pre-installed. Do NOT attempt to run pip install or download packages.\n\n## Instructions:\n0. All source code is under `/workspace`. Do NOT search outside `/workspace` (e.g. `/usr/`, `/wheels/`, system site-packages). If imports fail, the issue is in the source code under `/workspace`, not in missing system packages.\n1. Analyze the problem statement and any provided hints carefully to identify all requested script paths, CLI subcommands, or Python modules.\n2. Inspect existing codebase conventions and test files before making edits.\n3. Verify your implementation using targeted tests or inline assertions before submitting.\n4. Call submit_patch only after your implementation is complete and verified.\n5. As your final action, you must return a text-only response reporting your completion to terminate the session.\n## Code Intelligence Tools\nThis repository has pre-built code graph and embedding data. Use these tools for fast, targeted navigation:\n- `search_similar_code(query)`: Find semantically similar functions/classes by keyword.\n- `get_code_neighbors(node)`: Find callers, callees, and definitions related to a symbol.\n- `get_code_subgraph(nodes)`: Get the induced subgraph for a set of symbols.\n\n## Workspace Layout\nThe repository is located at `/workspace`. Here is the directory tree (up to 3 levels):\n```\n.\n./.git\n./.github\n./.github/DISCUSSION_TEMPLATE\n./.github/DISCUSSION_TEMPLATE/questions.yml\n./.github/DISCUSSION_TEMPLATE/translations.yml\n./.github/FUNDING.yml\n./.github/ISSUE_TEMPLATE\n./.github/ISSUE_TEMPLATE/config.yml\n./.github/ISSUE_TEMPLATE/privileged.yml\n./.github/dependabot.yml\n./.github/labeler.yml\n./.github/workflows\n./.github/workflows/add-to-project.yml\n./.github/workflows/build-docs.yml\n./.github/workflows/contributors.yml\n./.github/workflows/deploy-docs.yml\n./.github/workflows/detect-conflicts.yml\n./.github/workflows/issue-manager.yml\n./.github/workflows/label-approved.yml\n./.github/workflows/labeler.yml\n./.github/workflows/latest-changes.yml\n./.github/workflows/notify-translations.yml\n./.github/workflows/people.yml\n./.github/workflows/pre-commit.yml\n./.github/workflows/publish.yml\n./.github/workflows/smokeshow.yml\n./.github/workflows/sponsors.yml\n./.github/workflows/test-redistribute.yml\n./.github/workflows/test.yml\n./.github/workflows/topic-repos.yml\n./.github/workflows/translate.yml\n./.gitignore\n./.pre-commit-config.yaml\n./CITATION.cff\n./CONTRIBUTING.md\n./LICENSE\n./README.md\n./SECURITY.md\n./conftest.py\n./docs\n./docs/de\n./docs/de/docs\n./docs/de/llm-prompt.md\n./docs/de/mkdocs.yml\n./docs/em\n./docs/em/docs\n./docs/em/mkdocs.yml\n./docs/en\n./docs/en/data\n./docs/en/docs\n./docs/en/mkdocs.env.yml\n./docs/en/mkdocs.yml\n./docs/en/overrides\n./docs/es\n./docs/es/docs\n./docs/es/llm-prompt.md\n./docs/es/mkdocs.yml\n./docs/fa\n./docs/fa/docs\n./docs/fa/mkdocs.yml\n./docs/fr\n./docs/fr/docs\n./docs/fr/mkdocs.yml\n./docs/ja\n./docs/ja/docs\n./docs/ja/mkdocs.yml\n./docs/ko\n./docs/ko/docs\n./docs/ko/mkdocs.yml\n./docs/language_names.yml\n./docs/missing-translation.md\n./docs/pt\n./docs/pt/docs\n./docs/pt/llm-prompt.md\n./docs/pt/mkdocs.yml\n./docs/ru\n./docs/ru/docs\n./docs/ru/llm-prompt.md\n./docs/ru/mkdocs.yml\n./docs/tr\n./docs/tr/docs\n./docs/tr/mkdocs.yml\n./docs/uk\n./docs/uk/docs\n./docs/uk/mkdocs.yml\n./docs/vi\n./docs/vi/docs\n./docs/vi/mkdocs.yml\n./docs/zh\n./docs/zh-hant\n./docs/zh-hant/docs\n./docs/zh-hant/mkdocs.yml\n./docs/zh/docs\n./docs/zh/mkdocs.yml\n./docs_src\n./docs_src/additional_responses\n./docs_src/additional_responses/tutorial001.py\n./docs_src/additional_responses/tutorial002.py\n./docs_src/additional_responses/tutorial003.py\n./docs_src/additional_responses/tutorial004.py\n./docs_src/additional_status_codes\n./docs_src/additional_status_codes/tutorial001.py\n./docs_src/additional_status_codes/tutorial001_an.py\n./docs_src/additional_status_codes/tutorial001_an_py310.py\n./docs_src/additional_status_codes/tutorial001_an_py39.py\n./docs_src/additional_status_codes/tutorial001_py310.py\n./docs_src/advanced_middleware\n./docs_src/advanced_middleware/tutorial001.py\n./docs_src/advanced_middleware/tutorial002.py\n./docs_src/advanced_middleware/tutorial003.py\n./docs_src/app_testing\n./docs_src/app_testing/__init__.py\n./docs_src/app_testing/app_b\n./docs_src/app_testing/app_b_an\n./docs_src/app_testing/app_b_an_py310\n./docs_src/app_testing/app_b_an_py39\n./docs_src/app_testing/app_b_py310\n./docs_src/app_testing/main.py\n./docs_src/app_testing/test_main.py\n./docs_src/app_testing/tutorial001.py\n./docs_src/app_testing/tutorial002.py\n./docs_src/app_testing/tutorial003.py\n./docs_src/app_testing/tutorial004.py\n./docs_src/async_tests\n./docs_src/async_tests/__init__.py\n./docs_src/async_tests/main.py\n./docs_src/async_tests/test_main.py\n./docs_src/authentication_error_status_code\n./docs_src/authentication_error_status_code/tutorial001_an.py\n./docs_src/authentication_error_status_code/tutorial001_an_py39.py\n./docs_src/background_tasks\n./docs_src/background_tasks/tutorial001.py\n./docs_src/background_tasks/tutorial002.py\n./docs_src/background_tasks/tutorial002_an.py\n./docs_src/background_tasks/tutorial002_an_py310.py\n./docs_src/background_tasks/tutorial002_an_py39.py\n./docs_src/background_tasks/tutorial002_py310.py\n./docs_src/behind_a_proxy\n./docs_src/behind_a_proxy/tutorial001.py\n./docs_src/behind_a_proxy/tutorial001_01.py\n./docs_src/behind_a_proxy/tutorial002.py\n./docs_src/behind_a_proxy/tutorial003.py\n./docs_src/behind_a_proxy/tutorial004.py\n./docs_src/bigger_applications\n./docs_src/bigger_applications/__init__.py\n./docs_src/bigger_applications/app\n./docs_src/bigger_applications/app_an\n./docs_src/bigger_applications/app_an_py39\n./docs_src/body\n```\n",
+      "extra": {
+        "event_type": "task_prompt",
+        "elapsed_s": 0.6523196697235107,
+        "timestamp": 1791363893.8711004,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_1",
+          "function_name": "run_skill_script",
+          "arguments": {
+            "file_path": "install.py",
+            "skill_name": "swe-tools"
+          },
+          "extra": {
+            "elapsed_s": 296.72848415374756,
+            "timestamp": 1791364189.947265,
+            "author": "setup",
+            "usage": {
+              "prompt_tokens": 3935,
+              "completion_tokens": 31,
+              "cached_tokens": 0,
+              "total_tokens": 3966
+            },
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"skill_name\": \"swe-tools\", \"file_path\": \"install.py\", \"stdout\": \"installed: ['_ws.py', 'check.py', 'edit.py', 'locate.py', 'test.py', 'view.py'] | helpers in ['/tmp/swegemma_sandbox_4f86b784-a03_enei0how/tmp/swe', '/tmp/swe']\\nusage: python3 /tmp/swe/edit.py FILE <<'EOF' (SEARCH/REPLACE block) | python3 /tmp/swe/locate.py \\\"<identifiers and keywords>\\\" | python3 /tmp/swe/test.py --target tests/test_x.py[::name] | python3 /tmp/swe/check.py --mode preflight|save|restore\\n\", \"stderr\": \"\", \"status\": \"success\"}",
+        "extra": {
+          "tool_name": "run_skill_script",
+          "elapsed_s": 296.7700800895691,
+          "timestamp": 1791364189.9888608,
+          "author": "setup"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 3935,
+        "completion_tokens": 31,
+        "cached_tokens": 0,
+        "total_tokens": 3966
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 296.72848415374756,
+        "timestamp": 1791364189.947265,
+        "author": "setup"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "message": "READY",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 4172,
+        "completion_tokens": 6,
+        "cached_tokens": 0,
+        "total_tokens": 4178
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 297.23698830604553,
+        "timestamp": 1791364190.455769,
+        "author": "setup"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 8107,
+    "total_completion_tokens": 37,
+    "total_cached_tokens": 0,
+    "total_tokens": 8144,
+    "total_steps": 3
+  }
+}
