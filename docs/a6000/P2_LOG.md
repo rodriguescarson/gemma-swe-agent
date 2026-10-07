@@ -48,3 +48,9 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T13:46:49Z | step=p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py rc=0
 - 2026-10-07T13:47:22Z | step=probe_v6pb | EVENT started pid 30621 (restarts so far 0; hard stop in 20.0 h)
 - 2026-10-07T13:55:23Z | step=probe_v6pb | END done: done=0/4 solved=0
+- 2026-10-07T13:55:26Z | probe gate v6p-b: GATE PASS | items 4, empty patches 0, tool-call-budget errors 0, infrastructure errors 0, items with a can't open file 0, counted helper calls 61
+  - ledger trio_34e7a2e: locator 2, fixer a 7, b 3, c 4 counted helper calls, 0 refusals (from traces)
+  - ledger trio_ac7b93f: locator 1, fixer a 6, b 6, c 7 counted helper calls, 0 refusals (from traces)
+  - ledger typer_42196d4: locator 4, fixer a 7, b 7, c 7 counted helper calls, 2 refusals (from traces)
+  - ledger typer_8e75bc3: locator 3, fixer a 3, b 2, c 2 counted helper calls, 2 refusals (from traces)
+- 2026-10-07T13:55:26Z | step=probe_v6pb | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_probe_gate.py /home/jc/g4/runs/p2 rc=0
