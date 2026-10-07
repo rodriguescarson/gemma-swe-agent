@@ -60,6 +60,13 @@ def copy_bundle(dst: Path, src: Path = BUNDLE) -> Path:
     return out
 
 
+def as_obj(x: Any) -> dict:
+    """A swegemma tool reply as a dict. harness/wheels' swegemma 0.2.7 returns a JSON string, the Kaggle wheelhouse's
+    later 0.2.7 builds a dict (A6000 box, 2026-10-07: 32 v10 tests died in json.loads on it); a copy, never the
+    harness's own object."""
+    return dict(x) if isinstance(x, dict) else json.loads(x)
+
+
 def write_tree(root: Path, files: dict[str, str | bytes]) -> None:
     for rel, content in files.items():
         p = Path(root) / rel
@@ -109,11 +116,12 @@ class Box:
         return self.mgr.exec(self.sid, command, timeout=timeout)
 
     def run_command(self, command: str) -> dict:
-        """The model-facing ``run_command`` tool: returns the parsed JSON reply plus ``_raw`` and ``_secs``."""
+        """The model-facing ``run_command`` tool: returns the parsed reply plus ``_raw`` (the reply as JSON text) and
+        ``_secs``; either swegemma reply form (JSON string or dict, see ``as_obj``)."""
         t = time.perf_counter()
         raw = self.tools["run_command"](command=command)
-        out = json.loads(raw)
-        out["_raw"], out["_secs"] = raw, time.perf_counter() - t
+        out = as_obj(raw)
+        out["_raw"], out["_secs"] = raw if isinstance(raw, str) else json.dumps(raw), time.perf_counter() - t
         return out
 
     def run_skill(self, file_path: str, args: dict | list | None = None, positional: list | None = None,

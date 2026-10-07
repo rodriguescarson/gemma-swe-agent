@@ -5,6 +5,7 @@ harness code paths the scorer uses: SubprocessManager (command-text rewriting of
 inherited stdin), the swegemma run_command tool, and the ADK skill wrapper (skill_toolset.py:571). R112 reproduces the
 Docker backend's contract (TEST_TMPDIR=/tmp-like dir, TMPDIR unset, PYTHONPATH unset, editable install, no rewriting).
 """
+import json
 import os
 import shutil
 import sys
@@ -58,6 +59,18 @@ EDIT_BLOCK = "<<<<<<< SEARCH\n    return a - b\n=======\n    return a + b\n>>>>>
 def out(r):
     """Model-visible text of a run_command reply (stdout, or the error text of a CommandError)."""
     return (r.get("stdout") or "") + (r.get("stderr") or "") + (r.get("error_message") or "")
+
+
+@pytest.mark.parametrize("form", ["json-string", "dict"])
+def test_run_command_reply_parses_both_swegemma_forms(form):
+    """harness/wheels' swegemma 0.2.7 replies with a JSON string, the Kaggle wheelhouse's later 0.2.7 builds with a dict
+    (A6000 box, 2026-10-07: 32 v10 tests died in json.loads); Box.run_command hands the tests the same dict either way."""
+    reply = {"status": "error", "error_type": "CommandError", "error_message": "boom", "details": {"exit_code": 2}}
+    raw = json.dumps(reply) if form == "json-string" else dict(reply)
+    r = S.Box(mgr=None, sid="-", ctx=None, tools={"run_command": lambda command: raw}).run_command("false")
+    assert {k: r[k] for k in reply} == reply and json.loads(r["_raw"]) == reply and r["_secs"] >= 0
+    if form == "dict":
+        assert raw == reply                                                  # the harness's own reply is not mutated
 
 
 @pytest.fixture(scope="module")
