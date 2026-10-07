@@ -103,7 +103,7 @@ def test_v7s_own_refusal_texts_are_counted(tmp_path):
     for _ in range(3):
         run(t, "locate.py", "f")
     search_cap = run(t, "locate.py", "f")[1]
-    for i in range(8):
+    for i in range(14):
         view(t, "m.py", str(10 * i + 101), str(10 * i + 105))
     read_cap = view(t, "m.py", "1", "5")
     good = [view(task(tmp_path, s), *a) for s, a in (("a", ("m.py", "30-40")), ("b", ("m.py",)), ("c", ("m.py", "30:40")), ("d", ("m.py", "30")))]

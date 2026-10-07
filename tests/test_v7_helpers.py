@@ -6,7 +6,7 @@ own tmp dir (TMPDIR), cwd = the task's git workspace. Written before the changes
          139 usage-line calls in 63 tasks; P4 + P2 traces: 172 `FILE N-N`, 24 bare `FILE`, 7 several ranges)
   fix 7  edit.py applies a --lines body that carries SEARCH/REPLACE markers as a SEARCH/REPLACE edit (finding 11: 13
          SYNTAX-ERROR reverts were markers written into the file by a --lines edit)
-  fix 9  the pre-edit caps: locate.py refuses after 3 calls per task, view.py after 8 calls made before the task's first
+  fix 9  the pre-edit caps: locate.py refuses after 3 calls per task, view.py after 14 calls made before the task's first
          OK edit.py call, uncapped after it; the counts live in <TMPDIR>/swe/.ledger.json next to the views log
   audit  every message a helper prints when it declines or fails an input is ONE line that names the cause and the
          next action (instead / now / next), never a bare usage line; the semantics stay (a test-file edit is still
@@ -218,29 +218,29 @@ def test_locate_cap_counts_per_task_dir_and_resets_in_another(tmp_path):
 
 def test_view_cap_boundary_before_the_first_edit(tmp_path):
     t = task(tmp_path)
-    for i in range(8):
+    for i in range(14):
         out = view(t, "m.py", str(10 * i + 1), str(10 * i + 5))
         assert numbered(out), (i, out)
     rc, out = run(t, "view.py", "m.py", "200", "210")
     assert rc == 0 and out.strip() == READ_CAP, out
-    assert ledger(t)["view"] == 8 and not ledger(t).get("edited")
+    assert ledger(t)["view"] == 14 and not ledger(t).get("edited")
     assert view(t, "m.py", "abc").strip() == READ_CAP                   # the cap comes first, whatever the arguments
 
 
 def test_view_is_uncapped_after_the_first_ok_edit_and_the_repeat_refusal_still_applies(tmp_path):
     t = task(tmp_path)
-    for i in range(8):
+    for i in range(14):
         view(t, "m.py", str(10 * i + 1), str(10 * i + 5))
     rc, out = run(t, "edit.py", "pkg/mod.py", stdin=block("    return x\n", "    return x * 2\n"))
     assert rc == 0 and out.startswith("OK pkg/mod.py") and ledger(t)["edited"] is True, out
-    for i in range(8, 14):
+    for i in range(14, 20):
         assert numbered(view(t, "m.py", str(10 * i + 1), str(10 * i + 5))), i
-    assert view(t, "m.py", "131", "135").startswith("ALREADY SHOWN")
+    assert view(t, "m.py", "191", "195").startswith("ALREADY SHOWN")
 
 
 def test_failed_edits_do_not_lift_the_cap_and_a_create_does(tmp_path):
     t = task(tmp_path)
-    for i in range(8):
+    for i in range(14):
         view(t, "m.py", str(10 * i + 1), str(10 * i + 5))
     assert run(t, "edit.py", "pkg/mod.py", stdin=block("    return 99\n", "    return 1\n"))[0] == 1          # NO MATCH
     assert run(t, "edit.py", "pkg/mod.py", stdin=block("    return x\n", "    return (x\n"))[0] == 1         # SYNTAX ERROR
@@ -274,7 +274,7 @@ def ws_constants():
 
 
 def test_the_caps_are_the_constants_the_locator_yaml_states():
-    assert ws_constants() == [3, 8, READ_CAP, SEARCH_CAP]
+    assert ws_constants() == [3, 14, READ_CAP, SEARCH_CAP]
 
 
 # ------------------------------------------------------------------ the refusal-message audit
@@ -284,7 +284,7 @@ def _view_once(t):
 
 
 def _spend_reads(t):
-    for i in range(8):
+    for i in range(14):
         view(t, "m.py", str(10 * i + 101), str(10 * i + 105))
 
 

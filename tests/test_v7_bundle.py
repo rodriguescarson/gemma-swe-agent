@@ -7,7 +7,7 @@ the changes (strict test-first).
   2 prompts describe calls in words, show the command alone  6 graph tools and edit_file dropped from every stage
   3 no forced install call in the fixer and verifier         7 edit.py: SEARCH/REPLACE markers in a --lines body
   4 repro through run_command + a quoted heredoc; only the   8 "budget exhausted" -> stop (verifier: submit_patch)
-    fixer declares write_file                                9 locate.py <= 3 per task, view.py <= 8 before the first edit
+    fixer declares write_file                                9 locate.py <= 3 per task, view.py <= 14 before the first edit
 
 This file: the file delta against v5h2, the compiled tree, packing, the tools per stage, the prompt wording rules, the
 helpers' coverage (install + Kaggle PROBES), the call arithmetic and the Kaggle kernel. Helper behaviour:

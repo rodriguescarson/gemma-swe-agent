@@ -9,7 +9,7 @@ from then on. A refusal is one line that says what to do next, exit 0."""
 import json, os, tempfile
 
 LOCATE_CAP = 3
-VIEW_CAP = 8
+VIEW_CAP = 14  # raised from 8 before any v7 result (2026-10-07 23:35 IST): the allowance is shared with the fixer
 SEARCH_CAP_MSG = "search cap reached: use `git grep -n <name>` or write the plan now"
 READ_CAP_MSG = "read cap reached before any edit: edit now with edit.py (fixer) or write the plan (locator)"
 
