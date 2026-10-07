@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SUB = ROOT / "submissions"
 V7, V7B = SUB / "v7", SUB / "v7b"
 FIX1 = {"skills/swe-tools/scripts/view.py", "skills/swe-tools/scripts/_ws.py"}
-FIX2 = {"prompts/fixer.md", "prompts/verifier.md"}
+FIX2 = {"prompts/fixer.md", "prompts/verifier.md", "prompts/locator.md"}   # locator added 2026-10-08: 5 of the 6 wrapper commands were its `run_command "git grep ..."`
 CHANGED = FIX1 | FIX2
 
 

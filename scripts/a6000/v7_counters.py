@@ -22,7 +22,7 @@ RULES = {"view_usage_calls": lambda v, c: v.mechanism.startswith("helper usage/a
          "write_file_path_refusals": lambda v, c: v.mechanism == "write_file outside the workspace refused",
          "forced_install_empty_args": lambda v, c: c.fn == "run_skill_script" and v.mechanism.startswith("harness rejection: INVALID_ARGUMENTS"),
          # v6p-b's ledger says SHARE SPENT; v7's pre-edit caps (submissions/v7 _ws.py) say "search cap reached" / "read cap reached"
-         "cap_refusals": lambda v, c: any(m in (c.content or "") for m in ("SHARE SPENT", "search cap reached", "read cap reached"))}
+         "cap_refusals": lambda v, c: any(m in (c.content or "") for m in ("SHARE SPENT", "search cap reached", "read cap reached", "outline only:"))}
 
 
 def load_run(run, arm, items_dir="items"):

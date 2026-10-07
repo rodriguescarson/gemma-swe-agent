@@ -41,7 +41,7 @@ def test_the_one_line_refusals_are_still_counted(tmp_path):
     outs, c = loop_run(tmp_path)
     assert [o.strip() == READ_CAP for o in outs] == [True, True, False, True, True, False], outs
     assert sum("outline only:" in o for o in outs) == 2
-    assert c["cap_refusals"] == 4, c
+    assert c["cap_refusals"] == 6, c                                   # 2026-10-08: the matcher counts the outline replies too
 
 
 def test_an_outline_is_not_a_usage_line_and_the_loop_is_still_seen(tmp_path):
@@ -50,9 +50,6 @@ def test_an_outline_is_not_a_usage_line_and_the_loop_is_still_seen(tmp_path):
     assert c["loops_ge5"] == 1                                          # 6 identical calls in a row, any replies
 
 
-@pytest.mark.xfail(strict=True, reason="pre-registered: RULES['cap_refusals'] in scripts/a6000/v7_counters.py learns "
-                   "'outline only:' once the no-touch list lifts (the box is running v7); then this passes and the "
-                   "marker goes")
 def test_every_refused_read_is_counted_outlines_included(tmp_path):
     _, c = loop_run(tmp_path)
     assert c["cap_refusals"] == 6, c

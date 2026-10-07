@@ -33,8 +33,8 @@ def test_the_sentence_is_present_once(stage):
 
 
 def test_no_other_prompt_carries_it():
-    for stage in ("setup", "locator"):
-        assert (V7B / "prompts" / f"{stage}.md").read_bytes() == (V7 / "prompts" / f"{stage}.md").read_bytes(), stage
+    assert (V7B / "prompts" / "setup.md").read_bytes() == (V7 / "prompts" / "setup.md").read_bytes()
+    assert SENTENCE not in prompt("locator", V7B)                        # the locator has its own sentence (below)
     for stage in STAGES:
         assert SENTENCE not in prompt(stage, V7)                          # control: v7 never had it
 
@@ -108,3 +108,15 @@ for _name in V7P_TESTS:
 def test_every_v7_prompt_test_is_rerun_on_v7b():
     assert len(V7P_TESTS) == 5
     assert {n for n in globals() if n.startswith("test_v7_rerun_")} == {"test_v7_rerun_" + n[5:] for n in V7P_TESTS}
+
+
+LOCATOR_SENTENCE = "Commands never start with the word run_command and never contain a tool name, since the command argument is the shell line alone."
+
+
+def test_the_locator_gets_its_own_sentence_once_and_v7_never_had_it():
+    """2026-10-08: on the box's v7 run 5 of the 6 literal-wrapper commands were the LOCATOR's `run_command "git grep ..."`."""
+    loc = prompt("locator", V7B)
+    assert loc.count(LOCATOR_SENTENCE) == 1 and LOCATOR_SENTENCE not in prompt("locator", V7)
+    assert not set("`():") & set(LOCATOR_SENTENCE) and not any(bad in LOCATOR_SENTENCE for bad in FORBIDDEN)
+    old, new = prompt("locator", V7).encode().split(b"\n"), loc.encode().split(b"\n")
+    assert len(new) == len(old) + 1 and [l for l in new if LOCATOR_SENTENCE.encode() not in l] == old   # one new line, rest byte-identical

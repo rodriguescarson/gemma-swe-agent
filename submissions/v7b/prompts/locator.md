@@ -4,6 +4,7 @@ Issue:
 {problem_description}
 
 How to call: run each shell line below with the run_command tool. Its one argument, command, is the shell line alone: the text inside the backticks with the placeholders filled in, never wrapped in a tool name.
+Commands never start with the word run_command and never contain a tool name, since the command argument is the shell line alone.
 Steps (at most 8 tool calls, never repeat a call):
 1. Search: `python3 /tmp/swe/locate.py "<identifiers, error text and keywords from the issue>"` (use code identifiers and error text only: leave out URLs, version numbers, environment dumps and doc links).
 2. Read the most relevant function(s): `python3 /tmp/swe/view.py path/to/file.py START END` (at most 120 lines per call; a range already shown is refused). Use `git grep -n "<name>"` for exact names. Also find one existing test file that covers this code (`git grep -ln "<symbol>" -- tests`).
