@@ -20,3 +20,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T00:49:12Z | step=stage1a | done=69/150 | solved=10 | empty=33 | errors=0 | median_s=306.0 | cap=24 | gpu=100% | disk_free=902GB | restarts=0
 - 2026-10-07T01:49:17Z | step=stage1a | done=91/150 | solved=13 | empty=46 | errors=0 | median_s=306.4 | cap=31 | gpu=100% | disk_free=902GB | restarts=0
 - 2026-10-07T02:49:22Z | step=stage1a | done=119/150 | solved=26 | empty=53 | errors=0 | median_s=292.0 | cap=39 | gpu=100% | disk_free=902GB | restarts=0
+- 2026-10-07T03:49:28Z | step=stage1a | done=143/150 | solved=33 | empty=64 | errors=2 | median_s=292.0 | cap=48 | gpu=99% | disk_free=902GB | restarts=0
