@@ -19,7 +19,7 @@ def v7_steps(runs, py, scale_fallback=1.0):
     probe = {"name": "probe_v7", "total": 4, "docker": True,
              "cmd": [py, "scripts/a6000/p2_probe.py", out, "--harness", "data/heldout1k/harness_s200", "--ids", "data/heldout1k/s200_valid_ids.txt", "--arms", "v7", "--levels", "2"],
              "proxy": None, "stats": {"type": "p2", "out": out, "arms": ["v7"], "ids": []}, "purge": None,
-             "post": [[py, "scripts/a6000/p2_probe_gate.py", out, "--arm", "v7"]]}
+             "post": [[py, "scripts/a6000/v7_counters.py", out, "--arm", "v7", "--items-dir", "probe_v7_T2", "--json", f"{runs}/v7_probe_counters.json"]]}   # v7 has no ledger: the gate's ledger condition does not apply, the counters do
     s50 = {"name": "v7_s50", "total": 50, "docker": True,
            "cmd": [py, "scripts/a6000/p2_race.py", out, "--harness", "data/heldout1k/harness_s200", "--ids", "data/heldout1k/s200_valid_ids.txt", "--n", "50", "--conc", "2", "--arms", "v7",
                    "--arm-scale-from-probe", f"v7={scale_fallback}", "--port", "8001", "--label", "probe", "--keep"],

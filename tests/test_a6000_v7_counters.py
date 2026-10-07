@@ -59,3 +59,11 @@ def test_counters_over_a_p4_layout_and_the_must_zero_verdict(tmp_path):
     assert v["pass"] is False and v["failing"] == ["view_usage_calls"]
     text = vc.markdown(c, v)
     assert "view_usage_calls" in text and "FAIL" in text and "b" in text                        # the example task is named
+
+
+def test_counters_can_read_a_probe_layout_via_items_dir(tmp_path):
+    d = tmp_path / "probe_v7_T2" / "v7" / "t1"; d.mkdir(parents=True)
+    (d / "task_results.jsonl").write_text(json.dumps({"instance_id": "t1", "resolved": True, "agent_patch_size": 5, "error": None}) + "\n")
+    (d / "traces").mkdir(); (d / "traces" / "trace_t1.json").write_text(json.dumps({"steps": [_step("fixer", "run_command", {"command": "ls"}, ok("x"))]}))
+    c = vc.counters(str(tmp_path), "v7", items_dir="probe_v7_T2")
+    assert c["tasks"] == 1 and c["solved"] == 1

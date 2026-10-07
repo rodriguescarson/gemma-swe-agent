@@ -12,7 +12,7 @@ def test_steps_in_the_p6_order_with_the_right_commands(tmp_path):
     assert names == ["probe_v7", "v7_s50", "v7_p4", "v7_p3"]
     probe, s50, p4, p3 = steps
     assert "--arms" in probe["cmd"] and probe["cmd"][probe["cmd"].index("--arms") + 1] == "v7" and probe["cmd"][probe["cmd"].index("--levels") + 1] == "2"
-    assert any("p2_probe_gate.py" in " ".join(h) for h in probe["post"])
+    assert any("v7_counters.py" in " ".join(h) and "--items-dir probe_v7_T2" in " ".join(h) for h in probe["post"]) and not any("p2_probe_gate" in " ".join(h) for h in probe["post"])
     c = s50["cmd"]
     assert c[c.index("--n") + 1] == "50" and c[c.index("--arms") + 1] == "v7" and c[c.index("--conc") + 1] == "2" and "--require-probe-ok" not in c
     assert "v7=1.0" in c[c.index("--arm-scale-from-probe") + 1] and s50["speed_log"].endswith("proxy_v7_s50.jsonl") and s50["proxy"]["log"] == s50["speed_log"]

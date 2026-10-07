@@ -24,7 +24,7 @@ RULES = {"view_usage_calls": lambda v, c: v.mechanism.startswith("helper usage/a
          "cap_refusals": lambda v, c: "SHARE SPENT" in (c.content or "")}
 
 
-def load_run(run, arm):
+def load_run(run, arm, items_dir="items"):
     """-> {task: (trace, resolved)}"""
     out = {}
     run = Path(run)
@@ -36,7 +36,7 @@ def load_run(run, arm):
                 if f.exists():
                     out[r["id"]] = (fx.load_trace(f), bool(r.get("resolved")))
         return out
-    for f in glob.glob(str(run / "items" / (arm or "*") / "*" / "task_results.jsonl")):
+    for f in glob.glob(str(run / items_dir / (arm or "*") / "*" / "task_results.jsonl")):
         r = json.loads(open(f).readline())
         tr = glob.glob(os.path.join(os.path.dirname(f), "traces", "trace_*.json"))
         if tr:
@@ -44,8 +44,8 @@ def load_run(run, arm):
     return out
 
 
-def counters(run, arm=None):
-    data = load_run(run, arm)
+def counters(run, arm=None, items_dir="items"):
+    data = load_run(run, arm, items_dir)
     c = {k: 0 for k in COUNTERS}
     c["tasks"], c["solved"] = len(data), sum(1 for _, s in data.values() if s)
     ex = {k: [] for k in COUNTERS}
@@ -96,9 +96,9 @@ def markdown(c, v=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("run"); ap.add_argument("--arm", default=None); ap.add_argument("--must-zero", nargs="*", default=["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"])
-    ap.add_argument("--json", default=None)
+    ap.add_argument("--json", default=None); ap.add_argument("--items-dir", default="items", help="e.g. probe_v7_T2 for a probe")
     a = ap.parse_args(argv)
-    c = counters(a.run, a.arm)
+    c = counters(a.run, a.arm, a.items_dir)
     v = verdict(c, a.must_zero)
     print(markdown(c, v))
     if a.json:
