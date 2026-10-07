@@ -47,3 +47,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T13:46:46Z | step=p4 | END done: done=74/74 solved=29
 - 2026-10-07T13:46:49Z | step=p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py rc=0
 - 2026-10-07T13:47:22Z | step=probe_v6pb | EVENT started pid 30621 (restarts so far 0; hard stop in 20.0 h)
+- 2026-10-07T13:55:23Z | step=probe_v6pb | END done: done=0/4 solved=0
