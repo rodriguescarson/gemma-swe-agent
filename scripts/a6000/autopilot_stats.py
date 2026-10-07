@@ -11,17 +11,21 @@ def _empty():
 
 
 def p2(spec):
-    """spec: {"out": dir, "arms": [...], "ids": [...]} -> counts over every arm's rows of the ids in this step."""
+    """spec: {"out": dir, "arms": [...], "ids": [...]} -> counts over every result file of the ids in this step, one per item (every pass of a task counts)."""
     import p2_report as rep
     s = _empty(); ids = set(spec["ids"])
     for arm in spec["arms"]:
-        for t, r in rep.load_rows(spec["out"], arm).items():
-            if t not in ids:
-                continue
-            tags = rep.classify(r)
-            s["done"] += 1; s["solved"] += "solved" in tags; s["empty"] += "empty" in tags
-            s["errors"] += "error" in tags; s["cap"] += "cap" in tags
-            s["durations"].append(float(r.get("duration_seconds") or 0))
+        for f in glob.glob(os.path.join(spec["out"], "items", arm, "*", "task_results.jsonl")):
+            for line in open(f):
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                if r.get("instance_id") not in ids:
+                    continue
+                tags = rep.classify(r)
+                s["done"] += 1; s["solved"] += "solved" in tags; s["empty"] += "empty" in tags
+                s["errors"] += "error" in tags; s["cap"] += "cap" in tags
+                s["durations"].append(float(r.get("duration_seconds") or 0))
     return s
 
 

@@ -179,3 +179,16 @@ def test_an_idle_supervisor_with_an_open_plan_still_writes_hourly_health_lines(t
         assert "EVENT idle: every step of the plan is done; waiting for new steps" in log and "step=idle" in log and "disk_free=" in log
     finally:
         os.killpg(p.pid, signal.SIGKILL)
+
+
+def test_health_stats_count_every_pass_of_a_task(tmp_path):
+    spec_s = importlib.util.spec_from_file_location("autopilot_stats", ROOT / "scripts" / "a6000" / "autopilot_stats.py")
+    stats = importlib.util.module_from_spec(spec_s); spec_s.loader.exec_module(stats)
+    import json
+    for k, solved in ((1, True), (2, False), (3, False)):
+        d = tmp_path / "items" / "v7" / f"a__s{k}"; d.mkdir(parents=True)
+        (d / "task_results.jsonl").write_text(json.dumps({"instance_id": "a", "resolved": solved, "duration_seconds": 100.0 * k, "error": None, "agent_patch_size": 1 if solved else 0}) + "\n")
+    d = tmp_path / "items" / "v7" / "b"; d.mkdir(parents=True)
+    (d / "task_results.jsonl").write_text(json.dumps({"instance_id": "b", "resolved": False, "duration_seconds": 50.0, "error": None, "agent_patch_size": 3}) + "\n")
+    s = stats.collect({"type": "p2", "out": str(tmp_path), "arms": ["v7"], "ids": ["a", "b", "c"]})
+    assert s["done"] == 4 and s["solved"] == 1 and s["empty"] == 2 and s["median_s"] == 150.0     # 3 passes of a + 1 of b
