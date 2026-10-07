@@ -59,3 +59,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T14:54:35Z | EVENT idle: every step of the plan is done; waiting for new steps (the plan is open)
 - 2026-10-07T15:54:37Z | step=idle | done=0/0 | solved=0 | empty=0 | errors=0 | median_s=n/a | cap=0 | gpu=0% | disk_free=910GB | restarts=0
 - 2026-10-07T16:54:40Z | step=idle | done=0/0 | solved=0 | empty=0 | errors=0 | median_s=n/a | cap=0 | gpu=0% | disk_free=910GB | restarts=0
+- 2026-10-07T17:22:11Z | EVENT P6 waiting for v7: tests/test_v7_bundle.py is not on origin/wip/gemma-agent yet (the expected ~2 h passed at about 16:40 UTC); the branch is polled every 10 min; GPU idle, supervisor idle with hourly health lines; hard stop unchanged 2026-10-08 09:44:04 UTC (16.4 h left).
