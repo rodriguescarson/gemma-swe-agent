@@ -1,5 +1,6 @@
 """scripts/heldout/sample_ids.py: the stratified heldout1k sample (per-repo cap, every repo present, ~20% title-only,
 fixed seed) and scripts/heldout/preflight_summary.py: valid / drop reasons from the pod_probe fix_gold + fix_empty runs."""
+import gzip
 import json
 import sys
 from collections import Counter
@@ -60,11 +61,13 @@ def test_impossible_request_fails():
 
 
 REAL = ROOT / "data" / "heldout1k" / "tasks.jsonl"
+REAL_GZ = REAL.with_name("tasks.jsonl.gz")      # committed; the unpacked 69 MB file is gitignored (absent in a clone)
 
 
-@pytest.mark.skipif(not REAL.is_file(), reason="heldout1k tasks.jsonl not unpacked")
+@pytest.mark.skipif(not REAL.is_file() and not REAL_GZ.is_file(), reason="heldout1k tasks.jsonl(.gz) not present")
 def test_real_sample200_matches_committed_ids():
-    rows = [json.loads(ln) for ln in REAL.read_text().splitlines() if ln.strip()]
+    text = REAL.read_text() if REAL.is_file() else gzip.decompress(REAL_GZ.read_bytes()).decode("utf-8")
+    rows = [json.loads(ln) for ln in text.splitlines() if ln.strip()]
     ids = S.sample(rows, n=200, cap=15, title_share=0.2, seed=S.SEED)
     by = {r["instance_id"]: r for r in rows}
     per = Counter(by[i]["repo"] for i in ids)
