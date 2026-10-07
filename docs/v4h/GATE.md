@@ -742,3 +742,13 @@ This replaces addendum 7's statement that the locator prompt is byte-identical t
 Limits: raw run_command calls (the locator's git grep, the fixers' copy, grep and final diff) are not counted, only paid for by the allowance; a loop made only of raw calls is not stopped by the ledger; v6p-b has not run on a model.
 
 (Correction to addendum 10, written 2026-10-07 09:56 UTC: in change item (1) two words were lost when the text was written, the sentence reads "It reads through `view.py` (counted) instead of the harness's `read_file` tool, which cannot be counted". Nothing else in the addendum was affected.)
+
+### P4 A6000 screen RESULT: v5h2 on the public 74 (2026-10-07 13:46 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 29/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 29/74 (base 34/74) | wins 2 losses 7 net -5 | rule: solved >= 37 and net >= +3
+won: fastapi_15589 rich_3676
+lost: fastapi_11194 fastapi_14616 fastapi_9753 requests_6644 rich_3063 rich_3521 rich_3718
+DROP: solved 29 < 37; net -5 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 3; errored rows 0; median task seconds 148; S(1) = 2.29 (raw 2.27, 3855 calls)
