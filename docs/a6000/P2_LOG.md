@@ -63,3 +63,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T17:43:49Z | EVENT P6 step 2: v7 arrived (branch a1ac091; bundle fixes in d1ac8d4, bundle test ccc5aa6); tests/test_v7_*.py + tests/test_setup_stage.py: 128 passed, 1 skipped; scripts/validate.py submissions/v7 OK (setup [skills] / locator [run_command, get_status] / fixer [run_command, write_file, get_status] / verifier [run_command, get_status, submit_patch]). Pre-registered as GATE.md P2 addendum 11; the v7 steps (probe_v7, v7_s50, v7_p4, v7_p3 x4 passes) go into the plan now; the idle supervisor starts the probe.
 - 2026-10-07T17:47:27Z | step=probe_v7 | EVENT started pid 24431 (restarts so far 0; hard stop in 16.0 h)
 - 2026-10-07T17:56:57Z | step=probe_v7 | END done: done=0/4 solved=0
+- 2026-10-07T17:57:00Z | step=probe_v7 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
