@@ -723,3 +723,10 @@ All earlier conditions of addendum 7 stand (3 or more empty patches, 2 or more t
 | v6p-think vs v4h2 | 49 | 1 | 14 | 0.001 | +0.84 | UNRESOLVED | 5 (1/2) |
 
 Chosen arm for P4 (addendum 6: the arm that is BETTER than v4h2 under the P2 rule, the larger net if both, else v5h2): **v5h2**.
+
+### P2 addendum 9 (2026-10-07 09:24 UTC; operational, no comparison or threshold changes): external GPU contention
+From about 07:30 UTC on 2026-10-07 another workload on the lab PC (outside WSL) used the A6000 (evidence in docs/a6000/P2_LOG.md): per-call slowdown went 1.2 -> 3 -> 57 -> 140 and P4 tasks reached the cap after 0 tool calls.
+Consequences, fixed here: (1) **P4:** the 7 rows finished before 07:29 (healthy GPU) stay; the 21 later rows are quarantined in ~/g4/runs/p4/contaminated/ (kept, not deleted) and are re-run; P4's verdict uses only rows from an uncontended GPU. Stage 1a (finished 07:10) and
+the stage 1a probe numbers predate the contention; the stage 1a table stands. (2) **Guard (scripts/a6000/autopilot.py, tests/test_a6000_guard.py, 10 tests incl. 3 supervisor integration tests):** a running step whose proxy slowdown over the last 10 minutes exceeds 3 is stopped, nvidia-smi
+is sampled with vLLM idle, and if the GPU is busy (median > 20% or any sample > 60%) the step is paused until two consecutive checks find it free, the items finished since 15 minutes before detection (and any in-flight item) are purged and re-run, and the step resumes; if the GPU is idle the alarm is logged as false and nothing is purged. Every step also waits for a free GPU
+before it starts. The 3.0 threshold is above the slowdowns measured on a healthy GPU (1.1 to 2.3, up to 4 tasks in flight). (3) Time spent waiting is not added back: the hard stop stays 2026-10-08 09:44:04 UTC, so steps may end incomplete; whatever finishes is reported as it stands.
