@@ -1,0 +1,79 @@
+diff --git a/boltons/jsonutils.py b/boltons/jsonutils.py
+index 42d9681..68a77cd 100644
+--- a/boltons/jsonutils.py
++++ b/boltons/jsonutils.py
+@@ -174,11 +174,20 @@ class JSONLIterator:
+         return self._file_obj.tell()
+ 
+     def _align_to_newline(self):
+-        "Aligns the file object's position to the next newline."
++        """Aligns the file object's position to the next newline."""
+         fo, bsize = self._file_obj, self._blocksize
+-        cur, total_read = '', 0
+         cur_pos = fo.tell()
+-        while '\n' not in cur:
++
++        # Read first block to determine type and start search
++        cur = fo.read(bsize)
++        if not cur:
++            fo.seek(0, os.SEEK_END)
++            return
++
++        newline = b'\n' if isinstance(cur, bytes) else '\n'
++        total_read = bsize
++
++        while newline not in cur:
+             cur = fo.read(bsize)
+             if not cur:
+                 # no newline until EOF; a partial trailing line was
+@@ -186,7 +195,8 @@ class JSONLIterator:
+                 fo.seek(0, os.SEEK_END)
+                 return
+             total_read += bsize
+-        newline_offset = cur.index('\n') + total_read - bsize
++
++        newline_offset = cur.index(newline) + total_read - bsize
+         fo.seek(cur_pos + newline_offset)
+ 
+     def _init_rel_seek(self):
+diff --git a/tests/test_jsonutils.py b/tests/test_jsonutils.py
+index 64247a8..f10e3be 100644
+--- a/tests/test_jsonutils.py
++++ b/tests/test_jsonutils.py
+@@ -1,4 +1,5 @@
+ import os
++import json
+ 
+ from boltons.jsonutils import (JSONLIterator,
+                                DEFAULT_BLOCKSIZE,
+@@ -25,7 +26,6 @@ def _test_reverse_iter_lines_bytes(filename, blocksize=DEFAULT_BLOCKSIZE):
+     assert os.linesep.encode('ascii').join(rev_lines[::-1]) == reference
+ 
+ 
+-
+ def test_reverse_iter_lines():
+     for blocksize in (2, 4, 16, 4096):
+         _test_reverse_iter_lines(NEWLINES_DATA_PATH, blocksize)
+@@ -90,3 +90,22 @@ def test_jsonl_explicit_end_seek(tmp_path):
+         assert list(JSONLIterator(stream, reverse=True, rel_seek=1.0)) == [{'n': 2}, {'n': 1}]
+     with path.open() as stream:
+         assert list(JSONLIterator(stream, rel_seek=1.0)) == []
++
++
++def test_jsonl_iterator_binary_rel_seek(tmp_path):
++    # This test specifically checks for the TypeError that occurred
++    # when performing relative seeking in binary JSONL streams.
++    path = tmp_path / 'binary_test.jsonl'
++    data = '{"a": 1}\n{"b": 2}\n{"c": 3}\n'
++    path.write_text(data)
++    
++    with path.open('rb') as stream:
++        # Rel seek to ~50% of the file.
++        # For data above, length is 12+12+12 = 36. 0.5 * 36 = 18.
++        # '{"a": 1}\n{"b": 2}\n{"c": 3}\n'
++        # 0123456789012345678
++        # '{"a": 1}\n{"b": 2'
++        # Should align to the newline after {"b": 2} and then read {"c": 3}
++        jsonl_iter = JSONLIterator(stream, rel_seek=0.5)
++        results = list(jsonl_iter)
++        assert results == [{"c": 3}]
