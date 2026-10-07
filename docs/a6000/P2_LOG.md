@@ -73,3 +73,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T19:15:18Z | step=v7_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
 - 2026-10-07T19:15:54Z | step=v7_p4 | EVENT started pid 32219 (restarts so far 0; hard stop in 14.5 h)
 - 2026-10-07T20:15:54Z | step=v7_p4 | done=28/74 | solved=11 | empty=2 | errors=0 | median_s=91.9 | cap=0 | gpu=100% | disk_free=901GB | restarts=0
+- 2026-10-07T21:15:57Z | step=v7_p4 | done=58/74 | solved=21 | empty=9 | errors=0 | median_s=99.3 | cap=2 | gpu=100% | disk_free=901GB | restarts=0
