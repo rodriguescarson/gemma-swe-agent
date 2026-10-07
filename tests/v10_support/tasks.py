@@ -9,12 +9,14 @@ sandbox_env, install_helpers, run_helper, mini_verify, hidden_claims_repro, resu
 
 Environment knobs: G4_J (worker threads, default 4), G4_NIGHTLY=1 (nightly tier), G4_TASKS (a subset of task ids;
 aggregate bars then skip), G4_BUNDLE (bundle root, default submissions/v10), G4_KPAR, G4_CACHE, G4_OFFLINE_OUT
-(default eval/offline). The cache holds about 90 MB per task (base; base_tp is an APFS clone of it) and is safe to
-delete: rm -rf ~/.cache/g4/ws ~/.cache/g4/work.
+(default a throwaway per-process dir; G4_OFFLINE_OUT=eval/offline records a run over the committed records). The cache
+holds about 90 MB per task (base; base_tp is an APFS clone of it) and is safe to delete: rm -rf ~/.cache/g4/ws
+~/.cache/g4/work.
 """
 from __future__ import annotations
 
 import ast
+import atexit
 import concurrent.futures as cf
 import contextlib
 import dataclasses
@@ -48,7 +50,12 @@ SCRIPTS = BUNDLE / "skills" / "swe-tools" / "scripts"
 KPAR = Path(os.environ.get("G4_KPAR") or Path.home() / ".cache" / "g4" / "kpar")
 CACHE = Path(os.environ.get("G4_CACHE") or Path.home() / ".cache" / "g4" / "ws")
 WORK = CACHE.parent / "work"            # same APFS volume as CACHE, so fresh_ws can clone
-OFFLINE_OUT = Path(os.environ.get("G4_OFFLINE_OUT") or ROOT / "eval" / "offline")
+# eval/offline/ holds the committed records of deliberate runs (docs/v10/SPEC.md 8); a plain test session must not
+# rewrite tracked files (full-suite runs rewrote five records, 2026-10-07), so it writes to a dir removed at exit
+_OFFLINE_TMP = Path(tempfile.gettempdir()) / f"g4_offline_{os.getpid()}"
+OFFLINE_OUT = Path(os.environ.get("G4_OFFLINE_OUT") or _OFFLINE_TMP)
+if OFFLINE_OUT == _OFFLINE_TMP:
+    atexit.register(shutil.rmtree, _OFFLINE_TMP, True)
 J = max(1, int(os.environ.get("G4_J", "4") or 4))
 NIGHTLY = os.environ.get("G4_NIGHTLY") == "1"
 BUILD_KPAR = ROOT / "scripts" / "build_kpar.sh"

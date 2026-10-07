@@ -5,8 +5,9 @@ Tiers: CI (this Mac, no network) and NIGHTLY (G4_NIGHTLY=1). Nothing touches a G
 - Repo tests run in the parity venvs of scripts/build_kpar.sh (outside the repo); a missing venv skips with the build
   command.
 - Per-task results are computed once per session per kind (tests/v10_support/tasks.py:results, ThreadPoolExecutor with
-  G4_J workers, default 4) and written to eval/offline/v10_<kind>.json; parametrised tests read them and aggregate tests
-  assert the SPEC's bars, scaled from the 40 local tasks to however many are local (need()).
+  G4_J workers, default 4) and written to $G4_OFFLINE_OUT/v10_<kind>.json (a throwaway dir unless set); parametrised
+  tests read them and aggregate tests assert the SPEC's bars, scaled from the 40 local tasks to however many are local
+  (need()).
 - Helper-dependent tests skip until the bundle's helper exists (other components build them in parallel).
 """
 import json
@@ -789,8 +790,23 @@ def test_tamper_lost_aggregate():
 
 
 # ================================================================================= timing budgets (asserted)
+def test_a_plain_session_never_rewrites_the_committed_offline_records():
+    """eval/offline/v10_<kind>.json are the committed records of deliberate offline runs (docs/v10/SPEC.md 8); full
+    suite runs rewrote five of them (2026-10-07). Without G4_OFFLINE_OUT the results go to a throwaway per-process dir;
+    G4_OFFLINE_OUT=eval/offline still records a run."""
+    code = "import sys; sys.path.insert(0, 'tests'); from v10_support import tasks as T; print(T.OFFLINE_OUT)"
+    env = {k: v for k, v in os.environ.items() if k != "G4_OFFLINE_OUT"}
+    for given, want_in_repo in ((None, False), (str(ROOT / "eval" / "offline"), True)):
+        if given:
+            env["G4_OFFLINE_OUT"] = given
+        r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env, capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-1500:]
+        out = Path(r.stdout.strip().splitlines()[-1]).resolve()
+        assert out.is_relative_to(ROOT.resolve()) == want_in_repo, (given, out)
+
+
 def test_results_written_and_timed():
-    """Every computed kind is on disk (eval/offline/v10_<kind>.json) with its wall time."""
+    """Every computed kind is on disk ($G4_OFFLINE_OUT/v10_<kind>.json) with its wall time."""
     done = [k for k in T.KINDS if k in T._RESULTS]
     if not done:
         pytest.skip("no kind computed in this session")
