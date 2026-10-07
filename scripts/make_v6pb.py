@@ -41,6 +41,15 @@ Then STOP calling tools and reply in under 100 words: what you changed (file, fu
 Tools you can call: run_command, get_status, get_code_neighbors, search_similar_code, get_code_subgraph, run_skill_script. There is no edit_file tool, no write_file tool and no bash tool: edit through the edit.py helper inside /tmp/w{l} and run shell commands such as `git -C /tmp/w{l} grep` through `run_command`.
 """
 
+LOCATOR_EDITS = [
+    ("Steps (at most 8 tool calls, never repeat a call):",
+     "Steps (at most {locator} tool calls, never repeat a call; locate.py and view.py are counted: after your {locator_helper}th helper call they refuse and print SHARE SPENT, and your next message must be the plan):"),
+    ("3. Read the most relevant function(s) with `read_file(filepath, start_line, end_line)`.",
+     "3. Read the most relevant function(s) with `run_command(command=\"python3 /tmp/swe/view.py path/to/file.py START END\")` (at most 120 lines per call; a range already shown is refused)."),
+    ("Tools you can call: run_command, read_file, edit_file, write_file, get_status, get_code_neighbors, search_similar_code, get_code_subgraph, run_skill_script. There is no other tool (no git_grep, no bash tool): run shell commands such as `git grep` through `run_command`.",
+     "Tools you can call: run_command, get_status, get_code_neighbors, search_similar_code, get_code_subgraph, run_skill_script. There is no read_file, edit_file, write_file, git_grep or bash tool: read with view.py and run shell commands such as `git grep` through `run_command`."),
+]
+
 VERIFIER_EDITS = [
     ("You are the VERIFIER in a three-stage team working in /workspace. The fix is already applied.",
      "You are the VERIFIER working in /workspace. Three fixers each proposed a fix; the selection script tested them and applied the best one to /workspace."),
@@ -62,7 +71,14 @@ def build():
     s = shares()
     for f in ("a", "b", "c"):
         (B / "prompts" / f"fixer_{f}.md").write_text(FIXER.format(L=f.upper(), l=f, fixer=s["fixer"], helper=s["helper"]))
-    shutil.copyfile(V4 / "prompts" / "locator.md", B / "prompts" / "locator.md")
+    loc = (V4 / "prompts" / "locator.md").read_text()
+    for old, new in LOCATOR_EDITS:
+        assert old in loc, old
+        loc = loc.replace(old, new.format(**s))
+    (B / "prompts" / "locator.md").write_text(loc)
+    ly = (V6 / "sub_agents" / "locator.yaml").read_text()
+    ly = re.sub(r"^tools:.*$", "tools: [run_command, get_status, get_code_neighbors, search_similar_code, get_code_subgraph]", ly, flags=re.M)
+    (B / "sub_agents" / "locator.yaml").write_text(ly)
     shutil.copyfile(V4 / "configs" / "sampling.yaml", B / "configs" / "sampling.yaml")
     v = (V4 / "prompts" / "verifier.md").read_text()
     for old, new in VERIFIER_EDITS:
@@ -79,16 +95,16 @@ def build():
                                   "v6p rebased on v4h2 - locate, three budgeted parallel fixers that stop once one passes, select by tests, verify."))
     fx = (V6 / "sub_agents" / "fixers.yaml").read_text().split("# Tool budget")[0].rstrip() + "\n" + (
         "# Tool budget (eval_config max_tool_calls = 70 counts every agent's calls in a task, and the harness cannot cap one agent):\n"
-        "#   setup 1 + locator 8 + 3 fixers x %d + selector 1 + verifier %d = %d <= 70; every fixer may overshoot by %d raw calls and the\n"
-        "#   selector and verifier still have their %d (70 - 1 - 8 - 3 x %d = %d).\n"
+        "#   setup 1 + locator %d + 3 fixers x %d + selector 1 + verifier %d = %d <= 70; the locator and every fixer may overshoot by %d raw calls and the\n"
+        "#   selector and verifier still have their %d (70 - 1 - (%d + %d) - 3 x %d = %d).\n"
         "# The caps live in the helper ledger (skills/swe-tools/scripts/_budget.py); tests/test_v6pb_bundle.py checks the arithmetic and the prompts.\n"
-    ) % (s["fixer"], s["verifier"], s["setup"] + s["locator"] + 3 * s["fixer"] + s["selector"] + s["verifier"], s["allowance"],
-         s["selector"] + s["verifier"], s["fixer"] + s["allowance"], BUDGET_LEFT(s))
+    ) % (s["locator"], s["fixer"], s["verifier"], s["setup"] + s["locator"] + 3 * s["fixer"] + s["selector"] + s["verifier"], s["allowance"],
+         s["selector"] + s["verifier"], s["locator"], s["allowance"], s["fixer"] + s["allowance"], BUDGET_LEFT(s))
     (B / "sub_agents" / "fixers.yaml").write_text(fx)
 
 
 def BUDGET_LEFT(s):
-    return s["total"] - s["setup"] - s["locator"] - 3 * (s["fixer"] + s["allowance"])
+    return s["total"] - s["setup"] - (s["locator"] + s["allowance"]) - 3 * (s["fixer"] + s["allowance"])
 
 
 if __name__ == "__main__":

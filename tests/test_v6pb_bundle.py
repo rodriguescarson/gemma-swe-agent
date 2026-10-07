@@ -58,21 +58,22 @@ def _compile(b):
 
 
 # ------------------------------------------------------------------------------------------------ the shares
-def test_shares_sum_to_at_most_70_and_leave_the_downstream_stages_their_calls_even_when_every_fixer_overshoots():
+def test_shares_sum_to_at_most_70_and_leave_the_downstream_stages_their_calls_even_when_every_capped_stage_overshoots():
     s = _budget_mod().SHARES
     nominal = s["setup"] + s["locator"] + 3 * s["fixer"] + s["selector"] + s["verifier"]
     assert nominal <= BUDGET, nominal
-    # worst case: every fixer overshoots its share by the allowance (raw run_command calls the helper ledger cannot see)
-    worst_fixers = 3 * (s["fixer"] + s["allowance"])
-    left_for_downstream = BUDGET - s["setup"] - s["locator"] - worst_fixers
-    assert left_for_downstream >= s["selector"] + s["verifier"], left_for_downstream
+    # worst case: the locator and every fixer overshoot their share by the allowance (raw run_command calls the helper ledger cannot see)
+    worst = s["setup"] + (s["locator"] + s["allowance"]) + 3 * (s["fixer"] + s["allowance"])
+    assert BUDGET - worst >= s["selector"] + s["verifier"], BUDGET - worst
 
 
-def test_no_single_fixer_can_exhaust_the_whole_budget():
+def test_no_single_stage_can_exhaust_the_whole_budget():
     s = _budget_mod().SHARES
-    reserved = s["setup"] + s["locator"] + s["selector"] + s["verifier"]
-    assert s["fixer"] + s["allowance"] < BUDGET - reserved                       # one fixer at its worst leaves room for the others and for the reserve
+    reserved = s["setup"] + s["selector"] + s["verifier"]
+    assert s["locator"] + s["allowance"] < BUDGET - reserved - 3 * s["fixer"]       # the locator at its worst still leaves the three fixers their shares
+    assert s["fixer"] + s["allowance"] < BUDGET - reserved - s["locator"]
     assert s["helper"] <= s["fixer"] - 2                                          # the copy command and the final diff are the fixer's two raw calls
+    assert s["locator_helper"] <= s["locator"] - 1                                # install is the locator's one uncounted call
     assert s["total"] == BUDGET
 
 
@@ -81,19 +82,27 @@ def test_prompts_state_exactly_the_shares_of_the_ledger():
     for f in FIXERS:
         t = (B / "prompts" / f"{f}.md").read_text()
         assert f"At most {s['fixer']} tool calls" in t and f"at most {s['helper']} helper calls" in t, f
-    assert f"at most {s['locator']} tool calls" in (B / "prompts" / "locator.md").read_text() or "at most 8 tool calls" in (B / "prompts" / "locator.md").read_text()
-    assert s["locator"] == 8                                                       # v4h2's own locator cap, unchanged by the rebase
+    loc = (B / "prompts" / "locator.md").read_text()
+    assert f"at most {s['locator']} tool calls" in loc and f"{s['locator_helper']}th helper call" in loc
 
 
 # ------------------------------------------------------------------------------------------------ the rebase on v4h2
-def test_locator_and_sampling_are_v4h2s_and_the_verifier_differs_only_in_the_selection_report():
-    assert (B / "prompts" / "locator.md").read_text() == (V4H2 / "prompts" / "locator.md").read_text()
-    assert (B / "configs" / "sampling.yaml").read_text() == (V4H2 / "configs" / "sampling.yaml").read_text()
-    a = (V4H2 / "prompts" / "verifier.md").read_text().splitlines()
-    b = (B / "prompts" / "verifier.md").read_text().splitlines()
+def test_locator_is_v4h2s_except_it_reads_through_the_counted_view_helper_and_sampling_is_v4h2s():
+    a = (V4H2 / "prompts" / "locator.md").read_text().splitlines()
+    b = (B / "prompts" / "locator.md").read_text().splitlines()
     changed = [l for l in b if l not in a]
-    assert 1 <= len(changed) <= 5 and all(("election" in l or "candidate" in l or "fixers" in l or "applied" in l) for l in changed), changed
-    assert "{selection?}" in "\n".join(b) and "{fix_notes?}" not in "\n".join(b)
+    assert 1 <= len(changed) <= 5, changed                                          # the read step, the cap sentence, the tools sentence
+    txt = "\n".join(b)
+    assert "view.py" in txt and "read_file" not in txt.replace("There is no read_file", "")
+    assert all(l in b for l in a if l.startswith(("FILES:", "ROOT CAUSE:", "CHANGE:", "TEST:", "Issue:", "{problem_description}")))      # the plan format is untouched
+    assert (B / "configs" / "sampling.yaml").read_text() == (V4H2 / "configs" / "sampling.yaml").read_text()
+    tools = _yaml(B / "sub_agents" / "locator.yaml")["tools"]
+    assert "run_command" in tools and not {"read_file", "write_file", "edit_file"} & set(tools)         # every read goes through a counted helper
+    a2 = (V4H2 / "prompts" / "verifier.md").read_text().splitlines()
+    b2 = (B / "prompts" / "verifier.md").read_text().splitlines()
+    changed2 = [l for l in b2 if l not in a2]
+    assert 1 <= len(changed2) <= 5 and all(("election" in l or "candidate" in l or "fixers" in l or "applied" in l) for l in changed2), changed2
+    assert "{selection?}" in "\n".join(b2) and "{fix_notes?}" not in "\n".join(b2)
 
 
 def test_structure_is_setup_locator_parallel_fixers_selector_verifier():
@@ -143,10 +152,10 @@ def test_ledger_allows_exactly_the_helper_share_then_refuses(tmp_path):
     assert m.enter("/sbx/tmp/wb", base=str(tmp_path))[0] is None                  # another fixer's share is its own
 
 
-def test_a_non_fixer_workspace_is_never_counted(tmp_path):
-    m = _budget_mod()
+def test_a_non_fixer_workspace_after_the_copies_exist_is_never_counted(tmp_path):
+    m = _budget_mod(); tmp = tmp_path / "sbx_tmp"; (tmp / "swe").mkdir(parents=True); (tmp / "wb").mkdir()
     for _ in range(m.SHARES["helper"] + 5):
-        assert m.enter("/workspace", base=str(tmp_path)) == (None, "")
+        assert m.enter("/workspace", base=str(tmp_path / "led"), tmp=str(tmp)) == (None, "")
 
 
 def test_once_one_fixer_passes_the_others_are_told_to_stop_and_the_passer_is_not(tmp_path):
@@ -212,3 +221,29 @@ def test_the_footer_is_the_first_line_of_every_counted_helper_output(tmp_path):
     assert edit.splitlines()[0].startswith("[fixer a: helper call 2/") and "OK" in edit
     test = _run("test.py", ["--target", "test_mod.py"], r, tmp_path)
     assert test.splitlines()[0].startswith("[fixer a: helper call 3/")
+
+
+# ------------------------------------------------------------------------------------------------ the locator's share (2026-10-07)
+def test_locator_phase_is_counted_and_refused_after_its_share(tmp_path):
+    m = _budget_mod(); H = m.SHARES["locator_helper"]; tmp = tmp_path / "sbx_tmp"; (tmp / "swe").mkdir(parents=True)
+    for n in range(1, H + 1):
+        refusal, footer = m.enter("/workspace", base=str(tmp_path / "led"), tmp=str(tmp))
+        assert refusal is None and f"[locator: helper call {n}/{H}" in footer
+    refusal, _ = m.enter("/workspace", base=str(tmp_path / "led"), tmp=str(tmp))
+    assert refusal and "SHARE SPENT" in refusal and "plan" in refusal and "FILES" in refusal
+
+
+def test_once_the_fixers_copies_exist_workspace_calls_are_the_verifiers_and_not_counted(tmp_path):
+    m = _budget_mod(); tmp = tmp_path / "sbx_tmp"; (tmp / "swe").mkdir(parents=True); (tmp / "wa").mkdir()
+    for _ in range(m.SHARES["locator_helper"] + 5):
+        assert m.enter("/workspace", base=str(tmp_path / "led"), tmp=str(tmp)) == (None, "")
+
+
+def test_locate_and_view_helpers_count_the_locators_calls(tmp_path):
+    H = _budget_mod().SHARES["locator_helper"]
+    r = _repo(tmp_path, "workspace")                                                # a repo that is not a fixer copy, with no copies around
+    (tmp_path / "tmpdir" ).mkdir(exist_ok=True)
+    outs = [_run("view.py", ["mod.py", str(i), str(i + 1)], r, tmp_path) for i in range(1, H + 1)]
+    assert f"[locator: helper call {H}/{H}" in outs[-1] and outs[0].splitlines()[0].startswith("[locator: helper call 1/")
+    refused = _run("locate.py", ["f"], r, tmp_path)
+    assert "SHARE SPENT" in refused and "plan" in refused

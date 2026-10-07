@@ -13,13 +13,23 @@ import os, tempfile
 # The stage shares inside the 70-call total (tests/test_v6pb_bundle.py checks the arithmetic and that every prompt says the same numbers).
 # setup 1 + locator 8 (v4h2's own cap) + 3 fixers x 10 + selector 1 + verifier 17 = 57; every fixer may overshoot by the allowance (4 raw calls) and the
 # selector and verifier still have their 18 calls: 70 - 1 - 8 - 3 x 14 = 19 >= 18.
-SHARES = {"setup": 1, "locator": 8, "selector": 1, "verifier": 17, "fixer": 10, "helper": 7, "allowance": 4, "total": 70}
+SHARES = {"setup": 1, "locator": 8, "locator_helper": 5, "selector": 1, "verifier": 14, "fixer": 10, "helper": 7, "allowance": 4, "total": 70}
 
 
 def fixer_id(root):
     """'a' for a root named wa, 'b' for wb, 'c' for wc (the fixers' copies); None for /workspace or anything else."""
     b = os.path.basename(os.path.normpath(root or ""))
     return b[1] if len(b) == 2 and b[0] == "w" and b[1] in "abc" else None
+
+
+def _tmp_base(tmp=None):
+    """The sandbox tmp the helpers are installed in: <tmp>/swe/_budget.py, the fixers' copies are <tmp>/wa, <tmp>/wb, <tmp>/wc."""
+    return tmp or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def copies_exist(tmp=None):
+    t = _tmp_base(tmp)
+    return any(os.path.isdir(os.path.join(t, "w" + k)) for k in "abc")
 
 
 def _base(base=None):
@@ -60,11 +70,22 @@ def _final(k):
             % (k, k, k, k, k))
 
 
-def enter(root, base=None):
-    """Called first by view.py / edit.py / test.py. -> (refusal or None, footer). A non-fixer root is never counted: (None, '')."""
+def _plan_hint():
+    return "the plan in the required format (FILES / ROOT CAUSE / CHANGE / TEST)"
+
+
+def enter(root, base=None, tmp=None):
+    """Called first by view.py / edit.py / test.py / locate.py. -> (refusal or None, footer). Outside the locator and the fixers: (None, '')."""
     k = fixer_id(root)
     if k is None:
-        return None, ""
+        if copies_exist(tmp):                                   # the fixers' copies exist: this is the selector or the verifier, never counted
+            return None, ""
+        d, h = _base(base), SHARES["locator_helper"]            # no copy yet: the locator
+        n = _tick("L", d)
+        if n > h:
+            return ("SHARE SPENT: your %d counted helper calls (locate.py, view.py) are used and nothing was done. Reply NOW with %s, without calling anything else." % (h, _plan_hint())), ""
+        tail = "the last one: write the plan next" if n == h else "%d left" % (h - n)
+        return None, "[locator: helper call %d/%d, %s]" % (n, h, tail)
     d = _base(base)
     others = sorted(f.split(".")[1] for f in os.listdir(d) if f.startswith("passed.") and f.split(".")[1] != k)
     if others:

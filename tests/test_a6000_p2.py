@@ -346,6 +346,17 @@ def test_gate_main_writes_the_ledger_report_to_the_log(tmp_path):
     log = tmp_path / "log.md"
     assert g.main([str(tmp_path), "--arm", "v6p-b", "--log", str(log)]) == 0
     text = log.read_text()
-    assert "GATE PASS" in text and "ledger t0: fixer a 2, b 1, c 3" in text and "can't open" in text
+    assert "GATE PASS" in text and "ledger t0: locator 0, fixer a 2, b 1, c 3" in text and "can't open" in text
     import json
     assert json.loads((tmp_path / "probe_gate.json").read_text())["v6p-b"]["ledger"]["t0"]["a"] == 2
+
+
+def test_gate_report_also_counts_the_locators_helper_calls(tmp_path):
+    g = _gate_mod()
+    _probe_item(tmp_path, "v6p-b", "t0", patch=10)
+    _trace(tmp_path, "v6p-b", "t0", [_step("python3 /tmp/swe/locate.py x", "[locator: helper call 1/5, 4 left]\nresult"),
+                                      _step("python3 /tmp/swe/view.py f.py 1 5", "[locator: helper call 3/5, 2 left]\n1| x"),
+                                      _step("cd /tmp/wa && python3 /tmp/swe/view.py f.py 1 5", "[fixer a: helper call 2/7, 5 left]\n1| x")])
+    r = g.gate(str(tmp_path), "v6p-b")
+    assert r["ledger"]["t0"]["locator"] == 3 and r["ledger"]["t0"]["a"] == 2
+    assert r["ledger_total"] == 2                                       # the 'caps engaged' condition is about the fixers, as registered in addendum 8

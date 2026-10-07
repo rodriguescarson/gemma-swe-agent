@@ -11,6 +11,7 @@ sys.path.insert(0, str(HERE))
 import p2_report as rep  # noqa: E402
 
 FOOTER = re.compile(r"\[fixer ([abc]): helper call (\d+)/(\d+)")
+LOCATOR = re.compile(r"\[locator: helper call (\d+)/(\d+)")
 REFUSAL = re.compile(r"(SHARE SPENT|STOP: candidate [abc])")
 FINAL = re.compile(r"/tmp/w([abc])")
 
@@ -23,21 +24,27 @@ def _ledger_from_dir(d):
     return c
 
 
+def _locator_from_dir(d):
+    return sum(1 for f in os.listdir(d) if f.startswith("L.call."))
+
+
 def ledger_counts(item_dir, task):
     """Counted helper calls per fixer for one probe item and the refusals seen: from the copied ledger directory when it survived, else from the
     footers the helpers print into the stored tool results (the largest n printed for a fixer is its count)."""
     led = item_dir.rstrip("/") + ".ledger"
     if os.path.isdir(led):
-        return dict(_ledger_from_dir(led), refused=0, source="ledger")
-    c, refused = {"a": 0, "b": 0, "c": 0}, 0
+        return dict(_ledger_from_dir(led), refused=0, source="ledger", locator=_locator_from_dir(led))
+    c, refused, loc = {"a": 0, "b": 0, "c": 0}, 0, 0
     for f in glob.glob(os.path.join(item_dir, "traces", "trace_*.json")):
         for st in json.load(open(f)).get("steps", []):
             obs = st.get("observation")
             text = obs if isinstance(obs, str) else json.dumps(obs)
             for k, n, _h in FOOTER.findall(text):
                 c[k] = max(c[k], int(n))
+            for n, _h in LOCATOR.findall(text):
+                loc = max(loc, int(n))
             refused += len(REFUSAL.findall(text))
-    return dict(c, refused=refused, source="traces")
+    return dict(c, refused=refused, source="traces", locator=loc)
 
 
 def helper_fail_tasks(out, arm, T):
@@ -99,7 +106,7 @@ def main(argv=None):
              f"tool-call-budget errors {r['budget']}, infrastructure errors {r['infra']}, items with a can't open file {r['helper_fail_tasks']}, counted helper calls {r['ledger_total']}"
              + (f" | reasons: {'; '.join(r['reasons'])}" if r["reasons"] else "")]
     for task, v in sorted(r["ledger"].items()):
-        lines.append(f"  - ledger {task}: fixer a {v['a']}, b {v['b']}, c {v['c']} counted helper calls, {v['refused']} refusals (from {v['source']})")
+        lines.append(f"  - ledger {task}: locator {v.get('locator', 0)}, fixer a {v['a']}, b {v['b']}, c {v['c']} counted helper calls, {v['refused']} refusals (from {v['source']})")
     print("\n".join(lines))
     with open(a.log, "a") as fh:
         fh.write("\n".join(lines) + "\n")

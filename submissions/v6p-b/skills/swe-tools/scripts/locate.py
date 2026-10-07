@@ -3,6 +3,12 @@ Usage: run_skill_script(skill_name="swe_tools", file_path="locate.py", args={"qu
 import ast, math, os, re, sys, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _ws import ws
+import _budget                                      # v6p-b: the locator's counted share (docs/v4h/GATE.md addendum 10)
+_refusal, _footer = _budget.enter(ws())
+if _refusal:
+    print(_refusal); sys.exit(0)
+if _footer:
+    print(_footer)                                  # first line: the harness truncates long tool output
 args = sys.argv[1:]; q = ""
 if "--query" in args: q = args[args.index("--query") + 1]
 elif args: q = " ".join(a for a in args if a != "--")
