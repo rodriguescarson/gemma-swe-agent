@@ -1,7 +1,7 @@
 """investigate.py must stay under the harness's 5,000-char command-output cap and surface the definition of issue identifiers."""
 import os, subprocess, sys, pathlib, shutil
 ROOT = pathlib.Path(__file__).parent.parent
-S = ROOT / "submissions/v7/skills/swe-tools/scripts"
+S = ROOT / "submissions/v8/skills/swe-tools/scripts"  # was the old v7's copy (byte-identical); submissions/v7 is now v5h2 + fixes
 
 def repo(tmp_path):
     w = tmp_path / "ws"; (w / "pkg").mkdir(parents=True); (w / "tests").mkdir()
