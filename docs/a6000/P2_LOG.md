@@ -43,3 +43,4 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T10:52:35Z | step=p4 | EVENT GPU free again; starting
 - 2026-10-07T10:52:38Z | step=p4 | EVENT started pid 26417 (restarts so far 0; hard stop in 24.3 h)
 - 2026-10-07T11:52:39Z | step=p4 | done=33/74 | solved=16 | empty=3 | errors=0 | median_s=111.1 | cap=0 | gpu=0% | disk_free=902GB | restarts=0
+- 2026-10-07T12:52:42Z | step=p4 | done=55/74 | solved=21 | empty=8 | errors=0 | median_s=135.1 | cap=2 | gpu=100% | disk_free=902GB | restarts=0
