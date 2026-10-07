@@ -156,3 +156,20 @@ def test_adopted_poll_follows_the_pid():
     assert a.poll() is None
     p.kill(); p.wait()
     assert a.poll() == 0
+
+
+def test_an_idle_supervisor_with_an_open_plan_still_writes_hourly_health_lines(tmp_path):
+    plan = {"open": True, "steps": [{"name": "done_step", "total": 1, "docker": False, "cmd": ["true"], "proxy": None, "stats": {"type": "results_jsonl", "file": "/nonexistent.jsonl"}, "post": []}]}
+    state = {"done": ["done_step"], "restarts": {}, "launch_epoch": time.time(), "results": {}}
+    (tmp_path / "plan.json").write_text(json.dumps(plan)); (tmp_path / "state.json").write_text(json.dumps(state))
+    env = dict(os.environ, AUTOPILOT_LOG=str(tmp_path / "log.md"), AUTOPILOT_NO_PUSH="1", AUTOPILOT_SKIP_SERVICES="1", AUTOPILOT_TICK="1", AUTOPILOT_HEALTH_S="2", AUTOPILOT_IDLE_S="1")
+    p = subprocess.Popen([sys.executable, str(ROOT / "scripts" / "a6000" / "autopilot.py"), "--plan", str(tmp_path / "plan.json"), "--state", str(tmp_path / "state.json")],
+                         env=env, cwd=ROOT, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        t0 = time.time()
+        while time.time() - t0 < 12 and "step=idle" not in ((tmp_path / "log.md").read_text() if (tmp_path / "log.md").exists() else ""):
+            time.sleep(0.5)
+        log = (tmp_path / "log.md").read_text()
+        assert "EVENT idle: every step of the plan is done; waiting for new steps" in log and "step=idle" in log and "disk_free=" in log
+    finally:
+        os.killpg(p.pid, signal.SIGKILL)

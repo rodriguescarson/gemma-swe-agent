@@ -18,7 +18,8 @@ NO_PUSH = bool(os.environ.get("AUTOPILOT_NO_PUSH"))   # tests
 G4 = Path.home() / "g4"
 PY = str(G4 / "venv" / "bin" / "python")
 ENV = dict(os.environ, PATH="/usr/bin:" + ":".join(p for p in os.environ.get("PATH", "").split(":") if not p.startswith("/mnt/")))
-TICK, STOP_CHECK_S, HEALTH_S = int(os.environ.get("AUTOPILOT_TICK") or 30), 300, 3600
+TICK, STOP_CHECK_S, HEALTH_S = int(os.environ.get("AUTOPILOT_TICK") or 30), 300, int(os.environ.get("AUTOPILOT_HEALTH_S") or 3600)
+IDLE_S = int(os.environ.get("AUTOPILOT_IDLE_S") or 60)
 SKIP_SERVICES = bool(os.environ.get("AUTOPILOT_SKIP_SERVICES"))   # tests: never touch dockerd / vLLM
 CONT_CHECK_S = int(os.environ.get("AUTOPILOT_CONT_CHECK_S") or 120)      # how often a running step's slowdown is looked at
 FREE_POLL_S = int(os.environ.get("AUTOPILOT_FREE_POLL_S") or 30)         # pause between two "is the GPU free" checks while waiting
@@ -371,13 +372,21 @@ def main(argv=None):
     ap.add_argument("--plan", default=str(G4 / "runs" / "autopilot_plan.json")); ap.add_argument("--state", default=str(G4 / "runs" / "autopilot_state.json"))
     a = ap.parse_args(argv)
     st = json.loads(Path(a.state).read_text()) if Path(a.state).exists() else {"done": [], "restarts": {}, "launch_epoch": None, "results": {}}
+    idle_since, t_idle_health = None, 0.0
     while True:
         plan = json.loads(Path(a.plan).read_text())
         todo = [s for s in plan["steps"] if s["name"] not in st["done"]]
         if not todo:
             if plan.get("open") and lib.time_left_s(st["launch_epoch"] or time.time(), time.time()) > 0:
-                time.sleep(60); continue          # the plan is still being written: wait for the next step
+                if not idle_since:
+                    idle_since = time.time(); t_idle_health = time.time()
+                    log_line(f"- {now_iso()} | EVENT idle: every step of the plan is done; waiting for new steps (the plan is open)")
+                if time.time() - t_idle_health >= HEALTH_S:          # the hourly health line continues while idle
+                    t_idle_health = time.time()
+                    log_line(lib.health_line(now_iso(), "idle", 0, 0, 0, 0, 0, None, 0, gpu_util(), disk_free_gb(), st["restarts"].get("vllm", 0) + st["restarts"].get("docker", 0)))
+                time.sleep(IDLE_S); continue          # the plan is still being written: wait for the next step
             break
+        idle_since = None
         step = todo[0]
         if st["launch_epoch"] is None:
             st["launch_epoch"] = time.time(); json.dump(st, open(a.state, "w"))
