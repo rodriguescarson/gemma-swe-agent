@@ -65,3 +65,5 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T17:56:57Z | step=probe_v7 | END done: done=0/4 solved=0
 - 2026-10-07T17:57:00Z | step=probe_v7 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-07T17:57:36Z | EVENT P6 probe_v7 RESULT: v7 arm-pure, last 4 ids, T = 2: S = 1.373 (122 calls, mean item 233 s, items 171/324/293/144 s, rc 0 x4) -> G4_L4_SCALE 0.7281 (effective cap 412 s); counters on the 4 probe items: view.py usage-line calls 0, literal-wrapper commands 0, write_file path refusals 0, forced-install {} calls 0 (must-be-zero: PASS), cap refusals 2 (v7's read cap, typer_42196d4), loops 0, budget-exhausted 0, helper unreachable 0; solved 0/4 (probe ids, not a table). Next: v7 on the 50 stage-1a ids at C = 2.
+- 2026-10-07T17:57:36Z | step=v7_s50 | EVENT started pid 29560 (restarts so far 0; hard stop in 15.8 h)
+- 2026-10-07T18:57:39Z | step=v7_s50 | done=40/50 | solved=15 | empty=9 | errors=0 | median_s=175.4 | cap=1 | gpu=100% | disk_free=901GB | restarts=0
