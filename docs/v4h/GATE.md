@@ -793,3 +793,24 @@ Stage 1b as run: the queue of `p2_race.py --n 100 --arms v4h2 v6p v6p-b` holds e
 | v4h2 | 31 | 8 | 7 | n/a | n/a |
 | v6p | 31 | 18 | 12 | n/a | n/a |
 | v6p-b | 31 | 1 | 2 | 118 / 140 / 134 / 144 | 83 |
+
+### P2 addendum 11 (P6, the v7 switch; written 2026-10-07 17:43 UTC, before any v7 run; v7 = commit a1ac091 (bundle last changed in d1ac8d4; delta vs v5h2 = 13 files: 3 prompts, 3 stage yamls, 7 helper scripts), tests 128 passed, 1 skipped (tests/test_v7_*.py + tests/test_setup_stage.py, 2026-10-07 17:43 UTC), scripts/validate.py OK)
+Carson's decision (PROMPTS P6, GAPS 2026-10-06 last section): no more compute on v4h2 / v6p / v6p-b; stage 1b was stopped at 14:41 UTC with its PARTIAL table above; only submissions/v7
+(v5h2 plus the fixes for every "ours" finding of docs/a6000/FAILURE_FORENSICS.md) runs from here. Server unchanged (vLLM 0.19.1, int4, bf16 KV, gpu_memory_utilization 0.95); supervisor, guard,
+hourly health lines, backups and the hard stop (2026-10-08 09:44:04 UTC) unchanged.
+**Probe:** v7 arm-pure on the last 4 ids of s200_valid_ids.txt at T = 2 (as addendum 4); scale = 1 / S when S > 1.15, else 1.0 (p2_race --arm-scale-from-probe; fallback 1.0 if the probe is unusable);
+the probe items are judged by the forensics counters only (v7 ships no ledger, so addendum 8's ledger condition does not apply) and are never part of a table.
+**(a) v7 on the 50 stage-1a ids,** 1 sample, C = 2, paired against the stage-1a rows of v4h2 on the same ids (same box, server and settings; a different day is a confound).
+Reading: wins - losses with the exact two-sided sign test and Wilson 95% CIs; the P2 verdict words apply (BETTER net >= +5 and p < 0.10; WORSE net <= -5 and p < 0.10; UNRESOLVED when v7's
+cap-hit share is >= 10 points above v4h2's and the verdict is not BETTER; otherwise NO EVIDENCE). Also reported against v5h2 where it ran (P4 is the public set, so only the counters compare).
+**(b) v7 on the public 74,** sequential (T = 1), pace proxy on, the bundle's own budgets (as P4), judged by scripts/keep_rule.py against eval/kaggle/g4-l4-v4h2g-p312/results.jsonl
+(KEEP = solved >= 37 and paired net >= +3), an A6000 screen and never a Kaggle result, plus the helper gate (<= 1 task with a can't-open).
+**Counters on the traces of (a) and (b)** (scripts/a6000/v7_counters.py): view.py usage-line calls, literal-wrapper commands, write_file path refusals, forced-install `{}` calls: **must be 0** (the
+v7 pass rule of GAPS); also reported: locate/view cap refusals, loops >= 5, budget-exhausted tasks, helper reachability. A non-zero must-be-zero counter is reported with three examples
+(task, call, reply) for the Mac side; it does not stop the run.
+**(c) P3 with v7** for the remaining time: data/heldout1k/p3_ids.txt (the 844 valid held-out tasks minus the 200 sample ids), **4 passes per task** (one pace proxy per pass with its own
+sampling seed: the bundle's seed for pass 1, +1 / +2 / +3 for the others; everything else the bundle's own), C = 2, v7's scale, every model call captured per pass, a resumable queue stopped at the
+hard stop. Rows: train/build_sft.py --pair per pass (test-verified successes only, the sample-200 ids refused), rebalance_rows.py (drop repeats, read_file share 0.15, 200 per task, unknown tools
+dropped), validate_rows.py. Preference pairs: tasks with a solved and a failed attempt, written as raw material (pairs_raw.jsonl: task, solved passes, failed passes); the Adaption SDK's alignment
+schema is applied on the Mac (the package is not installed here, its format is not guessed).
+Order: probe -> (a) -> (b) -> (c); each step's table, counters, verdict and commit hash are reported when it ends.
