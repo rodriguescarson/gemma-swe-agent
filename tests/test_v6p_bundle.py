@@ -299,6 +299,8 @@ def test_skill_md_documents_select_and_the_workdir_override():
 def test_eval_kernel_slug_is_free_and_regenerates_identically(tmp_path):
     assert KERNEL_SLUG not in QUEUED_SLUGS
     kd = ROOT / "kernels" / KERNEL_DIR
+    if not (kd / "kernel-metadata.json").is_file():
+        pytest.skip(f"kernels/{KERNEL_DIR} not present (kernels/*/ is gitignored; generated on the Mac)")
     meta = (kd / "kernel-metadata.json").read_text()
     assert f'"id": "carsonrodrigues/{KERNEL_SLUG}"' in meta and '"docker_image_pinning_type": "original"' in meta
     assert '"machine_shape": "NvidiaL4"' in meta

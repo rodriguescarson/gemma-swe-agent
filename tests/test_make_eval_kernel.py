@@ -309,6 +309,10 @@ def test_adapters_dataset_option_keeps_weights_out_of_the_notebook(tmp_path):
     """--adapters-dataset owner/slug: adapter weights come from the Kaggle dataset (flat <name>__adapter_model.safetensors),
     the manifest and configs stay embedded, the data cell copies the weights into the bundle and stops on a sha mismatch,
     and the dataset is a kernel dataset source."""
+    arm = ROOT / "eval" / "golden" / "arms" / "v4_lora_probe"
+    if not (arm / "eval_config.yaml").is_file() or not any(arm.glob("adapters/*/*.safetensors")):
+        pytest.skip("eval/golden/arms/v4_lora_probe (with its adapter weights) not present: eval/golden/arms/ is "
+                    "gitignored, built locally")
     ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n")
     build(tmp_path, ROOT / "eval" / "golden" / "arms" / "v4_lora_probe", "k", "--ids", str(ids), "--probe", "lora",
           "--adapters-dataset", "carsonrodrigues/g4-adapters-probe2")

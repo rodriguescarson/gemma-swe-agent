@@ -196,6 +196,8 @@ def test_eval_kernel_matches_the_v5b_recipe(name, tmp_path):
     kdir, slug = KERNELS[name]
     assert slug not in QUEUED_SLUGS
     kd = ROOT / "kernels" / kdir
+    if not (kd / "kernel-metadata.json").is_file():
+        pytest.skip(f"kernels/{kdir} not present (kernels/*/ is gitignored; generated on the Mac)")
     meta = (kd / "kernel-metadata.json").read_text()
     assert f'"id": "carsonrodrigues/{slug}"' in meta and '"docker_image_pinning_type": "original"' in meta
     r = subprocess.run([sys.executable, str(ROOT / "scripts" / "make_eval_kernel.py"), str(SUB / name), kdir,

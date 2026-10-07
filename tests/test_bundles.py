@@ -28,10 +28,29 @@ def test_agents_only_use_real_tools(b):
             tools = {t.strip() for t in m.group(1).split(",") if t.strip()}
             assert tools <= REAL_TOOLS, (y, tools - REAL_TOOLS)
 
+def adapter_weights_missing(b):
+    """True for a bundle that names an `adapter:` while its adapters/ dir holds no weight file (*.safetensors, what
+    discover_adapters counts): the weights are gitignored and ship as a Kaggle dataset, so a clone cannot compile it."""
+    yamls = list(b.glob("*.yaml")) + list(b.glob("sub_agents/*.yaml"))
+    named = any(re.search(r"^adapter:\s*\S", y.read_text(), re.M) for y in yamls)
+    return named and not any(p.suffix == ".safetensors" for p in (b / "adapters").rglob("*") if p.is_file())
+
 @pytest.mark.parametrize("b", BUNDLES, ids=lambda p: p.name)
 def test_bundle_compiles_with_official_compiler(b):
+    if adapter_weights_missing(b):
+        pytest.skip(f"adapter weights not present (gitignored): {b.name}/adapters has no *.safetensors")
     r = subprocess.run([sys.executable, str(ROOT / "scripts/validate.py"), str(b)], capture_output=True, text=True)
     assert "OK model=gemma-4-31b-it-qat-w4a16-ct" in r.stdout, r.stdout[-800:] + r.stderr[-2000:]
+
+def test_adapter_weights_guard(tmp_path):
+    b = tmp_path / "b"; (b / "sub_agents").mkdir(parents=True); (b / "agent.yaml").write_text("name: a\n")
+    assert not adapter_weights_missing(b)                                  # no adapter named: compiles without weights
+    (b / "sub_agents" / "fixer.yaml").write_text("name: fixer\nadapter: v11a\n")
+    assert adapter_weights_missing(b)                                      # named, no adapters/ dir (a fresh clone)
+    (b / "adapters" / "v11a").mkdir(parents=True); (b / "adapters" / "v11a" / "adapter_config.json").write_text("{}")
+    assert adapter_weights_missing(b)                                      # config only (v4_lora_test's tracked file)
+    (b / "adapters" / "v11a" / "adapter_model.safetensors").write_bytes(b"x")
+    assert not adapter_weights_missing(b)                                  # weights present: the compile test runs
 
 def test_make_kernel_skips_caches(tmp_path):
     b = tmp_path / "bundle"; (b / "skills/x/scripts/__pycache__").mkdir(parents=True)
