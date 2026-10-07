@@ -68,3 +68,6 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T17:57:36Z | step=v7_s50 | EVENT started pid 29560 (restarts so far 0; hard stop in 15.8 h)
 - 2026-10-07T18:57:39Z | step=v7_s50 | done=40/50 | solved=15 | empty=9 | errors=0 | median_s=175.4 | cap=1 | gpu=100% | disk_free=901GB | restarts=0
 - 2026-10-07T19:15:12Z | step=v7_s50 | END done: done=50/50 solved=19
+- 2026-10-07T19:15:15Z | step=v7_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-07T19:15:15Z | step=v7_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-07T19:15:18Z | step=v7_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
