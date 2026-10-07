@@ -752,3 +752,5 @@ won: fastapi_15589 rich_3676
 lost: fastapi_11194 fastapi_14616 fastapi_9753 requests_6644 rich_3063 rich_3521 rich_3718
 DROP: solved 29 < 37; net -5 < +3`
 - helper reachability: 0/74 tasks with a can't-open; cap hits 3; errored rows 0; median task seconds 148; S(1) = 2.29 (raw 2.27, 3855 calls)
+
+(Correction to the P4 entry above, written 2026-10-07 13:47 UTC: its "S(1) = 2.29" averaged the whole proxy log including the contended hours of 2026-10-07 (docs/a6000/P2_LOG.md). On the clean windows only, S(1) = 1.17 (7 of 28 ten-minute windows were contended and are left out). scripts/a6000/p4_judge.py now reports both. The keep-rule verdict is unchanged: DROP, 29/74 solved, wins 2, losses 7, net -5; helper reachability 0/74 tasks with a can't open.)

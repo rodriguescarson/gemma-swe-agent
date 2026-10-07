@@ -68,3 +68,14 @@ def test_build_reports_cleanly_when_p3_never_ran(tmp_path, capsys):
     (tmp_path / "empty").mkdir()
     assert b.main(["--out", str(tmp_path / "empty"), "--no-append"]) == 0                  # a directory with no items and no capture
     assert "tasks finished 0" in capsys.readouterr().out
+
+
+def test_p4_judge_reports_slowdown_over_clean_windows_and_says_how_much_was_contended(tmp_path):
+    j = _mod("p4_judge")
+    now = 1_000_000.0
+    rows = [{"status": 200, "t": now - 3600 * 5 + i * 20, "latency_s": 2.2, "l4_target_s": 2.0} for i in range(90)]            # healthy hour
+    rows += [{"status": 200, "t": now - 3600 * 3 + i * 20, "latency_s": 120.0, "l4_target_s": 2.0} for i in range(90)]         # contended hour
+    rows += [{"status": 200, "t": now - 1800 + i * 20, "latency_s": 2.4, "l4_target_s": 2.0} for i in range(90)]               # healthy again
+    s = j.slowdown_summary(rows)
+    assert abs(s["clean"] - 1.15) < 0.05 and s["all"] > 20 and s["contended_windows"] == 3 and s["windows"] == 9
+    assert "clean windows" in j.slowdown_text(s) and "contended" in j.slowdown_text(s)

@@ -11,6 +11,35 @@ sys.path.insert(0, str(HERE)); sys.path.insert(0, str(ROOT / "scripts"))
 import p2_lib  # noqa: E402
 
 
+WINDOW_S = 600
+
+
+def slowdown_summary(rows):
+    """Slowdown over everything (all) and over the clean windows only: a 10-minute window of the proxy log whose own slowdown exceeds 3 is a contended window
+    (another workload on the GPU, docs/a6000/P2_LOG.md 2026-10-07) and is left out of `clean`."""
+    ok = [r for r in rows if r.get("status") == 200 and r.get("l4_target_s")]
+    if not ok:
+        return {"all": float("nan"), "clean": float("nan"), "windows": 0, "contended_windows": 0, "calls": 0}
+    tot = p2_lib.slowdown(ok)["effective"]
+    t0 = min(r["t"] for r in ok)
+    buckets = {}
+    for r in ok:
+        buckets.setdefault(int((r["t"] - t0) // WINDOW_S), []).append(r)
+    clean_rows, bad = [], 0
+    for k, rs in buckets.items():
+        sd = p2_lib.slowdown(rs)["effective"]
+        if sd > 3.0:
+            bad += 1
+        else:
+            clean_rows += rs
+    return {"all": tot, "clean": p2_lib.slowdown(clean_rows)["effective"] if clean_rows else float("nan"), "windows": len(buckets), "contended_windows": bad, "calls": len(ok)}
+
+
+def slowdown_text(s):
+    return (f"S(1) over clean windows = {s['clean']:.2f}; over the whole log {s['all']:.2f} ({s['calls']} calls; {s['contended_windows']} of {s['windows']} ten-minute windows "
+            f"were contended by another GPU workload and are left out of the clean figure)")
+
+
 def markdown(out, proxy_log=None):
     out = Path(out)
     arm = (out / "ARM").read_text().strip() if (out / "ARM").exists() else "?"
@@ -30,8 +59,7 @@ def markdown(out, proxy_log=None):
         helper = f"analyzer unavailable ({e!r})"[:80]
     s1 = "n/a"
     if proxy_log and Path(proxy_log).exists():
-        sd = p2_lib.slowdown([json.loads(l) for l in open(proxy_log) if l.strip()])
-        s1 = f"S(1) = {sd['effective']:.2f} (raw {sd['raw']:.2f}, {sd['calls']} calls)"
+        s1 = slowdown_text(slowdown_summary([json.loads(l) for l in open(proxy_log) if l.strip()]))
     return (f"\n### P4 A6000 screen RESULT: {arm} on the public 74 ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n"
             f"**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower "
             f"than the L4 model, so a miss is pessimistic.\n\n"
