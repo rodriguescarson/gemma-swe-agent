@@ -692,3 +692,34 @@ All earlier conditions of addendum 7 stand (3 or more empty patches, 2 or more t
 - Where the report goes: after the probe, scripts/p2_probe_gate.py appends the gate verdict and one ledger line per probe item (fixer a / b / c counted helper calls and refusals, with the source: copied ledger directory or trace footers) to docs/a6000/P2_LOG.md, writes OUT/probe_gate.json, and the results backup pushes both.
 
 (Correction: the addendum 8 notes above were written and pushed at 2026-10-06 23:32 UTC, not 23:41.)
+
+### P2 stage 1a RESULT (2026-10-07 07:10 UTC)
+##### all items
+**stage 1a: 50 ids, arms v4h2, v6p, v6p-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v6p | 50 | 14 | 0.175-0.417 | 19 | 2 | 3 | 226 | 9 |
+| v6p-think | 50 | 3 | 0.021-0.162 | 41 | 0 | 45 | 426 | 6 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 50 | 3 | 5 | 0.727 | +0.00 | NO EVIDENCE | 45 (3/5) |
+| v6p-think vs v4h2 | 50 | 1 | 14 | 0.001 | +0.84 | UNRESOLVED | 5 (1/2) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**stage 1a without contended items: 50 ids, arms v4h2, v6p, v6p-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v6p | 49 | 13 | 0.162-0.403 | 19 | 2 | 3 | 232 | 9 |
+| v6p-think | 49 | 3 | 0.021-0.165 | 40 | 0 | 44 | 426 | 6 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 49 | 3 | 5 | 0.727 | +0.00 | NO EVIDENCE | 44 (3/5) |
+| v6p-think vs v4h2 | 49 | 1 | 14 | 0.001 | +0.84 | UNRESOLVED | 5 (1/2) |
+
+Chosen arm for P4 (addendum 6: the arm that is BETTER than v4h2 under the P2 rule, the larger net if both, else v5h2): **v5h2**.
