@@ -1,5 +1,5 @@
-"""edit.py: the edit channel for v4h (v4 + this one helper). Stdlib only, standalone (no sibling imports: it is
-installed on its own into the sandbox's rewritten tmp, see install.py).
+"""edit.py: the edit channel (v4h, v4h2, v5h2; v7 below). Stdlib only; it imports nothing from its siblings except the
+optional cap ledger (_ws.py), so it still edits when installed alone.
 
   python3 /tmp/swe/edit.py FILE <<'EOF'            SEARCH/REPLACE blocks (several blocks are all-or-nothing)
   <<<<<<< SEARCH
@@ -16,6 +16,11 @@ calls, so 35% of v4's edit_file calls failed "old_string not found" (152 of 439 
 through run_command is one plain string. Matching falls back from exact to trailing-whitespace-tolerant, to
 indentation-shifted, to JSON-unescaped. Bytes are split on "\\n" only and decoded UTF-8 with surrogateescape so untouched
 bytes round-trip. A .py file that no longer compiles after the edit is restored and the error printed.
+
+v7: a --lines body that carries SEARCH/REPLACE markers is applied as a SEARCH/REPLACE block, with one NOTE line, instead
+of writing the markers into the file (docs/a6000/FAILURE_FORENSICS.md finding 11: 13 SYNTAX-ERROR reverts); the range
+shapes the model sends without the flag (FILE A-B, FILE A B, --lines A B, --create FILE) are taken as meant; every
+refusal is one line that names the cause and the next action; the first OK edit is recorded in the task's cap ledger.
 """
 import difflib
 import os
@@ -23,7 +28,8 @@ import py_compile
 import re
 import sys
 
-USAGE = "usage: python3 /tmp/swe/edit.py FILE [--lines A-B | --create] <<'EOF' ... EOF"
+HOWTO = ("edit.py edits one file: send python3 /tmp/swe/edit.py FILE <<'EOF' with a SEARCH/REPLACE block (or FILE --lines "
+         "A-B with the new lines, or FILE --create with the whole file), the lines, then EOF, next")
 PROTECTED = re.compile(r"(^|/)(tests?|testing)/|(^|/)test_[^/]*\.py$|_test\.py$|"
                        r"(^|/)(conftest\.py|pytest\.ini|tox\.ini|setup\.cfg|pyproject\.toml)$")
 MS = re.compile(r"^[ \t]*<{5,9} ?(SEARCH|ORIGINAL|FIND|OLD)[ \t]*$", re.I)
@@ -31,12 +37,15 @@ MD = re.compile(r"^[ \t]*={5,9}[ \t]*$")
 MR = re.compile(r"^[ \t]*>{5,9} ?(REPLACE|UPDATED|NEW)[ \t]*$", re.I)
 FENCE = re.compile(r"^[ \t]*```[\w+.-]*[ \t]*$")
 NUM = re.compile(r"^\s*\d+[|:] ?")
+RANGE_ARG = re.compile(r"^\d+([-:]\d+)?$")
 ESC = re.compile(r'\\(["\\nt])')
 ESC_TO = {'"': '"', "\\": "\\", "n": "\n", "t": "\t"}
 REGION = 30
 OUT_MAX = 3500
-EARLY_EOF = ("ERROR: the edit ended early (no ======= or no >>>>>>> REPLACE line arrived), so nothing changed. A line "
-             "EOF inside the block ends the heredoc. Put EOF once, as the last line, and send the whole edit again.")
+EARLY_EOF = ("ERROR: the edit ended early (no ======= or no >>>>>>> REPLACE line arrived, often because a line EOF inside "
+             "the block ended the heredoc), so nothing changed; put EOF once, as the last line, and send the whole edit again now")
+MARKERS_NOTE = ("the --lines input carried SEARCH/REPLACE markers, so it was applied as a SEARCH/REPLACE block and the "
+                "range was not used; --lines takes only the new lines")
 
 
 class Fail(Exception):
@@ -102,11 +111,13 @@ def parse_blocks(lines):
             raise Fail(EARLY_EOF)
         search, repl = strip_nums(lines[i + 1:j]), strip_nums(lines[j + 1:k])
         if not [l for l in search if l.strip()]:
-            raise Fail("ERROR: the SEARCH part is empty. Copy the exact current lines to replace, or use --lines A-B.")
+            raise Fail("ERROR: the SEARCH part is empty, so copy the exact current lines into it, or replace by number "
+                       "with --lines A-B instead")
         blocks.append((search, repl))
         i = k + 1
     if not blocks:
-        raise Fail("ERROR: no <<<<<<< SEARCH / ======= / >>>>>>> REPLACE block found.\n" + USAGE)
+        raise Fail("ERROR: no <<<<<<< SEARCH / ======= / >>>>>>> REPLACE block arrived, so send one next, or replace by "
+                   "number with --lines A-B and the plain new lines instead")
     return blocks
 
 
@@ -158,18 +169,27 @@ def closest(file_lines, search):
     return best_i
 
 
+def excerpt(line, n=70):
+    s = line.strip().encode("utf-8", "replace").decode("utf-8", "replace")
+    return s if len(s) <= n else s[:n - 3] + "..."
+
+
 def apply_blocks(file_lines, blocks, rel):
     cur, regions = list(file_lines), []
     for search, repl in blocks:
         p, mode, src = find(cur, search)
         if len(p) == 0:
+            if not cur:
+                raise Fail("NO MATCH in %s: the file is empty, so write its whole text with --lines or a new file with "
+                           "--create instead" % rel)
             c = closest(cur, search)
-            raise Fail("NO MATCH in %s for the SEARCH block (%d lines). Closest current lines:\n%s\n"
-                       "Copy them exactly, or replace by number: python3 /tmp/swe/edit.py %s --lines %d-%d <<'EOF' ... EOF"
-                       % (rel, len(search), numbered(cur, c - 6, c + 7), rel, c + 1, c + len(search)))
+            b = min(len(cur), c + len(search))
+            raise Fail("NO MATCH in %s: the SEARCH lines are not in the file (the closest current line is %d: `%s`), so "
+                       "replace by number now with --lines %d-%d, or copy the exact current lines into SEARCH"
+                       % (rel, c + 1, excerpt(cur[c]), c + 1, b))
         if len(p) > 1:
-            raise Fail("AMBIGUOUS in %s: the SEARCH block matches %d places (lines %s). Include more surrounding lines, "
-                       "or use --lines A-B." % (rel, len(p), ", ".join(str(i + 1) for i in p[:6])))
+            raise Fail("AMBIGUOUS in %s: the SEARCH block matches %d places (lines %s), so add more surrounding lines to "
+                       "SEARCH, or replace by number with --lines A-B instead" % (rel, len(p), ", ".join(str(i + 1) for i in p[:6])))
         i = p[0]
         new = reindent(repl, cur[i], src[0]) if indent(cur[i]) != indent(src[0]) else repl
         cur[i:i + len(src)] = new
@@ -177,68 +197,133 @@ def apply_blocks(file_lines, blocks, rel):
     return cur, regions
 
 
-def parse_range(s, nlines):
-    m = re.match(r"^\s*(\d+)\s*(?:-\s*(\d+))?\s*$", s or "")
+def parse_range(s, nlines, rel):
+    m = re.match(r"^\s*(\d+)\s*(?:[-:]\s*(\d+))?\s*$", s or "")
     if not m:
-        raise Fail("ERROR: --lines needs A-B, for example --lines 120-135.")
+        raise Fail("ERROR: --lines needs A-B (for example --lines 120-135), not %r, so send the edit again with the range "
+                   "next" % (s or ""))
     a, b = int(m.group(1)), int(m.group(2) or m.group(1))
     if not (1 <= a <= b <= nlines):
-        raise Fail("ERROR: --lines %d-%d is outside the file (%d lines)." % (a, b, nlines))
+        raise Fail("ERROR: --lines %d-%d is outside %s (%d lines), so pick a range inside 1-%d next"
+                   % (a, b, rel, nlines, nlines))
     return a, b
 
 
-def main(argv, stdin_text):
+def parse_args(argv):
+    """-> (path, mode, range text). FILE [--lines A-B | --lines A B | --lines=A-B | --create]; also FILE A-B, FILE A B,
+    FILE A (meaning --lines) and --create FILE, the shapes the model sends."""
     args = [a for a in argv if a != "--"]
     if not args or args[0] in ("-h", "--help"):
-        raise Fail(USAGE)
-    path, mode, rng = args[0], "blocks", None
-    rest = args[1:]
-    while rest:
-        a = rest.pop(0)
-        if a == "--lines" and rest:
-            mode, rng = "lines", rest.pop(0)
-        elif a.startswith("--lines="):
-            mode, rng = "lines", a.split("=", 1)[1]
-        elif a == "--create":
+        raise Fail(HOWTO)
+    path, mode, rng, nums, i = None, "blocks", None, [], 0
+    while i < len(args):
+        a = args[i]
+        if a == "--create":
             mode = "create"
+        elif a == "--lines" and i + 1 < len(args):
+            rng, i = args[i + 1], i + 1
+            if re.fullmatch(r"\d+", rng) and i + 1 < len(args) and re.fullmatch(r"\d+", args[i + 1]):
+                rng, i = rng + "-" + args[i + 1], i + 1
+            mode = "lines" if mode == "blocks" else mode
+        elif a.startswith("--lines="):
+            rng = a.split("=", 1)[1]
+            mode = "lines" if mode == "blocks" else mode
+        elif path is None and not a.startswith("-"):
+            path = a
+        elif path is not None and RANGE_ARG.match(a):
+            nums.append(a)
         else:
-            raise Fail("ERROR: unknown argument %r.\n%s" % (a, USAGE))
+            raise Fail("ERROR: unknown argument %r, so send the edit again next with only FILE and, if needed, --lines A-B "
+                       "or --create" % a)
+        i += 1
+    if path is None:
+        raise Fail(HOWTO)
+    if nums:
+        if len(nums) == 2 and all(re.fullmatch(r"\d+", x) for x in nums):
+            nums = [nums[0] + "-" + nums[1]]
+        if len(nums) != 1 or rng is not None or mode == "create":
+            raise Fail("ERROR: unknown argument %r, so send the edit again next with only FILE and, if needed, --lines A-B "
+                       "or --create" % nums[-1])
+        rng, mode = nums[0], "lines"
+    return path, mode, rng
+
+
+def source_hint():
+    """' under pkg/' for the workspace's top-level package(s), so a refused test edit points at the source."""
+    root = os.getcwd()
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        return ""
+    skip = {"tests", "test", "testing", "docs", "doc", "examples", "scripts", "benchmarks", "build", "dist"}
+    pk = [n for n in names if n not in skip and not n.startswith((".", "_")) and os.path.isfile(os.path.join(root, n, "__init__.py"))]
+    src = os.path.join(root, "src")
+    if not pk and os.path.isdir(src):
+        pk = ["src/" + n for n in sorted(os.listdir(src)) if os.path.isfile(os.path.join(src, n, "__init__.py"))]
+    return (" under " + " or ".join(p + "/" for p in pk[:2])) if pk else ""
+
+
+def main(argv, stdin_text):
+    path, mode, rng = parse_args(argv)
     rel = path
     full = path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
     if PROTECTED.search(rel.replace(os.sep, "/")):
-        raise Fail("REFUSED %s: test and config files are replaced at grading, so edits there are discarded. "
-                   "Fix the source code instead." % rel)
+        raise Fail("REFUSED %s: test and config files are reset by the grader, so edit the source file%s instead"
+                   % (rel, source_hint()))
     in_lines, _ = split(stdin_text)
     in_lines = strip_fences(in_lines)
     if mode == "create":
         if os.path.exists(full):
-            raise Fail("REFUSED --create: %s already exists. Use a SEARCH/REPLACE block or --lines." % rel)
+            raise Fail("REFUSED --create: %s already exists, so change it with a SEARCH/REPLACE block or --lines A-B instead" % rel)
         os.makedirs(os.path.dirname(full) or ".", exist_ok=True)
         text = join(strip_nums(in_lines), True)
         write_text(full, text)
         out = ["OK created %s (%d lines)" % (rel, len(in_lines))]
         return check_compile(full, rel, None, out)
     if not os.path.isfile(full):
-        raise Fail("NO SUCH FILE: %s. Find it with: git ls-files | grep %s" % (rel, os.path.basename(rel)))
+        raise Fail("NO SUCH FILE: %s, so find the path with git ls-files | grep %s and send the edit again next"
+                   % (rel, os.path.basename(rel)))
     original = read_text(full)
     lines, final_nl = split(original)
-    if mode == "lines":
-        a, b = parse_range(rng, len(lines))
-        new = strip_nums(in_lines)
-        cur = lines[:a - 1] + new + lines[b:]
-        regions = [(a - 1, b - a + 1, len(new), "lines")]
-    else:
-        cur, regions = apply_blocks(lines, parse_blocks(in_lines), rel)
-    if cur == lines:
-        raise Fail("NO CHANGE: the replacement equals the current text of %s." % rel)
-    write_text(full, join(cur, final_nl or not lines))
-    out = []
-    for i, n_old, n_new, m in regions:
-        out.append("OK %s: lines %d-%d replaced (%d -> %d lines%s)"
-                   % (rel, i + 1, i + max(n_old, 1), n_old, n_new, "" if m in ("exact", "lines") else ", matched by " + m))
-    i0, _, n0, _ = regions[0]
-    out.append("Now:\n" + numbered(cur, i0 - 3, i0 + min(n0, REGION - 6) + 3))
-    return check_compile(full, rel, original, out)
+    note = None
+    if mode == "lines" and any(MS.match(l) for l in in_lines):
+        mode, note = "blocks", "NOTE: " + MARKERS_NOTE.replace("--lines input", "--lines %s input" % rng, 1)
+    try:
+        if mode == "lines":
+            a, b = parse_range(rng, len(lines), rel)
+            new = strip_nums(in_lines)
+            cur = lines[:a - 1] + new + lines[b:]
+            regions = [(a - 1, b - a + 1, len(new), "lines")]
+        else:
+            cur, regions = apply_blocks(lines, parse_blocks(in_lines), rel)
+        if cur == lines:
+            raise Fail("NO CHANGE: %s already contains the REPLACE text, so do not resend this edit; move to the next "
+                       "change or run the test now" % rel)
+        write_text(full, join(cur, final_nl or not lines))
+        out = []
+        for i, n_old, n_new, m in regions:
+            out.append("OK %s: lines %d-%d replaced (%d -> %d lines%s)"
+                       % (rel, i + 1, i + max(n_old, 1), n_old, n_new, "" if m in ("exact", "lines") else ", matched by " + m))
+        i0, _, n0, _ = regions[0]
+        out.append("Now:\n" + numbered(cur, i0 - 3, i0 + min(n0, REGION - 6) + 3))
+        text = check_compile(full, rel, original, out)
+    except Fail as e:
+        if note:
+            raise Fail("%s (%s)" % (e, MARKERS_NOTE))
+        raise
+    return text + ("\n" + note if note else "")
+
+
+def compile_error(e):
+    v = getattr(e, "exc_value", None)
+    line, msg, src = getattr(v, "lineno", None), getattr(v, "msg", None), (getattr(v, "text", None) or "").strip()
+    if not msg:
+        msg = (str(v) if v is not None else str(e)).strip().splitlines()[-1:] or ["does not compile"]
+        msg = msg[0]
+    d = ("line %d: %s" % (line, msg)) if line else str(msg)
+    if src:
+        d += ", `%s`" % excerpt(src, 60)
+    return " ".join(d.split())
 
 
 def check_compile(full, rel, original, out):
@@ -248,17 +333,30 @@ def check_compile(full, rel, original, out):
         except py_compile.PyCompileError as e:
             if original is None:
                 os.unlink(full)
-            else:
-                write_text(full, original)
-            raise Fail("SYNTAX ERROR after the edit, so it was REVERTED (%s unchanged):\n%s"
-                       % (rel, str(e).strip()[-400:]))
+                raise Fail("SYNTAX ERROR in the new file (%s), so it was REVERTED and %s was not created; fix those lines "
+                           "and send the --create again now" % (compile_error(e), rel))
+            write_text(full, original)
+            raise Fail("SYNTAX ERROR after the edit (%s), so it was REVERTED and %s is unchanged; fix the new lines and "
+                       "send the edit again now" % (compile_error(e), rel))
         finally:
             try:
                 os.unlink(full + ".swe_pyc_check")
             except OSError:
                 pass
+    _mark_edited()
     text = "\n".join(out)
     return text if len(text) <= OUT_MAX else text[:OUT_MAX - 20] + "\n... (output cut)"
+
+
+def _mark_edited():
+    """The task's first OK edit ends view.py's pre-edit read cap (_ws.py); an edit never fails over the ledger."""
+    try:
+        sys.dont_write_bytecode = True                  # never leave a __pycache__ next to the helpers
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from _ws import mark_edited
+        mark_edited()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":
