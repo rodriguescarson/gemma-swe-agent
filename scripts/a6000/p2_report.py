@@ -64,9 +64,12 @@ def has_loop(trace, n=5):
     return False
 
 
-def loops(out, arm):
+def loops(out, arm, ids=None, exclude=None):
     k = 0
     for f in glob.glob(os.path.join(out, "items", arm, "*", "traces", "trace_*.json")):
+        task = os.path.basename(f)[len("trace_"):-len(".json")]
+        if (ids is not None and task not in ids) or (exclude and (arm, task) in exclude):
+            continue
         try:
             k += has_loop(json.load(open(f)))
         except Exception:
@@ -102,7 +105,7 @@ def summarize(out, arms, ids=None, exclude=None):
              "errors": sum("error" in t for t in tags.values()), "infra": sum("infra" in t for t in tags.values()),
              "verify": sum("verify" in t for t in tags.values()), "cap": sum("cap" in t for t in tags.values()),
              "budget": sum("budget" in t for t in tags.values()), "median_s": statistics.median(secs) if secs else None,
-             "loops": loops(out, arm)}
+             "loops": loops(out, arm, ids, exclude)}
         d["ci"] = wilson(d["solved"], n)
         d["flags"] = []
         if secs and d["median_s"] < 60:

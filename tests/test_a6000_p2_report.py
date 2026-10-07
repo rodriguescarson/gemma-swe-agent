@@ -142,3 +142,14 @@ def test_choose_p4_writes_the_better_arm_else_v5h2(tmp_path):
         put(tmp_path, "v6p", f"t{i}", resolved=(i in {0, 1, 2, 3}), secs=320.0)
     md.main([str(tmp_path), "--label", "t", "--to", "10", "--ids", str(tmp_path / "ids.txt"), "--choose", "p4", "--no-append", "--contended", str(tmp_path / "nope.json")])
     assert json.loads(md.CHOICE.read_text())["p4_arm"] == "v5h2"
+
+
+def test_loops_are_counted_only_for_the_selected_ids_and_not_excluded_items(tmp_path):
+    same = [("run_command", {"command": "ls"})] * 5
+    put(tmp_path, "v6p", "a", trace_calls=same)          # loops
+    put(tmp_path, "v6p", "b", trace_calls=same)          # loops
+    put(tmp_path, "v6p", "c", trace_calls=[("view", {})])
+    assert rep.summarize(str(tmp_path), ["v6p"])["v6p"]["loops"] == 2
+    assert rep.summarize(str(tmp_path), ["v6p"], ids=["a", "c"])["v6p"]["loops"] == 1
+    assert rep.summarize(str(tmp_path), ["v6p"], ids=["c"])["v6p"]["loops"] == 0
+    assert rep.summarize(str(tmp_path), ["v6p"], exclude={("v6p", "a")})["v6p"]["loops"] == 1
