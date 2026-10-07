@@ -384,6 +384,10 @@ def test_committed_overrides_cover_every_leak_and_leave_none(statics):
     import build_fixtures as B
     ctx = statics[0]
     assert B.check_overrides(ctx.overrides, ctx.ids) == []
+    missing = [t for t in ctx.ids if not ctx.T.has_snapshot(t)]
+    if missing:                       # without a snapshot, rule 2 sees only the patch context (RepoIndex): false leaks
+        pytest.skip(f"rule-2 lookups grep each task's base workspace; {len(missing)} of {len(ctx.ids)} snapshots absent "
+                    f"(gitignored data/raw/snapshots), e.g. {missing[0]}")
     left = {}
     with cf.ThreadPoolExecutor(6) as ex:
         all_st = dict(zip(ctx.ids, ex.map(lambda t: B.static_task(ctx, t), ctx.ids)))

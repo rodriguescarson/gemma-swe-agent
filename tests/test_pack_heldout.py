@@ -246,6 +246,9 @@ def test_repack_skips_up_to_date_snapshots(world, tmp_path):
 
 
 def test_graph_files_use_the_harness_key(world, tmp_path, monkeypatch):
+    if not (P.PIPE / "graphs.py").is_file():
+        pytest.skip("data/pallets/pipeline/ (the SWE-Pallets-X pipeline, gitignored) not fetched: "
+                    "python scripts/pallets/fetch.py pipeline/")
     calls = []
 
     def fake_embed(graph_json, npz, python):
