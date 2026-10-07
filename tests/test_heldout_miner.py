@@ -217,6 +217,19 @@ def test_disk_floor_stops(tmp_path):
     assert m.require_disk(tmp_path, floor_gb=8, free_fn=lambda p: 12.0) == 12.0
 
 
+def test_free_gb_reads_the_data_volume_where_it_exists_else_the_repo(tmp_path, monkeypatch):
+    """free_gb() with no path (write_progress, the round summaries) read /System/Volumes/Data unconditionally:
+    FileNotFoundError on Linux (A6000 box, 2026-10-07). The Mac keeps measuring that volume; elsewhere the repo's own
+    filesystem is measured; an explicit path is measured as given."""
+    seen = []
+    monkeypatch.setattr(m.shutil, "disk_usage", lambda p: seen.append(str(p)) or SimpleNamespace(free=5e9))
+    monkeypatch.setattr(m, "DISK_PATH", str(tmp_path))                     # the data volume exists (the Mac)
+    assert m.free_gb() == 5.0 and seen[-1] == str(tmp_path)
+    monkeypatch.setattr(m, "DISK_PATH", str(tmp_path / "absent"))          # no such volume (Linux)
+    assert m.free_gb() == 5.0 and seen[-1] == str(m.ROOT)
+    assert m.free_gb(tmp_path / "x") == 5.0 and seen[-1] == str(tmp_path / "x")
+
+
 def test_batch_dir_cleaned_on_success_and_error(tmp_path):
     with m.batch_dir(tmp_path, "b0") as d:
         (d / "venv").mkdir()

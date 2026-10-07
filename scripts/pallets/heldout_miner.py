@@ -384,7 +384,11 @@ def coverage_gaps(out_json: Path, min_share: float = 0.08) -> set:
 
 
 # ------------------------------------------------------------------------------------------- disk + batches
-def free_gb(path=DISK_PATH) -> float:
+def free_gb(path=None) -> float:
+    """Free GB on `path`; by default the macOS data volume (DISK_PATH), or the repo's filesystem where that volume does
+    not exist (Linux)."""
+    if path is None:
+        path = DISK_PATH if Path(DISK_PATH).exists() else ROOT
     return shutil.disk_usage(path).free / 1e9
 
 
