@@ -58,3 +58,13 @@ def test_final_summary_survives_steps_that_never_ran(tmp_path):
     (d / "task_results.jsonl").write_text(json.dumps({"instance_id": "t0", "resolved": True, "duration_seconds": 100.0, "error": None, "agent_patch_size": 5}) + "\n")
     text = fs.summary_text(str(tmp_path / "p2"), str(tmp_path / "no_p4"), str(tmp_path / "no_p3"), ids=["t0"])
     assert "FINAL SUMMARY" in text and "stage 1a" in text and "P4" in text and "not run" in text and "P3" in text
+
+
+def test_build_reports_cleanly_when_p3_never_ran(tmp_path, capsys):
+    b = _mod("p3_build")
+    assert b.main(["--out", str(tmp_path / "never_created"), "--no-append"]) == 0
+    out = capsys.readouterr().out
+    assert "P3 did not run" in out and "0" in out
+    (tmp_path / "empty").mkdir()
+    assert b.main(["--out", str(tmp_path / "empty"), "--no-append"]) == 0                  # a directory with no items and no capture
+    assert "tasks finished 0" in capsys.readouterr().out

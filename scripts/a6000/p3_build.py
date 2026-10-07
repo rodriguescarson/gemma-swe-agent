@@ -39,6 +39,14 @@ def main(argv=None):
     ap.add_argument("--out", default=str(Path.home() / "g4" / "runs" / "p3")); ap.add_argument("--no-append", action="store_true")
     a = ap.parse_args(argv)
     out = a.out
+    if not os.path.isdir(out):                                    # P3 never started (for example the GPU was busy until the hard stop)
+        text = (f"\n### P3 data report ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n- P3 did not run: no output directory, so no tasks finished, 0 SFT rows, 0 preference pairs.\n")
+        print(text)
+        if not a.no_append:
+            for f in (ROOT / "docs" / "v4h" / "GATE.md", ROOT / "docs" / "a6000" / "P2_LOG.md"):
+                with open(f, "a") as fh:
+                    fh.write(text)
+        return 0
     n = merge_results(out, f"{out}/results_all.jsonl")
     rows = [json.loads(l) for l in open(f"{out}/results_all.jsonl") if l.strip()]
     attempts = {}
