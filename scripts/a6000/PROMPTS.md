@@ -184,3 +184,34 @@ locator budget finding) so you do not redo it.
    harness vs model, example task, proposed fix, confidence), then the detail per section above. Fix nothing in
    the bundles yet. Commit the doc and any analysis scripts (tests first for scripts), push to wip/gemma-agent,
    and end with the top 5 findings in plain words: what is failing most, why, and whether it is our code.
+
+
+-------------------------------------------------------------------------
+P6. SWITCH TO v7 (Carson 2026-10-07: no more compute on the old bundles)
+-------------------------------------------------------------------------
+Repo ~/g4/gemma-swe-agent, branch wip/gemma-agent. Carson's decision: stop spending GPU on v4h2 / v6p / v6p-b and
+run only the fixed bundle submissions/v7 (v5h2 plus the fixes for every "ours" finding in
+docs/a6000/FAILURE_FORENSICS.md; scope and pass rule in docs/GAPS_2026-10-06.md, last section). Keep the supervisor,
+the guard, the hourly health lines, the backups and the 36 h hard stop exactly as they are.
+
+1. STOP stage 1b now, cleanly: let in-flight items finish, write the partial stage 1b table to GATE.md (per arm:
+   items, solved, empty, budget-exhausted, loops; v6p-b's ledger counts), labelled PARTIAL, then free the GPU.
+   Nothing else of v4h2/v6p/v6p-b runs again.
+2. WAIT for v7: `git pull --rebase --autostash origin wip/gemma-agent` every 10 minutes until submissions/v7 and
+   tests/test_v7_bundle.py exist. Then run ONLY v7's tests plus the sandbox tests
+   (PYTHONDONTWRITEBYTECODE=1 venv/bin/python -m pytest -q tests/test_v7_*.py tests/test_setup_stage.py) and the
+   compile check (scripts/validate.py submissions/v7). If anything fails, stop and append the failure to
+   docs/a6000/P2_LOG.md; do not patch v7 yourself (the Mac side owns it).
+3. PRE-REGISTER in GATE.md (same server, same C = 2 and per-arm pacing rule; derive v7's scale from a 4-item probe
+   like addendum 4), then run, in this order, each judged by the forensics counters on its traces (view.py
+   usage-line calls, literal-wrapper commands, write_file path refusals, forced-install `{}` calls, locate/view cap
+   refusals, loops >= 5, budget-exhausted tasks, helper reachability):
+   a. v7 on the 50 stage-1a ids, 1 sample, paired against the existing v4h2 stage-1a rows (same ids, same box;
+      note the different day as a confound). Reading: wins - losses, sign test, Wilson CI.
+   b. v7 on the public 74 (as P4: sequential, pacing on), judged by scripts/keep_rule.py against
+      eval/kaggle/g4-l4-v4h2g-p312/results.jsonl (A6000 screen, not a Kaggle result) and by the counters above.
+   c. With whatever time remains before the hard stop: P3 (training data) with v7 as the bundle, 4 passes per task,
+      excluding the s200 ids, successes only, plus (chosen, rejected) pairs, as written in P3.
+4. Report after each of a, b, c: the table, the counters, the verdict against the pre-registered reading, and the
+   commit hashes. If a counter that v7 must bring to zero is not zero, say which calls still produce it, with
+   three examples (task, call, reply), so the Mac side can fix it.
