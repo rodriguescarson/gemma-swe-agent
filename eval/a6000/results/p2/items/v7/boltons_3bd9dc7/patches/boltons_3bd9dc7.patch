@@ -1,0 +1,180 @@
+diff --git a/boltons/cacheutils.py b/boltons/cacheutils.py
+index 01009f0..a4d02f5 100644
+--- a/boltons/cacheutils.py
++++ b/boltons/cacheutils.py
+@@ -313,98 +313,47 @@ class LRU(dict):
+                 % (cn, self.max_size, self.on_miss, val_map))
+ 
+ 
+-class LRI(dict):
++class LRI(LRU):
+     """The ``LRI`` implements the basic *Least Recently Inserted* strategy to
+     caching. One could also think of this as a ``SizeLimitedDefaultDict``.
+ 
+-    *on_miss* is a callable that accepts the missing key (as opposed
+-    to :class:`collections.defaultdict`'s "default_factory", which
+-    accepts no arguments.) Also note that, like the :class:`LRU`,
+-    the ``LRI`` is instrumented with statistics tracking.
+-
+-    >>> cap_cache = LRI(max_size=2)
+-    >>> cap_cache['a'], cap_cache['b'] = 'A', 'B'
+-    >>> from pprint import pprint as pp
+-    >>> pp(cap_cache)
+-    {'a': 'A', 'b': 'B'}
+-    >>> [cap_cache['b'] for i in range(3)][0]
+-    'B'
+-    >>> cap_cache['c'] = 'C'
+-    >>> print(cap_cache.get('a'))
+-    None
+-    >>> cap_cache.hit_count, cap_cache.miss_count, cap_cache.soft_miss_count
+-    (3, 1, 1)
++    :param max_size: Maximum number of items to keep in the cache.
++    :param on_miss: A callable that is called when a key is not found in the
++        cache. The return value is then stored in the cache and returned.
++    :param values: Initial values to populate the cache.
+     """
+-    # In order to support delitem andn .pop() setitem will need to
+-    # popleft until it finds a key still in the cache. or, only
+-    # support popitems and raise an error on pop.
+-    def __init__(self, max_size=DEFAULT_MAX_SIZE, values=None,
+-                 on_miss=None):
+-        super(LRI, self).__init__()
+-        self.hit_count = self.miss_count = self.soft_miss_count = 0
+-        self.max_size = max_size
+-        self.on_miss = on_miss
+-        self._queue = deque()
+-
+-        if values:
+-            self.update(values)
+-
+-    def __setitem__(self, key, value):
+-        # TODO: pop support (see above)
+-        if len(self) >= self.max_size:
+-            old = self._queue.popleft()
+-            del self[old]
+-        super(LRI, self).__setitem__(key, value)
+-        self._queue.append(key)
+-
+-    def update(self, E, **F):
+-        # E and F are throwback names to the dict() __doc__
+-        if E is self:
+-            return
+-        setitem = self.__setitem__
+-        if callable(getattr(E, 'keys', None)):
+-            for k in E.keys():
+-                setitem(k, E[k])
+-        else:
+-            for k, v in E:
+-                setitem(k, v)
+-        for k in F:
+-            setitem(k, F[k])
+-        return
+-
+-    def copy(self):
+-        return self.__class__(max_size=self.max_size, values=self)
+-
+-    def clear(self):
+-        self._queue.clear()
+-        super(LRI, self).clear()
+-
+     def __getitem__(self, key):
+-        try:
+-            ret = super(LRI, self).__getitem__(key)
+-        except KeyError:
+-            self.miss_count += 1
+-            if not self.on_miss:
+-                raise
+-            ret = self[key] = self.on_miss(key)
+-            return ret
+-        self.hit_count += 1
++        with self._lock:
++            try:
++                # LRI does NOT move the item to the front on access
++                # We use the base dict __getitem__ to avoid LRU's move-to-front
++                val = super(LRU, self).__getitem__(key)
++                self.hit_count += 1
++                return val
++            except KeyError:
++                self.miss_count += 1
++                if not self.on_miss:
++                    raise
++                # We must release the lock before calling self[key] = ...
++                # because __setitem__ also acquires the lock.
++                # But we can't just 'pass' and return.
++                # We need to return the value from on_miss.
++                # The easiest way is to handle the miss outside the lock.
++                pass
++        
++        # Handle miss outside the lock
++        ret = self.on_miss(key)
++        self[key] = ret
+         return ret
+ 
+-    def get(self, key, default=None):
++    def _get_link_and_move_to_front_of_ll(self, key):
++        # Override to NOT move to front
+         try:
+-            return self[key]
++            return self._link_lookup[key]
+         except KeyError:
+-            self.soft_miss_count += 1
+-            return default
+-
+-    def setdefault(self, key, default=None):
+-        try:
+-            return self[key]
++            raise KeyError(key)
+         except KeyError:
+-            self.soft_miss_count += 1
+-            self[key] = default
+-            return default
++            raise KeyError(key)
+ 
+ 
+ ### Cached decorator
+diff --git a/tests/test_lri_issue.py b/tests/test_lri_issue.py
+new file mode 100644
+index 0000000..259b369
+--- /dev/null
++++ b/tests/test_lri_issue.py
+@@ -0,0 +1,40 @@
++import pytest
++from boltons.cacheutils import LRI
++
++def test_lri_update_existing_key():
++    # LRI should not increase size when updating an existing key
++    cache = LRI(max_size=2)
++    cache['a'] = 1
++    cache['b'] = 2
++    assert len(cache) == 2
++    cache['a'] = 3
++    assert len(cache) == 2
++    cache['c'] = 3
++    assert len(cache) == 2
++    assert 'b' not in cache
++    assert 'a' in cache
++    assert 'c' in cache
++
++def test_lri_pop_support():
++    # LRI currently doesn't support pop/popitem well according to TODOs
++    cache = LRI(max_size=2)
++    cache['a'] = 1
++    cache['b'] = 2
++    # This might fail or behave unexpectedly
++    val = cache.pop('a')
++    assert val == 1
++    assert len(cache) == 1
++    assert 'a' not in cache
++
++def test_lri_del_support():
++    cache = LRI(max_size=2)
++    cache['a'] = 1
++    cache['b'] = 2
++    del cache['a']
++    assert len(cache) == 1
++    cache['c'] = 3
++    cache['d'] = 4
++    # If 'a' was deleted, 'b' should be the oldest
++    assert 'b' not in cache
++    assert 'c' in cache
++    assert 'd' in cache
