@@ -25,3 +25,5 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T07:00:32Z | step=stage1a | EVENT started pid 1717 (restarts so far 0; hard stop in 26.8 h)
 - 2026-10-07T07:10:32Z | step=stage1a | END done: done=150/150 solved=33
 - 2026-10-07T07:10:36Z | step=stage1a | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-07T07:10:42Z | step=p4 | EVENT started pid 4174 (restarts so far 0; hard stop in 26.6 h)
+- 2026-10-07T08:10:42Z | step=p4 | done=15/74 | solved=2 | empty=7 | errors=0 | median_s=292.8 | cap=7 | gpu=100% | disk_free=902GB | restarts=0
