@@ -1,12 +1,18 @@
 """Rank source files and symbols (incl. async defs, methods, classes) for a query. Stdlib only.
-Usage: run_skill_script(skill_name="swe_tools", file_path="locate.py", args={"query": "<identifiers, error text, keywords>"})"""
+Usage: python3 /tmp/swe/locate.py "<identifiers, error text, keywords>"   (or --query "...", or the query on stdin)
+v7: counted in the task's cap ledger (_ws.py) and refused after LOCATE_CAP calls per task; an empty query and a query
+with no match each get one line that says what to do next."""
 import ast, math, os, re, sys, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _ws import ws
+from _ws import take_locate, ws
+refusal = take_locate()
+if refusal: print(refusal); sys.exit(0)
 args = sys.argv[1:]; q = ""
-if "--query" in args: q = args[args.index("--query") + 1]
+if "--query" in args: q = " ".join(args[args.index("--query") + 1:args.index("--query") + 2])
 elif args: q = " ".join(a for a in args if a != "--")
 if not q: q = sys.stdin.read() if not sys.stdin.isatty() else ""
+if not q.strip():
+    print('no query: pass identifiers, error text or keywords from the issue next, for example python3 /tmp/swe/locate.py "parse_header ValueError"'); sys.exit(0)
 ROOT = ws(); SKIP = {".git", "node_modules", "__pycache__", "build", "dist", ".venv", "venv", ".tox", "site-packages"}
 split = lambda s: [t.lower() for t in re.findall(r"[A-Z]?[a-z]+|[A-Z]+(?![a-z])|\d+", s) if len(t) > 1]
 def toks(s):
@@ -64,10 +70,11 @@ for s, d in scored:
     if s > 0: by[d[0]].append((s, d))
 fs = sorted(by.items(), key=lambda kv: -(kv[1][0][0] + 0.3 * (kv[1][1][0] if len(kv[1]) > 1 else 0)))
 files = collections.OrderedDict(fs)
+if not files:
+    print(f"no matches; try other identifiers from the issue or `git grep -n <word>` next (workspace={ROOT}, symbols={N})"); sys.exit(0)
 print(f"workspace={ROOT} symbols={N}")
 for i, (f, lst) in enumerate(list(files.items())[:8]):
     tag = " [test]" if lst[0][1][5] else ""
     print(f"{i+1}. {f}{tag}  score={lst[0][0]:.1f}")
     for s, d in lst[:4]:
         if d[1] != "<module>": print(f"     {d[4]} {d[1]}  L{d[2]}-{d[3]}")
-if not files: print("no matches; try other identifiers or `git grep -n <word>`")
