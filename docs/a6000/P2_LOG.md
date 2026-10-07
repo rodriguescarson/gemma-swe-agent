@@ -54,3 +54,5 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
   - ledger typer_42196d4: locator 4, fixer a 7, b 7, c 7 counted helper calls, 2 refusals (from traces)
   - ledger typer_8e75bc3: locator 3, fixer a 3, b 2, c 2 counted helper calls, 2 refusals (from traces)
 - 2026-10-07T13:55:26Z | step=probe_v6pb | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_probe_gate.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-07T13:56:02Z | step=stage1b | EVENT started pid 2788 (restarts so far 0; hard stop in 19.8 h)
+- 2026-10-07T14:54:31Z | step=stage1b | EVENT STOPPED for P6 (Carson: no more compute on the old bundles): supervisor and runner stopped 14:41:41 UTC, the 2 in-flight items finished (14:43:25, 14:44:47), then the proxy, vLLM and the container were stopped; GPU free. Stage 1b as run was v6p-b on the first 31 stage-1a ids (the queue ran the new arm's items for ids 1-50 before any id 51-100: a plan mistake of mine), 0 items of ids 51-100; PARTIAL table in GATE.md. The old P3 step is removed from the plan; the plan stays open and the supervisor idles with hourly health lines until v7 arrives.

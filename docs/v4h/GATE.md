@@ -754,3 +754,42 @@ DROP: solved 29 < 37; net -5 < +3`
 - helper reachability: 0/74 tasks with a can't-open; cap hits 3; errored rows 0; median task seconds 148; S(1) = 2.29 (raw 2.27, 3855 calls)
 
 (Correction to the P4 entry above, written 2026-10-07 13:47 UTC: its "S(1) = 2.29" averaged the whole proxy log including the contended hours of 2026-10-07 (docs/a6000/P2_LOG.md). On the clean windows only, S(1) = 1.17 (7 of 28 ten-minute windows were contended and are left out). scripts/a6000/p4_judge.py now reports both. The keep-rule verdict is unchanged: DROP, 29/74 solved, wins 2, losses 7, net -5; helper reachability 0/74 tasks with a can't open.)
+
+
+### P2 stage 1b PARTIAL = v6p-b on the first 31 stage-1a ids (stopped 2026-10-07 14:41 UTC for P6; 0 items of ids 51-100 ran) RESULT (2026-10-07 14:54 UTC)
+##### all items
+**stage 1b PARTIAL = v6p-b on the first 31 stage-1a ids (stopped 2026-10-07 14:41 UTC for P6; 0 items of ids 51-100 ran): 31 ids, arms v4h2, v6p, v6p-b; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 31 | 8 | 0.137-0.432 | 6 | 0 | 2 | 233 | 5 |
+| v6p | 31 | 4 | 0.051-0.289 | 15 | 0 | 2 | 236 | 9 |
+| v6p-b | 31 | 5 | 0.071-0.326 | 1 | 0 | 0 | 170 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 31 | 0 | 4 | 0.125 | +0.00 | NO EVIDENCE | 28 (0/4) |
+| v6p-b vs v4h2 | 31 | 2 | 5 | 0.453 | -0.06 | NO EVIDENCE | 29 (2/5) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**stage 1b PARTIAL = v6p-b on the first 31 stage-1a ids (stopped 2026-10-07 14:41 UTC for P6; 0 items of ids 51-100 ran) without contended items: 31 ids, arms v4h2, v6p, v6p-b; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 31 | 8 | 0.137-0.432 | 6 | 0 | 2 | 233 | 5 |
+| v6p | 30 | 3 | 0.035-0.256 | 15 | 0 | 2 | 237 | 9 |
+| v6p-b | 31 | 5 | 0.071-0.326 | 1 | 0 | 0 | 170 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 30 | 0 | 4 | 0.125 | +0.00 | NO EVIDENCE | 27 (0/4) |
+| v6p-b vs v4h2 | 31 | 2 | 5 | 0.453 | -0.06 | NO EVIDENCE | 29 (2/5) |
+
+
+Stage 1b as run: the queue of `p2_race.py --n 100 --arms v4h2 v6p v6p-b` holds every (task, arm) item without a result, in task order, so the new arm's items for ids 1-50 came before any item of ids 51-100; the 31 items that ran before the stop (29 finished, 2 in flight finished after it) are all v6p-b on stage-1a ids 1-31. Nothing of ids 51-100 ran. The table above pairs v6p-b against the stage-1a rows of v4h2 and v6p on those 31 ids (same box, different day: a confound). Per arm on these 31 ids:
+
+| arm | items | budget-exhausted tasks | loops >= 5 | ledger counted helper calls (locator / fixer a / b / c) | ledger refusals (SHARE SPENT or STOP) |
+|---|---|---|---|---|---|
+| v4h2 | 31 | 8 | 7 | n/a | n/a |
+| v6p | 31 | 18 | 12 | n/a | n/a |
+| v6p-b | 31 | 1 | 2 | 118 / 140 / 134 / 144 | 83 |
