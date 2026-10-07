@@ -1,6 +1,6 @@
 """v7b = v7 + the two fixes pre-registered in docs/GAPS_2026-10-06.md (last section, "v7 A6000 screen read"), built in a
 new directory so the v7 run on the GPU box is never touched. Strict test-first: step 1, v7b was an exact copy (cp -a,
-byte-identical with the same modes, commit 4de4cec); every later step names the files it may change.
+byte-identical with the same modes: commit "v7b step 1"); every later step names the files it may change.
 
   fix 1  the read-cap refusal stops being a loop trap: view.py + _ws.py (tests/test_v7b_helpers.py, _sandbox, _counters)
   fix 2  submit_patch is a tool, commands never start with run_command: one new line in fixer.md and verifier.md
