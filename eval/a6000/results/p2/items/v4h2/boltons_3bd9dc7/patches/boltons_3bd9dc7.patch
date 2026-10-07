@@ -1,0 +1,106 @@
+diff --git a/boltons/cacheutils.py b/boltons/cacheutils.py
+index 01009f0..26a402f 100644
+--- a/boltons/cacheutils.py
++++ b/boltons/cacheutils.py
+@@ -313,7 +313,7 @@ class LRU(dict):
+                 % (cn, self.max_size, self.on_miss, val_map))
+ 
+ 
+-class LRI(dict):
++class LRI(LRU):
+     """The ``LRI`` implements the basic *Least Recently Inserted* strategy to
+     caching. One could also think of this as a ``SizeLimitedDefaultDict``.
+ 
+@@ -340,56 +340,46 @@ class LRI(dict):
+     # support popitems and raise an error on pop.
+     def __init__(self, max_size=DEFAULT_MAX_SIZE, values=None,
+                  on_miss=None):
+-        super(LRI, self).__init__()
+-        self.hit_count = self.miss_count = self.soft_miss_count = 0
+-        self.max_size = max_size
+-        self.on_miss = on_miss
+-        self._queue = deque()
+-
+-        if values:
+-            self.update(values)
++        super(LRI, self).__init__(max_size=max_size, values=values, on_miss=on_miss)
+ 
+     def __setitem__(self, key, value):
+-        # TODO: pop support (see above)
+-        if len(self) >= self.max_size:
+-            old = self._queue.popleft()
+-            del self[old]
+-        super(LRI, self).__setitem__(key, value)
+-        self._queue.append(key)
+-
+-    def update(self, E, **F):
+-        # E and F are throwback names to the dict() __doc__
+-        if E is self:
+-            return
+-        setitem = self.__setitem__
+-        if callable(getattr(E, 'keys', None)):
+-            for k in E.keys():
+-                setitem(k, E[k])
+-        else:
+-            for k, v in E:
+-                setitem(k, v)
+-        for k in F:
+-            setitem(k, F[k])
+-        return
+-
+-    def copy(self):
+-        return self.__class__(max_size=self.max_size, values=self)
+-
+-    def clear(self):
+-        self._queue.clear()
+-        super(LRI, self).clear()
++        # To make this LRI instead of LRU, we want to avoid moving
++        # the key to the front of the linked list if it already exists.
++        # The LRU.__setitem__ does this via _get_link_and_move_to_front_of_ll.
++        # Instead, we want to just update the value.
++        with self._lock:
++            try:
++                # Use the LRU's internal link lookup to see if it exists
++                link = self._link_lookup[key]
++                link[VALUE] = value
++            except KeyError:
++                # If it doesn't exist, use LRU.__setitem__ to add it and
++                # handle eviction of the least recently used (which is now
++                # the least recently inserted).
++                super(LRI, self).__setitem__(key, value)
+ 
+     def __getitem__(self, key):
+-        try:
+-            ret = super(LRI, self).__getitem__(key)
+-        except KeyError:
+-            self.miss_count += 1
+-            if not self.on_miss:
+-                raise
+-            ret = self[key] = self.on_miss(key)
+-            return ret
+-        self.hit_count += 1
+-        return ret
++        with self._lock:
++            try:
++                link = self._link_lookup[key]
++                val = link[VALUE]
++            except KeyError:
++                # Handle miss separately to avoid lock contention/deadlock
++                # during on_miss call and subsequent __setitem__
++                val = _MISSING
++        
++        if val is not _MISSING:
++            self.hit_count += 1
++            return val
++        
++        self.miss_count += 1
++        if not self.on_miss:
++            raise KeyError(key)
++        
++        # This will call LRI.__setitem__, which acquires the lock
++        res = self.on_miss(key)
++        self[key] = res
++        return res
+ 
+     def get(self, key, default=None):
+         try:
