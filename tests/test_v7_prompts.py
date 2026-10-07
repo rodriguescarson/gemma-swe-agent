@@ -79,8 +79,9 @@ class Scratch:
             self.install()
 
     def env(self):
+        # like the sandbox: the interpreter that runs the harness comes first on PATH, so `python3` has pytest
         return dict(os.environ, SWE_WS=str(self.ws), TMPDIR=str(self.tmp), TEST_TMPDIR=str(self.tmp), PYTHONPATH=str(self.ws),
-                    PYTHONDONTWRITEBYTECODE="1")
+                    PYTHONDONTWRITEBYTECODE="1", PATH=os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", ""))
 
     def install(self):
         # install.py as the skill runner calls it: a copy of the skill in a temp dir; /tmp/swe stands for <tmp>/swe
@@ -147,7 +148,8 @@ def test_every_shell_line_runs_and_prints_what_the_prompt_promises(tmp_path, sta
     pre, check, promise = expectation(fill(cmd))
     if pre:
         pre(s)
-    rc, out = s.sh(fill(cmd), fill_body(cmd, body) if body is not None else None)
+    heredoc = body is not None or cmd.rstrip().endswith("<<'EOF'")       # a backticked heredoc start: the model adds the lines
+    rc, out = s.sh(fill(cmd), fill_body(cmd, body or "") if heredoc else None)
     assert check(rc, out, s), (stage, cmd, promise, rc, out[-800:])
 
 

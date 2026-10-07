@@ -184,7 +184,7 @@ def apply_blocks(file_lines, blocks, rel):
                            "--create instead" % rel)
             c = closest(cur, search)
             b = min(len(cur), c + len(search))
-            raise Fail("NO MATCH in %s: the SEARCH lines are not in the file (the closest current line is %d: `%s`), so "
+            raise Fail("NO MATCH in %s: the SEARCH lines are not in the file (the closest is line %d: `%s`), so "
                        "replace by number now with --lines %d-%d, or copy the exact current lines into SEARCH"
                        % (rel, c + 1, excerpt(cur[c]), c + 1, b))
         if len(p) > 1:
