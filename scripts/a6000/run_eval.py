@@ -38,8 +38,9 @@ def budget_for(bundle):
     return read_budget(bundle)[0]
 
 
-def result_row(cfg, tid, resolved, exit_code, calls, secs, err, patch):
-    return dict(cfg=cfg, id=tid, resolved=bool(resolved), exit=exit_code, calls=calls, secs=round(secs, 1), err=err, patch=patch)
+def result_row(cfg, tid, resolved, exit_code, calls, secs, err, patch, t=None):
+    """t = the wall-clock finish time (epoch): lets the GPU-contention guard re-run what finished during a contended window."""
+    return dict(cfg=cfg, id=tid, resolved=bool(resolved), exit=exit_code, calls=calls, secs=round(secs, 1), err=err, patch=patch, t=t)
 
 
 def main(argv=None):
@@ -112,9 +113,9 @@ def main(argv=None):
             try:
                 r = run_sync(lambda: ev.evaluate_task(task=t, task_index=i, total_tasks=len(tasks)))
                 row = result_row(None, t.instance_id, r.resolved, r.test_exit_code, r.tool_calls, time.time() - s,
-                                 (str(r.error)[:300] if r.error else None), r.agent_patch or "")
+                                 (str(r.error)[:300] if r.error else None), r.agent_patch or "", t=time.time())
             except Exception as e:
-                row = dict(cfg=None, id=t.instance_id, resolved=False, err="EXC " + repr(e)[:300], secs=round(time.time() - s, 1))
+                row = dict(cfg=None, id=t.instance_id, resolved=False, err="EXC " + repr(e)[:300], secs=round(time.time() - s, 1), t=time.time())
             out.write(json.dumps(row) + "\n"); out.flush()
             print(i, row["id"], row["resolved"], row.get("calls"), row["secs"], (row.get("err") or "")[:80], flush=True)
     n = sum(json.loads(l)["resolved"] for l in open(out_dir / "results.jsonl"))

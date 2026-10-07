@@ -37,7 +37,7 @@ def test_uses_subprocess_sandbox_and_no_docker():
 
 def test_result_row_has_the_kernels_fields():
     row = _load().result_row(None, "t1", True, 0, 12, 3.14159, None, "diff")
-    assert list(row) == ["cfg", "id", "resolved", "exit", "calls", "secs", "err", "patch"] and row["secs"] == 3.1
+    assert list(row)[:8] == ["cfg", "id", "resolved", "exit", "calls", "secs", "err", "patch"] and row["secs"] == 3.1 and "t" in row      # t: the finish stamp of the contention guard
 
 
 def test_done_ids_and_remaining_support_resume(tmp_path):

@@ -69,3 +69,33 @@ _INFRA = re.compile(r"APIError|APIConnection|Connection error|ConnectError|Conne
 def is_infra_error(err):
     """An item error caused by the model server or network (re-run it), as opposed to the bundle's own behaviour or a budget end."""
     return bool(err) and bool(_INFRA.search(str(err)))
+
+
+# ------------------------------------------------------------------------------------- external GPU contention (2026-10-07)
+CONT_S, CONT_WINDOW_S, CONT_MIN_CALLS, CONT_MARGIN_S = 3.0, 600, 8, 900
+
+
+def window_slowdown(rows, now, window_s=CONT_WINDOW_S, min_calls=CONT_MIN_CALLS):
+    """Effective slowdown (sum max(latency, L4-model time) / sum L4-model time) over the pace-proxy rows of the last window_s seconds, or None with too few calls."""
+    r = [x for x in rows if x.get("status") == 200 and x.get("l4_target_s") is not None and now - window_s <= x.get("t", 0) <= now]
+    tgt = sum(x["l4_target_s"] for x in r)
+    if len(r) < min_calls or tgt <= 0:
+        return None
+    return sum(max(x["latency_s"], x["l4_target_s"]) for x in r) / tgt
+
+
+def contended(s):
+    return s is not None and s > CONT_S
+
+
+def gpu_free(samples):
+    """nvidia-smi utilisation samples taken while vLLM is idle: free = median <= 20% and no sample above 60% (a mostly-busy GPU with brief zeros is busy)."""
+    if not samples:
+        return False
+    s = sorted(samples)
+    return s[len(s) // 2] <= 20 and max(samples) <= 60
+
+
+def contaminated_since(detect_epoch):
+    """Items finishing after this time (or still running) are re-run: the contention began before it was noticed."""
+    return detect_epoch - CONT_MARGIN_S

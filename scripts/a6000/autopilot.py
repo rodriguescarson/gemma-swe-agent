@@ -20,6 +20,12 @@ PY = str(G4 / "venv" / "bin" / "python")
 ENV = dict(os.environ, PATH="/usr/bin:" + ":".join(p for p in os.environ.get("PATH", "").split(":") if not p.startswith("/mnt/")))
 TICK, STOP_CHECK_S, HEALTH_S = int(os.environ.get("AUTOPILOT_TICK") or 30), 300, 3600
 SKIP_SERVICES = bool(os.environ.get("AUTOPILOT_SKIP_SERVICES"))   # tests: never touch dockerd / vLLM
+CONT_CHECK_S = int(os.environ.get("AUTOPILOT_CONT_CHECK_S") or 120)      # how often a running step's slowdown is looked at
+FREE_POLL_S = int(os.environ.get("AUTOPILOT_FREE_POLL_S") or 30)         # pause between two "is the GPU free" checks while waiting
+FREE_SAMPLES = int(os.environ.get("AUTOPILOT_FREE_SAMPLES") or 6)        # nvidia-smi utilisation samples per check, SAMPLE_GAP_S apart
+SAMPLE_GAP_S = 5
+CONFIRM_WAIT_S = int(os.environ.get("AUTOPILOT_CONFIRM_WAIT_S") or 20)   # after stopping the step, let vLLM drain before sampling
+FAKE_UTIL = os.environ.get("AUTOPILOT_FAKE_GPU_UTIL")                    # tests: a file of space-separated utilisation numbers
 
 
 def now_iso(t=None):
@@ -171,6 +177,50 @@ def disk_free_gb():
     return st.f_bavail * st.f_frsize / 1e9
 
 
+def gpu_samples():
+    """Utilisation samples of the whole GPU (every process on it, including ones outside WSL). Taken while vLLM is idle they measure someone else's load."""
+    if FAKE_UTIL:
+        return [float(x) for x in Path(FAKE_UTIL).read_text().split()]
+    out = []
+    for _ in range(FREE_SAMPLES):
+        u = gpu_util()
+        if u is not None:
+            out.append(u)
+        time.sleep(SAMPLE_GAP_S)
+    return out
+
+
+def wait_gpu_free(st, name):
+    """Block until two consecutive checks find the GPU free (vLLM idle); False when the hard stop arrives first. Logs every 10 minutes."""
+    consecutive, last_log, t0 = 0, 0.0, time.time()
+    while True:
+        if lib.time_left_s(st["launch_epoch"], time.time()) <= 0:
+            return False
+        samples = gpu_samples()
+        consecutive = consecutive + 1 if lib.gpu_free(samples) else 0
+        if consecutive >= 2:
+            return True
+        if time.time() - last_log >= 600:
+            last_log = time.time()
+            log_line(f"- {now_iso()} | step={name} | EVENT waiting for a free GPU ({(time.time() - t0) / 60:.0f} min so far; utilisation samples {samples})", push=False)
+        time.sleep(FREE_POLL_S)
+
+
+def read_rows(path, tail=4000):
+    try:
+        with open(path) as f:
+            lines = f.readlines()[-tail:]
+    except OSError:
+        return []
+    rows = []
+    for l in lines:
+        try:
+            rows.append(json.loads(l))
+        except ValueError:
+            pass
+    return rows
+
+
 def stats_for(step):
     try:
         mod = importlib.reload(importlib.import_module("autopilot_stats"))
@@ -185,6 +235,7 @@ def run_step(step, st, state_path):
     name = step["name"]
     restarts = st["restarts"].get(name, 0)
     reruns_after_infra = 0
+    suppress_until = 0.0
     while True:
         left = lib.time_left_s(st["launch_epoch"], time.time())
         if left <= 0:
@@ -193,6 +244,13 @@ def run_step(step, st, state_path):
             log_line(f"- {now_iso()} | step={name} | EVENT dockerd would not start"); return "failed"
         if not SKIP_SERVICES and not ensure_vllm():
             log_line(f"- {now_iso()} | step={name} | EVENT vLLM would not start"); return "failed"
+        if (FAKE_UTIL or not SKIP_SERVICES) and not (st.get("child_step") == name and st.get("child") and Adopted(st["child"]).poll() is None):
+            samples = gpu_samples()
+            if not lib.gpu_free(samples):
+                log_line(f"- {now_iso()} | step={name} | EVENT GPU busy at step start (another workload is using it; utilisation samples {samples}); waiting for it to be free", push=False)
+                if not wait_gpu_free(st, name):
+                    return "hardstop"
+                log_line(f"- {now_iso()} | step={name} | EVENT GPU free again; starting", push=False)
         proxy = start_proxy(step.get("proxy"), st)
         adopt = st.get("child") if st.get("child_step") == name else None
         if adopt and Adopted(adopt).poll() is None:
@@ -204,7 +262,7 @@ def run_step(step, st, state_path):
             log_line(f"- {now_iso()} | step={name} | EVENT started pid {child.pid} (restarts so far {restarts}; hard stop in {left / 3600:.1f} h)", push=False)
         st["child"], st["child_step"] = child.pid, name
         json.dump(st, open(state_path, "w"))
-        t_stop = t_health = time.time()
+        t_stop = t_health = t_cont = time.time()
         problem = None
         while child.poll() is None:
             time.sleep(TICK)
@@ -224,11 +282,37 @@ def run_step(step, st, state_path):
                     kill_group(child); kill_group(proxy)
                     log_line(f"- {now_iso()} | step={name} | BLOCKED {why}")
                     return "blocked"
+            if step.get("speed_log") and time.time() - t_cont >= CONT_CHECK_S and time.time() >= suppress_until:
+                t_cont = time.time()
+                slow = lib.window_slowdown(read_rows(step["speed_log"]), time.time())
+                if lib.contended(slow):
+                    detect = time.time()
+                    kill_group(child); kill_group(proxy)                  # stop my own load: the utilisation that remains is someone else's
+                    time.sleep(CONFIRM_WAIT_S)
+                    samples = gpu_samples()
+                    if not lib.gpu_free(samples):
+                        log_line(f"- {now_iso()} | step={name} | EVENT EXTERNAL GPU CONTENTION: the step's per-call slowdown over the last 10 min is S={slow:.1f} and nvidia-smi shows the GPU busy "
+                                 f"with vLLM idle (samples {samples}); step paused, items finished since {time.strftime('%H:%M', time.gmtime(lib.contaminated_since(detect)))} UTC are re-run")
+                        if step.get("purge_since"):
+                            r = sh(step["purge_since"] + [str(lib.contaminated_since(detect))], cwd=ROOT)
+                            log_line(f"- {now_iso()} | step={name} | EVENT contaminated items purged: {r.stdout.strip()[-60:]}", push=False)
+                        if not wait_gpu_free(st, name):
+                            return "hardstop"
+                        log_line(f"- {now_iso()} | step={name} | EVENT GPU free again; resuming (the purged items are queued again)")
+                        problem = "contention"
+                    else:
+                        suppress_until = time.time() + 1800
+                        log_line(f"- {now_iso()} | step={name} | EVENT high slowdown (S={slow:.1f}) but the GPU is idle with vLLM idle (samples {samples}): false alarm, nothing purged, "
+                                 f"contention check suppressed for 30 min", push=False)
+                        problem = "false alarm"
+                    break
             if time.time() - t_health >= HEALTH_S:
                 t_health = time.time()
                 s = stats_for(step)
                 log_line(lib.health_line(now_iso(), name, s["done"], step["total"], s["solved"], s["empty"], s["errors"], s["median_s"], s["cap"], gpu_util(),
                                          disk_free_gb(), st["restarts"].get("vllm", 0) + st["restarts"].get("docker", 0)))
+        if problem in ("contention", "false alarm"):
+            continue                                               # the step was stopped above; no restart is counted, the queue resumes
         if problem:
             kill_group(child); kill_group(proxy)
             restarts += 1; st["restarts"][name] = restarts; json.dump(st, open(state_path, "w"))
