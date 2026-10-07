@@ -308,7 +308,9 @@ def test_packs_small_and_complete(tmp_path):
 
 def test_the_kernel_slug_is_an_existing_one_no_queued_bundle_uses():
     assert KERNEL_SLUG not in TAKEN
-    assert (ROOT / "kernels" / "g4-hc-v4h2f-p312").exists() or True       # the slug's last use: the CPU helper check (done)
+    # an existing slug made under the 3.12 image (new slugs get the 3.13 image and every cp312 wheel fails): its last use
+    # was the CPU helper check of 2026-10-04, recorded in GATE.md ("g4-lora-test v3", HELPER_CHECK PASS)
+    assert "g4-hc-v4h2f-p312 on slug g4-lora-test" in (ROOT / "docs" / "v4h" / "GATE.md").read_text()
 
 
 @pytest.mark.skipif(not (ROOT / "kernels" / KERNEL_DIR / "kernel-metadata.json").exists(),
