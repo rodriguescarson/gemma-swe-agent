@@ -1,0 +1,100 @@
+diff --git a/reproduce_recursive_alias.py b/reproduce_recursive_alias.py
+new file mode 100644
+index 0000000..07dcc42
+--- /dev/null
++++ b/reproduce_recursive_alias.py
+@@ -0,0 +1,38 @@
++from typing import Union, Any
++from cattrs import Converter
++from cattrs.strategies import configure_tagged_union
++
++class A:
++    def __init__(self, a: int):
++        self.a = a
++    def __repr__(self):
++        return f"A({self.a})"
++    def __eq__(self, other):
++        return isinstance(other, A) and self.a == other.a
++
++class B:
++    def __init__(self, b: str):
++        self.b = b
++    def __repr__(self):
++        return f"B({self.b})"
++    def __eq__(self, other):
++        return isinstance(other, B) and self.b == other.b
++
++# Recursive type alias
++type Recursive = A | B | list["Recursive"]
++
++converter = Converter()
++converter.register_structure_hook(A, lambda v, c: A(v['a']))
++converter.register_structure_hook(B, lambda v, c: B(v['b']))
++
++# We need to register the tagged union strategy FIRST, but the strategy 
++# itself calls get_structure_hook for each member of the union.
++# If one of the members is a recursive reference to the alias, 
++# it will fail because the hook for the alias isn't registered yet.
++
++try:
++    configure_tagged_union(Recursive, converter)
++    print("Success")
++except Exception as e:
++    import traceback
++    traceback.print_exc()
+diff --git a/src/cattrs/strategies/_unions.py b/src/cattrs/strategies/_unions.py
+index 7cc06d8..b7437f2 100644
+--- a/src/cattrs/strategies/_unions.py
++++ b/src/cattrs/strategies/_unions.py
+@@ -54,22 +54,18 @@ def configure_tagged_union(
+     args = union.__args__
+     tag_to_hook = {}
+     exact_cl_unstruct_hooks = {}
+-    for cl in args:
+-        tag = tag_generator(cl)
+-        struct_handler = converter.get_structure_hook(cl)
+-        unstruct_handler = converter.get_unstructure_hook(cl)
+-
+-        def structure_union_member(val: dict, _cl=cl, _h=struct_handler) -> cl:
+-            return _h(val, _cl)
+-
+-        def unstructure_union_member(val: union, _h=unstruct_handler) -> dict:
+-            return _h(val)
+-
+-        tag_to_hook[tag] = structure_union_member
+-        exact_cl_unstruct_hooks[cl] = unstructure_union_member
+-
+     cl_to_tag = {cl: tag_generator(cl) for cl in args}
+ 
++    def unstructure_tagged_union(
++        val: union,
++        _exact_cl_unstruct_hooks=exact_cl_unstruct_hooks,
++        _cl_to_tag=cl_to_tag,
++        _tag_name=tag_name,
++    ) -> dict:
++        res = _exact_cl_unstruct_hooks[val.__class__](val)
++        res[_tag_name] = _cl_to_tag[val.__class__]
++        return res
++
+     if default is not NOTHING:
+         default_handler = converter.get_structure_hook(default)
+ 
+@@ -138,6 +134,18 @@ def configure_tagged_union(
+     converter.register_unstructure_hook(union, unstructure_tagged_union)
+     converter.register_structure_hook(union, structure_tagged_union)
+ 
++    for cl in args:
++        tag = tag_generator(cl)
++
++        def structure_union_member(val: dict, _cl=cl) -> cl:
++            return converter.get_structure_hook(_cl)(val, _cl)
++
++        def unstructure_union_member(val: union) -> dict:
++            return converter.get_unstructure_hook(val.__class__) (val)
++
++        tag_to_hook[tag] = structure_union_member
++        exact_cl_unstruct_hooks[cl] = unstructure_union_member
++
+ 
+ def configure_union_passthrough(
+     union: Any, converter: BaseConverter, accept_ints_as_floats: bool = True
