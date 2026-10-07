@@ -34,3 +34,12 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-07T09:38:48Z | EVENT contention source identified (read-only queries, nothing touched): Windows-side python.exe pid 200732 (started 2026-10-07 12:39:35 local = 07:09:35 UTC from a cmd window, parent pid 123656, working set 5.3 GB, owner and command line not readable from WSL) uses about 97% of the GPU's 3D engine; WSL itself is clean (booted 06:53 UTC, one distro, one vLLM, idle container, no leftovers of the interrupted run). Not ours; the step waits for a free GPU (guard) and the hard stop is unchanged.
 - 2026-10-07T09:41:21Z | step=p4 | EVENT waiting for a free GPU (11 min so far; utilisation samples [0.0, 95.0, 0.0, 94.0, 96.0, 0.0])
 - 2026-10-07T09:51:23Z | step=p4 | EVENT waiting for a free GPU (21 min so far; utilisation samples [96.0, 96.0, 0.0, 96.0, 0.0, 97.0])
+- 2026-10-07T10:01:25Z | step=p4 | EVENT waiting for a free GPU (31 min so far; utilisation samples [95.0, 95.0, 94.0, 95.0, 0.0, 94.0])
+- 2026-10-07T10:11:27Z | step=p4 | EVENT waiting for a free GPU (41 min so far; utilisation samples [95.0, 95.0, 96.0, 0.0, 95.0, 0.0])
+- 2026-10-07T10:21:29Z | step=p4 | EVENT waiting for a free GPU (51 min so far; utilisation samples [0.0, 91.0, 93.0, 92.0, 94.0, 0.0])
+- 2026-10-07T10:31:31Z | step=p4 | EVENT waiting for a free GPU (61 min so far; utilisation samples [95.0, 96.0, 0.0, 96.0, 96.0, 0.0])
+- 2026-10-07T10:41:33Z | step=p4 | EVENT waiting for a free GPU (71 min so far; utilisation samples [97.0, 37.0, 95.0, 0.0, 96.0, 0.0])
+- 2026-10-07T10:51:35Z | step=p4 | EVENT waiting for a free GPU (81 min so far; utilisation samples [0.0, 0.0, 0.0, 0.0, 1.0, 0.0])
+- 2026-10-07T10:52:35Z | step=p4 | EVENT GPU free again; starting
+- 2026-10-07T10:52:38Z | step=p4 | EVENT started pid 26417 (restarts so far 0; hard stop in 24.3 h)
+- 2026-10-07T11:52:39Z | step=p4 | done=33/74 | solved=16 | empty=3 | errors=0 | median_s=111.1 | cap=0 | gpu=0% | disk_free=902GB | restarts=0
