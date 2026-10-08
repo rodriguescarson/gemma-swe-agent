@@ -84,3 +84,95 @@ Plan and pre-registration: docs/v4h/GATE.md, "P2 addendum 4". The supervisor (sc
 - 2026-10-08T11:31:49Z | EVENT P7 recovery (new session): STATE. Nothing is alive: no autopilot, vLLM, pace_proxy, race or swegemma process; no docker daemon; no tmux server; nvidia-smi shows no compute process (678 MiB used, 0%). The WSL VM itself was down: it booted again at 11:29:23 UTC today, and the newest P3 files are from 23:29:38 UTC on 2026-10-07 (race.log 23:29:14, last health line 23:02:11), so the interruption killed the supervisor (autopilot_state.json still names child 12756 / proxy 32218, both gone), vLLM, the container g4-p3, the 4 pace proxies and the P3 pass at about 23:30 UTC. The plan is on step v7_p3 (done: stage1a, p4, probe_v6pb, stage1b, probe_v7, v7_s50, v7_p4). P3 (v7 = b62a546): 50 of 3376 items finished (race.log), rows.jsonl 47, pairs_raw 2 (as of the 22:22 build), disk free 830 GB. LOST: items in flight at the interruption = arrow_356035a__s3 and arrow_356035a__s4 (no task_results; the supervisor's purge rule re-runs them); P3 made no progress for about 12 h while the box was down.
 - 2026-10-08T11:31:49Z | EVENT P7 DECISION: the hard stop (2026-10-08 09:44:04 UTC) passed 1 h 51 min before this session started (11:29 UTC). P7 step 5 applies: P3 is NOT resumed (that would be new GPU work after the hard stop and the supervisor's run_step returns "hardstop" before it starts docker or vLLM anyway). The supervisor is started once so that it runs its own finalize (plan finalize hooks: p3_build.py, final_summary.py, backup_results.py), cleanup and DONE line; P3 stays at 50/3376 items.
 - 2026-10-08T11:31:49Z | step=v7_p3 | END hardstop: done=50/3376 solved=9
+
+### P3 data report (2026-10-08 11:31 UTC; ONE pass, bundle v7, stopped at the hard stop; weights and data stay out of git)
+- tasks finished 13 (solved in at least one pass 5); attempts 50 over 4 passes (rows per pass {1: 13, 2: 13, 3: 12, 4: 12}); captured model calls 2154
+- SFT rows (test-verified successes only, sample-200 ids refused): 280; after rebalance (drop repeats, read_file share 0.15, 200 per task, unknown tools dropped): 216
+- rebalance profile: `{"before": {"rows": 280, "tasks": 5, "tools": {"run_command": 230, "null": 36, "submit_patch": 9, "run_skill_script": 5}, "stages": {"setup": 14, "locator": 66, "fixer": 140, "verifier": 60}, "replies": 36}, "after": {"rows": 216, "tasks": 5, "tools": {"run_command": 166, "null": 36, "submit_patch": 9, "run_skill_script": 5}, "stages": {"setup": 14, "locator": 66, "fixer": 78, "verifier": 58}, "re`
+- validation rc: 0 (build rc 0, rebalance rc 0); `s_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "completion_tokens_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "problems": 0,
+ "first_problems": [],
+ "ok": true
+}`
+- preference pairs (a solved and a failed attempt of the same task): **3** (raw material in pairs_raw.jsonl: task, solved passes, failed passes; the Adaption SDK's alignment schema is applied on the Mac, the package is not installed here)
+- 2026-10-08T11:31:55Z | FINALIZE /home/jc/g4/venv/bin/python scripts/a6000/p3_build.py --out rc=0
+
+## FINAL SUMMARY (2026-10-08 11:31 UTC) - every number is an A6000 screen, never a Kaggle result
+
+#### stage 1a (ids 1-50)
+**stage 1a (ids 1-50): 50 ids, arms v4h2, v6p, v6p-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v6p | 50 | 14 | 0.175-0.417 | 19 | 2 | 3 | 226 | 9 |
+| v6p-think | 50 | 3 | 0.021-0.162 | 41 | 0 | 45 | 426 | 6 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 50 | 3 | 5 | 0.727 | +0.00 | NO EVIDENCE | 45 (3/5) |
+| v6p-think vs v4h2 | 50 | 1 | 14 | 0.001 | +0.84 | UNRESOLVED | 5 (1/2) |
+
+#### stage 1b (ids 51-100)
+**stage 1b (ids 51-100): 50 ids, arms v4h2, v6p, v6p-b; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 0 | 0 | 0.000-1.000 | 0 | 0 | 0 | nan | 0 |
+| v6p | 0 | 0 | 0.000-1.000 | 0 | 0 | 0 | nan | 0 |
+| v6p-b | 0 | 0 | 0.000-1.000 | 0 | 0 | 0 | nan | 0 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 0 | 0 | 0 | 1.000 | +0.00 | NO EVIDENCE | 0 (0/0) |
+| v6p-b vs v4h2 | 0 | 0 | 0 | 1.000 | +0.00 | NO EVIDENCE | 0 (0/0) |
+
+#### pooled stage 1a + 1b (ids 1-100), arms that ran in both
+**pooled stage 1a + 1b (ids 1-100), arms that ran in both: 100 ids, arms v4h2, v6p; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v6p | 50 | 14 | 0.175-0.417 | 19 | 2 | 3 | 226 | 9 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v6p vs v4h2 | 50 | 3 | 5 | 0.727 | +0.00 | NO EVIDENCE | 45 (3/5) |
+
+
+### P4 A6000 screen RESULT: v5h2 on the public 74 (2026-10-08 11:31 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 29/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 29/74 (base 34/74) | wins 2 losses 7 net -5 | rule: solved >= 37 and net >= +3
+won: fastapi_15589 rich_3676
+lost: fastapi_11194 fastapi_14616 fastapi_9753 requests_6644 rich_3063 rich_3521 rich_3718
+DROP: solved 29 < 37; net -5 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 3; errored rows 0; median task seconds 148; S(1) over clean windows = 1.17; over the whole log 2.29 (3855 calls; 7 of 28 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
+
+
+### P4 A6000 screen RESULT: v7 on the public 74 (2026-10-08 11:31 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 27/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 27/74 (base 34/74) | wins 2 losses 9 net -7 | rule: solved >= 37 and net >= +3
+won: fastapi_15589 rich_3676
+lost: fastapi_11194 fastapi_14616 fastapi_5077 fastapi_9753 requests_6644 rich_3067 rich_3506 rich_3718 rich_4077
+DROP: solved 27 < 37; net -7 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 4; errored rows 0; median task seconds 108; S(1) over clean windows = 1.14; over the whole log 1.14 (2895 calls; 0 of 17 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
+
+#### P3
+not run (no capture)
+- 2026-10-08T11:31:56Z | FINALIZE /home/jc/g4/venv/bin/python scripts/a6000/final_summary.py rc=0
+- 2026-10-08T11:31:59Z | FINALIZE /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-08T11:31:59Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
+- 2026-10-08T11:32:17Z | END cleanup (hard stop): nvidia-smi compute apps: none
