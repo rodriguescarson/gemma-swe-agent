@@ -177,3 +177,4 @@ not run (no capture)
 - 2026-10-08T11:31:59Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
 - 2026-10-08T11:32:17Z | END cleanup (hard stop): nvidia-smi compute apps: none
 - DONE 2026-10-08T11:32:20Z (hard stop)
+- 2026-10-08T16:26:49Z | LAUNCH stage 1a; HARD STOP 2026-10-09T16:26:49Z
