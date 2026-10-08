@@ -183,3 +183,4 @@ not run (no capture)
 - 2026-10-08T16:41:17Z | step=probe_v7c | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-08T16:41:52Z | step=v7c_s50 | EVENT started pid 8921 (restarts so far 0; hard stop in 23.8 h)
 - 2026-10-08T17:41:55Z | step=v7c_s50 | done=33/50 | solved=10 | empty=1 | errors=0 | median_s=207.9 | cap=0 | gpu=95% | disk_free=890GB | restarts=0
+- 2026-10-08T18:08:59Z | step=v7c_s50 | END done: done=50/50 solved=20
