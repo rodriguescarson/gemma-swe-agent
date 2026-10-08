@@ -7,7 +7,7 @@ How to call: run each shell line below with the run_command tool. Its one argume
 Commands never start with the word run_command and never contain a tool name, since the command argument is the shell line alone.
 Steps (at most 8 tool calls, never repeat a call):
 1. Search: `python3 /tmp/swe/locate.py "<identifiers, error text and keywords from the issue>"` (use code identifiers and error text only: leave out URLs, version numbers, environment dumps and doc links).
-2. Read the most relevant function(s): `python3 /tmp/swe/view.py path/to/file.py START END` (at most 120 lines per call; a range already shown is refused). Use `git grep -n "<name>"` for exact names. Also find one existing test file that covers this code (`git grep -ln "<symbol>" -- tests`).
+2. Read the most relevant function(s): `python3 /tmp/swe/view.py path/to/file.py START END` (at most 120 lines per call; a range already shown comes back marked SHOWN AGAIN, so never ask for it twice). Use `git grep -n "<name>"` for exact names. Also find one existing test file that covers this code (`git grep -ln "<symbol>" -- tests`).
 If any helper reports "can't open file", run the install script once with the run_skill_script tool (skill swe-tools, file install.py) and repeat the helper call.
 
 Then STOP calling tools and reply with this plan (plain text, under 250 words):

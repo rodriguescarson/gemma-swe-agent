@@ -274,3 +274,32 @@ logged in and sleep is off for the next 24 h; WSL died twice when the session en
    ends: finalize, stop vLLM and proxies, confirm `nvidia-smi` shows nothing, push, and report after each step:
    tables, counters, verdicts against the pre-registered readings, P3 counts (tasks attempted, solved, rows,
    distinct tasks, pairs), commit hashes. Do not start anything else.
+
+P9. v7d SCREEN (after P8 ends or at its hard stop 2026-10-09 16:26:49 UTC; new session)
+--------------------------------------------------------------------------------------
+You are a new Claude Code session on the A6000 box (WSL2 Ubuntu, friend's PC; work only in ~/g4 and Docker). Repo
+~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, pull --rebase --autostash before every
+push, commit small). Read first: docs/a6000/P2_LOG.md (last 40 lines), docs/v4h/GATE.md from "P2 addendum 12" to the
+end, docs/a6000/V7C_FAILURE_ANALYSIS.md (all of it, in chunks; section 7 is the Mac side), docs/GAPS_2026-10-06.md
+(last section: the v7d pre-registration), scripts/a6000/PROMPTS.md P8, and the header of scripts/a6000/autopilot.py.
+Before any GPU work, confirm with the owner that the Windows session stays logged in and sleep is off for the next
+24 h. Hard stop = launch + 24 h.
+
+1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"` (P8 must be finished: its DONE line in P2_LOG.md, no
+   autopilot process; never start while it runs), `nvidia-smi` (no compute process), `df -h ~`, `git status -sb`,
+   `git pull --rebase --autostash origin wip/gemma-agent`. Confirm submissions/v7d and tests/test_v7d_bundle.py exist;
+   run tests/test_v7d_*.py + tests/test_a6000_p8_plan.py + tests/test_a6000_v7_counters.py and
+   scripts/validate.py submissions/v7d. If anything fails, log it to P2_LOG.md and stop (the Mac side owns v7d).
+2. Start vLLM with scripts/a6000/serve.sh exactly as before. Pre-register in GATE.md (addendum 13) before the first
+   item, copying the readings of the v7d pre-registration in GAPS: v7d, C = 2, pacing rule, scale from a 4-item probe,
+   (a) paired against v4h2, v7 AND v7c on the 50 stage-1a ids, (b) the public 74 with the keep rule, counters with
+   the new repeat_reads reported, the cross_stage_refusals.py re-measure, the stated decision rule.
+3. `python scripts/a6000/p8_plan.py --arm v7d` writes the plan (probe_v7d -> v7d_s50 -> v7d_p4 -> v7d_p3); run it
+   through the supervisor as P8 did. After (a): run
+   `python3 -I docs/a6000/v7c_analysis/cross_stage_refusals.py "v7d=$HOME/g4/runs/p2/items/v7d/*/traces/trace_*.json" "v7c=$HOME/g4/runs/p2/items/v7c/*/traces/trace_*.json"`
+   and `python3 -I docs/a6000/v7c_analysis/aggregate_failures.py ~/g4/runs/p2/items/v7d` and put both outputs in
+   P2_LOG.md next to the table. (c) P3 with v7d runs only if (a) is not WORSE; otherwise stop the plan after (b).
+4. Hourly health lines, hourly results backups to the branch, the GPU guard as before. At the hard stop or when the
+   plan ends: finalize, stop vLLM and proxies, confirm `nvidia-smi` shows nothing, push, and report after each step:
+   tables, counters (repeat_reads included), the re-measure, verdicts against addendum 13, commit hashes. Do not
+   start anything else; do not edit submissions/v7d (the Mac side owns it).

@@ -17,7 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SUB = ROOT / "submissions"
 V7C, V7D = SUB / "v7c", SUB / "v7d"
-CHANGED = set()
+FIX1 = {"skills/swe-tools/scripts/view.py", "skills/swe-tools/scripts/_ws.py"}
+WORDING = {"prompts/locator.md", "prompts/fixer.md", "sub_agents/locator.yaml"}
+CHANGED = FIX1 | WORDING
 
 
 def all_files(d):
@@ -63,6 +65,44 @@ def test_every_helper_installs_into_the_sandbox_tmp_and_every_prompt_helper_is_p
     used = helpers_used(V7D)
     assert used == helpers - {"_ws.py"} == helpers_used(V7C), used       # _ws.py is a module the probed helpers import
     assert used <= probe_keys(), used - probe_keys()
+
+
+def test_the_call_arithmetic_is_v7cs():
+    """tests/test_v7c_bundle.py's reading of the locator.yaml comment, on v7d: same shares, same budget, no cap text;
+    the one sentence that changes (what view.py does with a re-read) is checked in tests/test_v7d_prompts.py."""
+    import re, yaml
+    c = "\n".join(l for l in (V7D / "sub_agents" / "locator.yaml").read_text().splitlines() if l.startswith("#"))
+    ev = yaml.safe_load((V7D / "eval_config.yaml").read_text())["evaluation"]
+    assert ev == yaml.safe_load((V7C / "eval_config.yaml").read_text())["evaluation"] and ev["max_tool_calls"] == 70
+    shares = {k: int(v) for k, v in re.findall(r"^#\s+(setup|locator|fixer|verifier)\s+(\d+)\b", c, re.M)}
+    assert shares == {"setup": 1, "locator": 8, "fixer": 12, "verifier": 49} and sum(shares.values()) == ev["max_tool_calls"]
+    assert "VIEW_CAP" not in c and not re.search(r"\b14\b", c) and "first OK edit" not in c and "read cap" not in c
+    assert "at most 8 tool calls" in (V7D / "prompts" / "locator.md").read_text()
+    assert "At most 12 tool calls" in (V7D / "prompts" / "fixer.md").read_text()
+
+
+def test_the_kaggle_helper_check_passes_on_v7d(tmp_path):
+    """make_eval_kernel.py --helper-check (HELPER_BODY, run as is in swegemma's SubprocessManager): every PROBES line,
+    then view.py's exact repeat, which on v7d comes back marked SHOWN AGAIN with the lines (v4h6g..v7c: refused).
+    Only the report path is moved off /kaggle/working."""
+    import base64, importlib.util, pytest
+    pytest.importorskip("swegemma.sandbox.subprocess")
+    spec = importlib.util.spec_from_file_location("make_eval_kernel_v7d", ROOT / "scripts" / "make_eval_kernel.py")
+    mk = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mk)
+    scripts = V7D / "skills" / "swe-tools" / "scripts"
+    report = tmp_path / "helper_check.txt"
+    body = mk.HELPER_BODY.replace("/kaggle/working/helper_check.txt", str(report))
+    ns = {"HELPERS_B64": {p.name: base64.b64encode(p.read_bytes()).decode() for p in sorted(scripts.glob("*.py"))}}
+    try:
+        exec(compile(body, "HELPER_BODY", "exec"), ns)
+    finally:
+        if "m" in ns:
+            ns["m"].cleanup_all()
+    lines = report.read_text().splitlines()
+    assert lines[-1] == "HELPER_CHECK PASS" and not [l for l in lines if l.startswith("FAIL")], lines
+    assert any(l.startswith("ok   view.py repeat shown again -> SHOWN AGAIN: pkg/mod.py lines 1-2 ") and "| 1| def parse_header(x): |" in l for l in lines), lines
+    assert not any("ALREADY SHOWN" in l for l in lines)
 
 
 def test_packs_small_and_complete(tmp_path):

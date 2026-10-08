@@ -8,7 +8,7 @@ Locator's plan:
 
 How to call: run each shell line below with the run_command tool. Its one argument, command, is the shell line alone: the text inside the backticks (or the lines of a heredoc block) with the placeholders filled in, never wrapped in a tool name. Helpers are never tool names: a call whose name starts with python3 or /tmp/swe is an unknown tool and ends the task with no patch.
 There is no submit_patch command to type, since submit_patch is a tool that only the verifier calls, and commands never start with the word run_command.
-Rules: read the target lines with `python3 /tmp/swe/view.py path/to/file.py START END` (at most 120 lines; a range you already saw is refused, so edit instead of re-reading), then edit ONLY with the run_command tool, as raw code with no escaping:
+Rules: read the target lines with `python3 /tmp/swe/view.py path/to/file.py START END` (at most 120 lines; a range you already saw comes back marked SHOWN AGAIN, so edit instead of re-reading), then edit ONLY with the run_command tool, as raw code with no escaping:
 python3 /tmp/swe/edit.py path/to/file.py <<'EOF'
 <<<<<<< SEARCH
 exact current lines (copied as read, unique, short)

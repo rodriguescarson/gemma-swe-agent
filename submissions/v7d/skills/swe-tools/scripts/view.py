@@ -1,5 +1,13 @@
-"""Show lines of FILE with line numbers (at most 120 per call). An exact repeat of a range already shown in this task,
-while the file is unchanged, is refused: re-reading the same lines never helps (v4h6g loop breaker).
+"""Show lines of FILE with line numbers (at most 120 per call).
+
+v7d (docs/a6000/V7C_FAILURE_ANALYSIS.md, step 1): a re-read is never answered with a bare refusal. v4h6g..v7c refused an
+exact repeat of a range already shown in this task with one line (already shown, edit now), but the ledger is shared by
+every stage and the fixer is a fresh agent: its FIRST view of the range the locator read came back refused, and it asked
+again, up to 44 times (10 of 35 v7c items began the fixer that way: 1 solved, against 11 of 25 for the rest). Now an
+identical re-read of an unchanged range prints its lines again, under one line that starts "SHOWN AGAIN:" and names
+the cause and the next action. That line comes FIRST, so it arrives before run_command's 5,000-char cut. A re-read that
+printed no lines the first time (PAST END, EMPTY FILE) prints that one line again, without the note. The run of
+identical re-reads (below) is unchanged: every 3rd one in a row still gets the outline, new content in place of the lines.
 
 v7 takes every range shape the model sends (docs/a6000/FAILURE_FORENSICS.md finding 1: `FILE 30-40` and a bare `FILE`
 got the usage line in 63 tasks): FILE START END, FILE START-END, FILE START:END, FILE START (START..START+119) and FILE
@@ -8,8 +16,9 @@ the range after parsing, so `30-40` repeats `30 40`. Only non-numeric input gets
 
 v7c (docs/GAPS_2026-10-06.md, v7c pre-registration): no read cap. Any number of distinct reads prints its lines; the
 ledger (_ws.py) only records the view.py calls made before the task's first OK edit. The 1st and 2nd identical re-read
-in a row of an unchanged range get the ALREADY SHOWN line; the 3rd gets v7b's outline of the requested file instead,
-and so do the 6th, the 9th (the run is per file and range; any other view.py call and an OK edit end it). The outline
+in a row of an unchanged range get the lines again (v7d; v7c: a one-line refusal); the 3rd gets v7b's outline of the
+requested file instead, and so do the 6th, the 9th (the run is per file and range; any other view.py call and an OK
+edit end it). The outline
 (v7b, unchanged): every top-level def/class (module-level if/try blocks included) and every method (a def in a class
 body, nested classes included) as `START-END kind name(args)`, one per line, at most OUTLINE_MAX; a longer outline
 shows the OUTLINE_MAX entries that start OUTLINE_BEFORE entries above the requested line and sums up the rest in
@@ -28,6 +37,8 @@ OUTLINE_MAX = 60      # v7b: entries in one outline
 OUTLINE_BEFORE = 10   # entries shown above the requested line when a file has more than OUTLINE_MAX
 OUTLINE_WIDTH = 72    # chars per entry: 60 entries and the last line stay far below the 5,000-char cut
 OUTLINE_LAST = "outline only: pick a range and edit it now with `python3 /tmp/swe/edit.py %s --lines A-B`"
+AGAIN = ("SHOWN AGAIN: %s lines %d-%d are unchanged since they were shown earlier in this task, so use them now instead "
+         "of viewing them again")   # v7d: the first line of a re-read's reply, then the lines
 
 
 def ranges(args):
@@ -158,18 +169,19 @@ def main(argv):
     try: seen = json.load(open(log))
     except Exception: seen = {}
     key = "%s:%d-%d" % (os.path.relpath(path, root), start, end)
-    if seen.get(key) == digest:
-        if take_view(key) == OUTLINE:   # v7c: the 3rd identical re-read in a row gets new content, not the same line again
-            print(outline_reply(argv)); return 0
-        print("ALREADY SHOWN: %s lines %d-%d are unchanged since you saw them, so edit now with python3 /tmp/swe/edit.py "
-              "or view different lines instead" % (rel, start, end)); return 0
-    take_view()
-    seen[key] = digest; json.dump(seen, open(log, "w"))
+    again = seen.get(key) == digest    # v7d: an identical re-read of an unchanged range
+    if again and take_view(key) == OUTLINE:   # v7c: the 3rd identical re-read in a row gets new content, not the lines again
+        print(outline_reply(argv)); return 0
+    if not again:
+        take_view()
+        seen[key] = digest; json.dump(seen, open(log, "w"))
     lines = data.decode("utf-8", "replace").splitlines()
     if not lines:
         print("EMPTY FILE: %s has no lines, so read another file next" % rel); return 0
     if start > len(lines):
         print("PAST END: %s has %d lines, so view a range inside 1-%d next" % (rel, len(lines), len(lines))); return 0
+    if again:
+        print(AGAIN % (rel, start, end))   # first: the lines below may run past run_command's 5,000-char cut
     for i in range(start, min(end, len(lines)) + 1):
         print("%d| %s" % (i, lines[i - 1]))
     if capped: print("(capped at %d lines; view the next range if needed)" % MAX)

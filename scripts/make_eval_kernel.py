@@ -298,9 +298,9 @@ for h, c in PROBES.items():
     if h not in HELPERS_B64: continue
     r = m.run_command(c); o = (r.stdout + r.stderr); bad = "can't open file" in o or "No such file" in o; ok &= not bad
     lines.append(("FAIL " if bad else "ok   ") + c.split("\n")[0] + " -> " + o.strip().replace("\n", " | ")[:200])
-if "view.py" in HELPERS_B64:   # the loop breaker must refuse an exact repeat on this sandbox too (v4h6g)
-    r = m.run_command("python3 /tmp/swe/view.py pkg/mod.py 1 2"); o = r.stdout + r.stderr; bad = "ALREADY SHOWN" not in o; ok &= not bad
-    lines.append(("FAIL " if bad else "ok   ") + "view.py repeat refused -> " + o.strip().replace("\n", " | ")[:200])
+if "view.py" in HELPERS_B64:   # the repeat check must fire on this sandbox too: v4h6g..v7c refuse (ALREADY SHOWN), v7d marks and shows (SHOWN AGAIN)
+    r = m.run_command("python3 /tmp/swe/view.py pkg/mod.py 1 2"); o = r.stdout + r.stderr; again = "SHOWN AGAIN" in o; bad = not (again or "ALREADY SHOWN" in o); ok &= not bad
+    lines.append(("FAIL " if bad else "ok   ") + ("view.py repeat shown again -> " if again else "view.py repeat refused -> ") + o.strip().replace("\n", " | ")[:200])
 lines.append("HELPER_CHECK " + ("PASS" if ok else "FAIL")); print("\n".join(lines)); open("/kaggle/working/helper_check.txt", "w").write("\n".join(lines) + "\n")
 '''
 

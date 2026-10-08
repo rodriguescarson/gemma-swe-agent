@@ -151,6 +151,8 @@ def classify(fn, args, payload):
         h = _helper(cmd)
         if stdout.lstrip().startswith("usage:") or stdout.lstrip().startswith("give args="):
             return Verdict(f"helper usage/argument error ({h})", "ours", cmd[:100].replace("\n", " "))
+        if "SHOWN AGAIN" in stdout:   # v7d: the re-read's lines again, under one note
+            return Verdict("view.py repeat shown again (ours, by design)", "model", cmd[:80])
         if "ALREADY SHOWN" in stdout:
             return Verdict("view.py repeat refused (ours, by design)", "model", cmd[:80])
         if "REPRO MISSING" in stdout:
@@ -173,6 +175,8 @@ def _reply_kind(payload, content):
     c = content or ""
     if payload and payload.get("status") == "error":
         return "error: " + str(payload.get("error_type") or "?")
+    if "SHOWN AGAIN" in c:
+        return "our repeat note (SHOWN AGAIN)"
     if "ALREADY SHOWN" in c:
         return "our repeat refusal (ALREADY SHOWN)"
     if '"stdout": "usage:' in c or (payload and str(payload.get("stdout") or "").lstrip().startswith("usage:")):
@@ -200,7 +204,7 @@ def find_loops(trace, n=5):
         if j - i + 1 >= n:
             replies = [x[4] for x in seq[i:j + 1]]
             kind = _reply_kind(_payload(replies[0]), replies[0])
-            owner = {"our repeat refusal (ALREADY SHOWN)": "model", "helper usage line": "ours", "empty output": "ours", "truncated reply": "ours", "normal result": "model"}.get(kind, "harness" if "Budget" in kind else "model")
+            owner = {"our repeat refusal (ALREADY SHOWN)": "model", "our repeat note (SHOWN AGAIN)": "model", "helper usage line": "ours", "empty output": "ours", "truncated reply": "ours", "normal result": "model"}.get(kind, "harness" if "Budget" in kind else "model")
             lo, hi = seq[i][0], seq[j][0]
             between = [s["message"] for s in steps[lo:hi + 1] if s.get("source") == "agent" and isinstance(s.get("message"), str)]
             loops.append(Loop(seq[i][1], seq[i][2], seq[i][3], j - i + 1, len(set(replies)) == 1, kind, owner, between, (replies[0] or "")[:200]))

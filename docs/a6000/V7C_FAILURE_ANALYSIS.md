@@ -75,3 +75,80 @@ The A6000 results, counters and verdicts follow in `P2_LOG.md` and `GATE.md` as 
 
 The traces are ATIF-v1.7 (Harbor: https://harborframework.com/docs/trajectory-format, which also documents a validator). TraceProbe
 (arXiv 2607.06184, found by search, not read in full) compares successful and failed SWE trajectories with a detector catalogue; worth reading for more detectors.
+
+## 7. Mac side, 2026-10-08/09: step 1 built as v7d; step 2 cannot live in a bundle
+
+Read with the branch at 87e0bb7 (pulled twice, nothing of the box's touched). Everything below is on the Mac copies of the
+traces that the hourly backup had pushed (24 of the 50 stage-1a items plus the 4 probe items), so the counts are a
+subset of section 2's; `cross_stage_refusals.py` and `aggregate_failures.py` now take `LABEL=GLOB` / a directory argument
+and run on either side.
+
+### Step 1 -> `submissions/v7d` (= v7c + view.py; tests first)
+
+* `view.py`: an identical re-read of an unchanged range prints its lines again, under one line that starts
+  `SHOWN AGAIN:` and names the cause and the next action; the line comes first, so it arrives before run_command's
+  5,000-char cut. No helper prints `ALREADY SHOWN` any more. v7c's run of identical re-reads is unchanged: the 3rd, 6th,
+  9th ... in a row still gets the outline (new content) instead of the lines; any other view.py call and an OK edit end
+  the run. A re-read that printed no lines the first time (PAST END, EMPTY FILE) prints that one line again, without the
+  note. `_ws.py` changes in its docstring only (the ledger code and shape are v7c's).
+* Why not a per-stage ledger (the plan's first option): nothing in the sandbox tells a helper which stage is calling. The
+  stages share one TMPDIR, no env var or marker changes at the handoff, and a stage-id flag in the prompt's command shape
+  would be dropped by the model as often as any other argument. So the safe form is the plan's third option: the lines
+  come back whoever asks, and the note is stage-neutral ("shown earlier in this task").
+* Prompts: the two spans that promised a refusal (locator.md "a range already shown is refused", fixer.md "a range you
+  already saw is refused, so edit instead of re-reading") now say what happens ("comes back marked SHOWN AGAIN") and
+  keep the instruction; one line each, the backticked shell lines untouched. The locator.yaml arithmetic comment is
+  restated. setup.md, verifier.md, SKILL.md, the yamls and the other helpers are byte-identical to v7c's.
+* Tooling: `scripts/a6000/forensics_lib.py` classifies the new reply (ours by design; a loop of them is the model's);
+  `scripts/a6000/v7_counters.py` gets `repeat_reads` (the SHOWN AGAIN replies) right after `repeat_outlines`, reported
+  and never gated, so the box's POST steps keep working across the pull; the Kaggle helper check
+  (`scripts/make_eval_kernel.py`, HELPER_BODY) accepts either marker on the repeat and labels which one it saw;
+  `scripts/a6000/p8_plan.py --arm v7d` writes the same four steps for v7d, its 50-id table paired against v4h2, v7 AND v7c.
+* Tests (all written before the change): tests/test_v7d_bundle.py (v7d differs from v7c in exactly view.py, _ws.py,
+  locator.md, fixer.md, locator.yaml; compiled tree = v7c's; install; the Kaggle helper check on the real
+  SubprocessManager: PASS, repeat "shown again"), tests/test_v7d_helpers.py (the stage-crossing case, the again/again/
+  outline sequence, the note first and one line, PAST END/EMPTY repeats, no helper says ALREADY SHOWN, the ledger shape,
+  v7c's outline tests and refusal audit re-run on v7d, every other v7c helper test re-run), tests/test_v7d_sandbox.py
+  (the same through swegemma's SubprocessManager and the /tmp rewrite), tests/test_v7d_prompts.py (exactly one line
+  changes in each of the two prompts, inside the parenthesis; the prose promise holds; v7b's and v7's prompt tests
+  re-run), tests/test_v7d_counters.py (forensics + counters), tests/test_a6000_p8_plan.py (--arm).
+* Baseline for the re-measure, Mac copies (`python3 -I docs/a6000/v7c_analysis/cross_stage_refusals.py "v7c=eval/a6000/results/p2/items/v7c/*/traces/trace_*.json"`):
+  v7c 24 items, 5 solved; bare refusals 175 (locator 52, fixer 123); items whose FIRST fixer view was refused 7 -> 1
+  solved, the other 17 -> 4; fixer re-reads identical to a locator call 55. v7 (50 items, 19 solved): 81 refusals
+  (fixer 80), first-fixer-view refused 7 -> 1 solved, others 43 -> 18. v7d's targets: bare refusals 0 of N (by
+  construction); the first-fixer-view items' solve rate against the rest (7 -> 1 vs 17 -> 4 is the number to move); the
+  identical-repeat share (`aggregate_failures.py`: v7c 215 of 931 calls on the 24 items, 23%; section 2: 27%) and the
+  loop items (6 of 24).
+
+### Step 2: a run_command repeat guard has nowhere to live
+
+Checked in the installed scorer stack (adk_eval_core 0.1.0, adk_submission 0.2.11, swegemma 0.2.7), not assumed:
+
+* `adk_eval_core/sandbox/subprocess_sandbox.py`: `run_command` is `subprocess.Popen(command, shell=True, cwd=..., env=sanitized)`,
+  i.e. `/bin/sh -c` with an env built from a fixed whitelist (PATH, LANG, LC_ALL, TERM, USER, LOGNAME, SYSTEMROOT,
+  LD_LIBRARY_PATH, TMPDIR, TEST_TMPDIR) plus HOME = TMPDIR = the sandbox tmp and PYTHONNOUSERSITE=1. A non-interactive
+  `sh -c` reads no startup file, BASH_ENV/ENV are not passed, and PATH is the scorer's own: no shell hook, no wrapper
+  binary, no `git` alias (builtins cannot be aliased) and no `sitecustomize` (that would also run inside the hidden
+  tests) can see or count a raw command.
+* `adk_submission/registry.py`: before/after-tool callbacks exist in the YAML schema but resolve against a CLOSED
+  `CallbackRegistry`, and `swegemma` registers none (`grep -rn callback .venv/lib/python3.12/site-packages/swegemma`
+  finds no registration). A bundle cannot add one.
+* So the only guard a bundle can carry is inside our helpers, and on the 28 local items the helpers other than view.py
+  account for 1 of the 299 identical consecutive repeats (edit.py, once); the raw loops are `git grep` (84 wasted calls),
+  `timeout 30 python3 -c ...` (44) and `python3 -c ...` (33). In 3 of the 4 raw loops of 5+ the repeated reply was
+  NON-EMPTY and informative (arrow_06fe693 `tzutc()` x34, arrow_fe1afe2 the caught AttributeError x44, typer_42196d4 the
+  grep hits x30); only trio_34e7a2e's grep (x53) was empty. A note appended to the reply would not have changed what
+  the model saw in those three, and v7c's own experiment (the refusal, then the outline every 3rd time) shows a changed
+  reply does not reliably end a run either.
+* What remains of step 2, deferred until a helper-side loop shows up in a trace: a generic identical-call note in `_ws.py`
+  for locate/test/check. Not built now: no observed mass, and it would be a second mechanism in the v7d cycle.
+* The nearest buildable lever for the raw loops is step 3, routing the locator's test-file search through locate.py
+  (whole-repo search for test files that name the symbol, an empty-result hint, a repeat note): that is the trio loop.
+  It is a prompt change and its own cycle, after v7d's probe.
+
+### Next
+
+1. On the box, after the P8 run ends (hard stop 2026-10-09 16:26:49 UTC = 21:56 IST): PROMPTS P9 (v7d probe -> 50 ids
+   paired vs v4h2/v7/v7c -> public 74), pre-registered as GATE addendum 13; the re-measure above after (a).
+2. The Kaggle queue (v7c -> v5h2 -> v11b probe) is unchanged; v7d replaces v7c in it only on Carson's call after (a).
+3. Step 3 (test-file search through locate.py) next, test-first, in its own bundle directory.

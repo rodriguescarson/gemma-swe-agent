@@ -10,11 +10,14 @@ next, exit 0), and, for the record only, the view.py calls made before the task'
 v7c (docs/GAPS_2026-10-06.md, v7c pre-registration): no read cap. v7's pre-edit cap on view.py (and v7b's outline on
 its 3rd refusal in a row) produced 737 refusals on 50 off-repo tasks, a refused read was repeated up to 49 times, loop
 tasks went 7 (v4h2) -> 18 (v7) and tasks that ran out of calls did not fall (10 -> 11): a refused call costs a harness
-call too. view.py now declines only an identical re-read of an unchanged range (ALREADY SHOWN). The ledger keeps the
-run of those re-reads per (file, range) (repeat_key, repeat_run): every OUTLINE_EVERY-th one in a row is answered with
-OUTLINE (view.py then prints an outline of the requested file) and the run starts again. Any other view.py call (a
-different range, a read that goes ahead, a call that names no readable range) and an OK edit end the run; nothing else
-does."""
+call too. The ledger keeps the run of identical re-reads of an unchanged range per (file, range) (repeat_key,
+repeat_run): every OUTLINE_EVERY-th one in a row is answered with OUTLINE (view.py then prints an outline of the
+requested file) and the run starts again. Any other view.py call (a different range, a read that goes ahead, a call
+that names no readable range) and an OK edit end the run; nothing else does.
+
+v7d (docs/a6000/V7C_FAILURE_ANALYSIS.md, step 1): view.py declines nothing any more. The other re-reads in the run print
+their lines again under one SHOWN AGAIN line (v7c answered them with a one-line refusal, which the fixer, a fresh agent
+whose first view often repeats the locator's, took as a reason to ask again). The ledger's code is v7c's."""
 import json, os, tempfile
 
 LOCATE_CAP = 3

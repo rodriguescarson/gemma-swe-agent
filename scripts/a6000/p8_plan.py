@@ -1,8 +1,10 @@
 """The supervisor steps of PROMPTS P8 (v7c screen + one data pass): probe (4 items, T = 2) -> v7c on the 50 stage-1a ids -> v7c on the public 74 -> P3 with v7c, ONE pass over
 the 844 training ids. Same shape as p6_plan.py (v7); the P3 output goes to p3_v7c so the v7 pass in p3 stays untouched. tests/test_a6000_p8_plan.py.
 
-    python scripts/a6000/p8_plan.py [--plan ~/g4/runs/autopilot_plan.json] [--scale-fallback 1.0] [--dry-run]
-The plan REPLACES the steps of the file (the old plan is kept by the caller) and is closed; the choice file points P4 and P3 at v7c."""
+    python scripts/a6000/p8_plan.py [--plan ~/g4/runs/autopilot_plan.json] [--scale-fallback 1.0] [--arm v7c] [--dry-run]
+The plan REPLACES the steps of the file (the old plan is kept by the caller) and is closed; the choice file points P4 and P3 at the arm.
+--arm (PROMPTS P9, docs/a6000/V7C_FAILURE_ANALYSIS.md step 1): the same four steps for another bundle under submissions/<arm>, e.g. v7d;
+its 50-id table is then paired against v4h2, v7 and v7c (every earlier arm with rows on those ids)."""
 import argparse
 import json
 import sys
@@ -13,9 +15,11 @@ G4 = Path.home() / "g4"
 IDS = [l.strip() for l in open(ROOT / "data" / "heldout1k" / "s200_valid_ids.txt") if l.strip()]
 P3_IDS = [l.strip() for l in open(ROOT / "data" / "heldout1k" / "p3_ids.txt") if l.strip()]
 ARM = "v7c"
+COMPARATORS = {"v7c": ("v4h2", "v7"), "v7d": ("v4h2", "v7", "v7c")}   # the earlier arms a 50-id table is paired against
 
 
-def v7c_steps(runs, py, scale_fallback=1.0, p3_scale=None):
+def v7c_steps(runs, py, scale_fallback=1.0, p3_scale=None, arm=ARM):
+    ARM = arm   # noqa: N806  (the module default stays v7c; every name below is built from this one)
     runs = str(runs)
     out = f"{runs}/p2"
     probe = {"name": f"probe_{ARM}", "total": 4, "docker": True,
@@ -28,7 +32,7 @@ def v7c_steps(runs, py, scale_fallback=1.0, p3_scale=None):
            "proxy": {"listen": 8001, "host": "172.18.0.1", "log": f"{out}/proxy_{ARM}_s50.jsonl"}, "speed_log": f"{out}/proxy_{ARM}_s50.jsonl",
            "stats": {"type": "p2", "out": out, "arms": [ARM], "ids": IDS[:50]},
            "purge": [py, "scripts/a6000/p2_purge.py", out, "items"], "purge_since": [py, "scripts/a6000/p2_purge_since.py", out, "items"],
-           "post": [[py, "scripts/a6000/p2_results_md.py", out, "--label", f"{ARM} on the stage-1a ids (vs v4h2 and v7 stage 1a)", "--from", "0", "--to", "50", "--arms", "v4h2", "v7", ARM],
+           "post": [[py, "scripts/a6000/p2_results_md.py", out, "--label", f"{ARM} on the stage-1a ids (vs " + ", ".join(COMPARATORS.get(ARM, ("v4h2", "v7"))) + " stage 1a)", "--from", "0", "--to", "50", "--arms", *COMPARATORS.get(ARM, ("v4h2", "v7")), ARM],
                     [py, "scripts/a6000/v7_counters.py", out, "--arm", ARM, "--json", f"{runs}/{ARM}_s50_counters.json"],
                     [py, "scripts/a6000/backup_results.py"]]}
     p4dir = f"{runs}/p4_{ARM}"
@@ -60,28 +64,28 @@ def set_choices(path, arm):
     p.write_text(json.dumps(cur))
 
 
-def finalize_hooks(runs, py):
-    return [[py, "scripts/a6000/p3_build.py", "--out", f"{runs}/p3_{ARM}", "--passes", "1"], [py, "scripts/a6000/final_summary.py"], [py, "scripts/a6000/backup_results.py"],
+def finalize_hooks(runs, py, arm=ARM):
+    return [[py, "scripts/a6000/p3_build.py", "--out", f"{runs}/p3_{arm}", "--passes", "1"], [py, "scripts/a6000/final_summary.py"], [py, "scripts/a6000/backup_results.py"],
             ["bash", "-c", "kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true"]]
 
 
-def write_plan(path, runs, py, scale_fallback=1.0):
-    plan = {"steps": v7c_steps(runs, py, scale_fallback), "finalize": finalize_hooks(runs, py), "open": False}
+def write_plan(path, runs, py, scale_fallback=1.0, arm=ARM):
+    plan = {"steps": v7c_steps(runs, py, scale_fallback, arm=arm), "finalize": finalize_hooks(runs, py, arm), "open": False}
     Path(path).write_text(json.dumps(plan, indent=1))
     return plan
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--plan", default=str(G4 / "runs" / "autopilot_plan.json")); ap.add_argument("--scale-fallback", type=float, default=1.0); ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--plan", default=str(G4 / "runs" / "autopilot_plan.json")); ap.add_argument("--scale-fallback", type=float, default=1.0); ap.add_argument("--arm", default=ARM); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
     py = str(G4 / "venv" / "bin" / "python")
     if a.dry_run:
-        print(json.dumps([s["name"] for s in v7c_steps(str(G4 / "runs"), py, a.scale_fallback)]))
+        print(json.dumps([s["name"] for s in v7c_steps(str(G4 / "runs"), py, a.scale_fallback, arm=a.arm)]))
         return 0
-    set_choices(str(G4 / "runs" / "autopilot_choice.json"), ARM)
-    plan = write_plan(a.plan, str(G4 / "runs"), py, a.scale_fallback)
-    print("plan steps:", [s["name"] for s in plan["steps"]], "| choices ->", ARM, "| open:", plan["open"])
+    set_choices(str(G4 / "runs" / "autopilot_choice.json"), a.arm)
+    plan = write_plan(a.plan, str(G4 / "runs"), py, a.scale_fallback, arm=a.arm)
+    print("plan steps:", [s["name"] for s in plan["steps"]], "| choices ->", a.arm, "| open:", plan["open"])
     return 0
 
 

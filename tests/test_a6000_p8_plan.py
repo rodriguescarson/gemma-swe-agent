@@ -49,3 +49,35 @@ def test_a_fresh_plan_replaces_the_old_steps_and_is_closed(tmp_path):
     p8.write_plan(str(plan), runs=str(tmp_path), py="/py")
     got = json.loads(plan.read_text())
     assert [s["name"] for s in got["steps"]] == ["probe_v7c", "v7c_s50", "v7c_p4", "v7c_p3"] and got["open"] is False and got["finalize"]
+
+
+def test_the_arm_option_builds_the_same_four_steps_for_v7d_paired_against_v7c_too(tmp_path):
+    """PROMPTS P9 (docs/a6000/V7C_FAILURE_ANALYSIS.md, step 1): the v7d screen is P8's plan with the arm swapped; its
+    50-id table is paired against v4h2, v7 AND v7c; the default stays v7c, byte for byte."""
+    steps = p8.v7c_steps(runs=str(tmp_path), py="/py", scale_fallback=1.0, arm="v7d")
+    assert [s["name"] for s in steps] == ["probe_v7d", "v7d_s50", "v7d_p4", "v7d_p3"]
+    probe, s50, p4, p3 = steps
+    assert probe["cmd"][probe["cmd"].index("--arms") + 1] == "v7d" and "--items-dir probe_v7d_T2" in " ".join(probe["post"][0])
+    c = s50["cmd"]
+    assert c[c.index("--arms") + 1] == "v7d" and c[c.index("--arm-scale-from-probe") + 1] == "v7d=1.0" and s50["stats"]["arms"] == ["v7d"]
+    posts = [" ".join(h) for h in s50["post"]]
+    assert any("p2_results_md.py" in p and "--arms v4h2 v7 v7c v7d" in p and "vs v4h2, v7, v7c stage 1a" in p for p in posts)
+    assert any("v7_counters.py" in p and "--arm v7d" in p and "v7d_s50_counters.json" in p for p in posts)
+    assert p4["cmd"][p4["cmd"].index("--out") + 1] == str(tmp_path / "p4_v7d") and p4["stats"]["file"] == str(tmp_path / "p4_v7d" / "results.jsonl")
+    assert p3["cmd"][p3["cmd"].index("--out") + 1] == str(tmp_path / "p3_v7d") and p3["stats"]["arms"] == ["v7d"]
+    assert "v7c" not in json.dumps([probe, p4, p3]) and "v7c" not in json.dumps(s50["cmd"])   # only the comparator list names it
+    joined = [" ".join(h) for h in p8.finalize_hooks(runs=str(tmp_path), py="/py", arm="v7d")]
+    assert any("p3_build.py" in j and "p3_v7d" in j for j in joined)
+    plan = tmp_path / "plan.json"
+    p8.write_plan(str(plan), runs=str(tmp_path), py="/py", arm="v7d")
+    assert [s["name"] for s in json.loads(plan.read_text())["steps"]] == ["probe_v7d", "v7d_s50", "v7d_p4", "v7d_p3"]
+    assert p8.v7c_steps(runs=str(tmp_path), py="/py", scale_fallback=1.0) == p8.v7c_steps(runs=str(tmp_path), py="/py", scale_fallback=1.0, arm="v7c")
+    assert (ROOT / "submissions" / "v7d" / "agent.yaml").exists()
+
+
+def test_the_cli_takes_the_arm(tmp_path):
+    import subprocess, sys
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "a6000" / "p8_plan.py"), "--dry-run", "--arm", "v7d"], capture_output=True, text=True)
+    assert r.returncode == 0 and json.loads(r.stdout) == ["probe_v7d", "v7d_s50", "v7d_p4", "v7d_p3"], r.stdout + r.stderr
+    r = subprocess.run([sys.executable, str(ROOT / "scripts" / "a6000" / "p8_plan.py"), "--dry-run"], capture_output=True, text=True)
+    assert r.returncode == 0 and json.loads(r.stdout) == ["probe_v7c", "v7c_s50", "v7c_p4", "v7c_p3"], r.stdout + r.stderr

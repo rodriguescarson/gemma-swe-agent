@@ -5,8 +5,8 @@
 RUN_DIR is either a p2_race output dir (items/<arm>/<task>/traces, task_results.jsonl) or a run_eval.py dir (results.jsonl, results/traces). Counters: view.py usage-line
 calls, literal-wrapper commands (prompt call shape echoed into the command), write_file path refusals, forced-install `{}` calls (run_skill_script INVALID_ARGUMENTS),
 locate/view cap refusals (v6p-b's SHARE SPENT, v7's search/read cap reached), repeat outlines (v7b/v7c view.py's "outline only:" reply; v7c: it answers every 3rd
-identical re-read, so it is reported on its own and never gated), loops >= 5, budget-exhausted tasks, helper reachability (tasks with a can't-open), plus tasks and solved.
-Three examples per non-zero counter."""
+identical re-read, so it is reported on its own and never gated), repeat reads (v7d view.py's "SHOWN AGAIN" reply: the lines of a re-read again, under one note;
+reported, never gated), loops >= 5, budget-exhausted tasks, helper reachability (tasks with a can't-open), plus tasks and solved. Three examples per non-zero counter."""
 import argparse
 import glob
 import json
@@ -18,7 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import forensics_lib as fx  # noqa: E402
 
-COUNTERS = ("view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args", "cap_refusals", "repeat_outlines", "loops_ge5", "budget_exhausted_tasks", "helper_unreachable_tasks")
+COUNTERS = ("view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args", "cap_refusals", "repeat_outlines", "repeat_reads", "loops_ge5", "budget_exhausted_tasks", "helper_unreachable_tasks")
 RULES = {"view_usage_calls": lambda v, c: v.mechanism.startswith("helper usage/argument error (view)"),
          "literal_wrapper_commands": lambda v, c: v.mechanism == "prompt call-shape echoed into the command",
          "write_file_path_refusals": lambda v, c: v.mechanism == "write_file outside the workspace refused",
@@ -26,7 +26,9 @@ RULES = {"view_usage_calls": lambda v, c: v.mechanism.startswith("helper usage/a
          # v6p-b's ledger says SHARE SPENT; v7's pre-edit caps (submissions/v7 _ws.py) say "search cap reached" / "read cap reached"
          "cap_refusals": lambda v, c: any(m in (c.content or "") for m in ("SHARE SPENT", "search cap reached", "read cap reached")),
          # v7b's outline (past the read cap) and v7c's (every 3rd identical re-read, no read cap) end with this line
-         "repeat_outlines": lambda v, c: "outline only:" in (c.content or "")}
+         "repeat_outlines": lambda v, c: "outline only:" in (c.content or ""),
+         # v7d's view.py prints a re-read's lines again under this line (the 1st, 2nd, 4th, 5th ... identical re-read in a row)
+         "repeat_reads": lambda v, c: "SHOWN AGAIN" in (c.content or "")}
 
 
 def load_run(run, arm, items_dir="items"):
