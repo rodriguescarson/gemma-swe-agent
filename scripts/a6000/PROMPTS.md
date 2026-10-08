@@ -215,3 +215,32 @@ the guard, the hourly health lines, the backups and the 36 h hard stop exactly a
 4. Report after each of a, b, c: the table, the counters, the verdict against the pre-registered reading, and the
    commit hashes. If a counter that v7 must bring to zero is not zero, say which calls still produce it, with
    three examples (task, call, reply), so the Mac side can fix it.
+
+
+-------------------------------------------------------------------------
+P7. RECOVER AFTER AN INTERRUPTED SESSION (new Claude Code session on the box)
+-------------------------------------------------------------------------
+You are a new session on the A6000 box (WSL2 Ubuntu, one RTX A6000, a friend's PC: work only inside ~/g4 and
+Docker). The previous Claude session was interrupted; its state lives in files, not in memory. Repo
+~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, pull --rebase --autostash before every
+push, commit small). Read first, in this order: docs/a6000/P2_LOG.md (last 40 lines: the hourly health lines and
+events), docs/v4h/GATE.md from "P2 addendum 11" to the end (the v7 runs, pre-registrations, the P3 plan),
+scripts/a6000/PROMPTS.md sections P3 and P6, and the header of scripts/a6000/autopilot.py (the supervisor: plan file,
+steps, self-repair, the 36 h hard stop at 2026-10-08 09:44 UTC).
+
+1. STATE, before touching anything: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi`, `tmux ls`,
+   `df -h ~`, `git status -sb`, the plan file the supervisor reads, and the newest result dirs under ~/g4/runs.
+   Write one block to P2_LOG.md: what is alive, what step the plan is on, the last health line, and whether the
+   interruption killed the supervisor, vLLM, or an in-flight P3 pass.
+2. If the supervisor is alive and P3 is progressing (new rows since the last health line): leave it alone, keep the
+   hourly health lines going, and go to step 4.
+3. If anything died: restart in the supervisor's own way (its plan file and resume logic; do not hand-launch steps).
+   P3 keeps the bundle it started with (v7 = commit b62a546). Do NOT switch to v7b or any other bundle mid-P3; v7b
+   exists on the branch for the Kaggle queue only. Items that were in flight at the interruption are purged and
+   re-run by the supervisor's existing rule. Record what was lost in P2_LOG.md.
+4. Until the hard stop: hourly health lines; back up results to the branch as before (results, pairs, captures,
+   logs); if the other Windows GPU workload returns, the guard pauses and resumes as before.
+5. At the hard stop (or when P3 finishes early): run the finalize hooks (the final summary, the P3 data report:
+   passes done, rows, distinct tasks, pairs, tool mix), stop vLLM and the proxies, confirm `nvidia-smi` shows no
+   compute process, push everything, and end with the P6 step-4 report (the v7_s50 table and verdict, the v7 P4
+   table and verdict, the counters, P3 counts, every commit hash). Then stop; do not start new runs.
