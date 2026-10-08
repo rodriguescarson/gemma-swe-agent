@@ -275,31 +275,47 @@ logged in and sleep is off for the next 24 h; WSL died twice when the session en
    tables, counters, verdicts against the pre-registered readings, P3 counts (tasks attempted, solved, rows,
    distinct tasks, pairs), commit hashes. Do not start anything else.
 
-P9. v7d SCREEN (after P8 ends or at its hard stop 2026-10-09 16:26:49 UTC; new session)
---------------------------------------------------------------------------------------
+P9. v7d: PULL, VERIFY, PRE-REGISTER, PREPARE THE PLAN; THE OWNER LAUNCHES (new session; paste as is)
+--------------------------------------------------------------------------------------------------
 You are a new Claude Code session on the A6000 box (WSL2 Ubuntu, friend's PC; work only in ~/g4 and Docker). Repo
-~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, pull --rebase --autostash before every
-push, commit small). Read first: docs/a6000/P2_LOG.md (last 40 lines), docs/v4h/GATE.md from "P2 addendum 12" to the
-end, docs/a6000/V7C_FAILURE_ANALYSIS.md (all of it, in chunks; section 7 is the Mac side), docs/GAPS_2026-10-06.md
-(last section: the v7d pre-registration), scripts/a6000/PROMPTS.md P8, and the header of scripts/a6000/autopilot.py.
-Before any GPU work, confirm with the owner that the Windows session stays logged in and sleep is off for the next
-24 h. Hard stop = launch + 24 h.
+~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, `git pull --rebase --autostash origin
+wip/gemma-agent` before every push, commit small). You prepare the v7d screen and STOP before launching it: the owner
+runs the launch command himself. Do not start vLLM, the supervisor or any item.
 
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"` (P8 must be finished: its DONE line in P2_LOG.md, no
-   autopilot process; never start while it runs), `nvidia-smi` (no compute process), `df -h ~`, `git status -sb`,
-   `git pull --rebase --autostash origin wip/gemma-agent`. Confirm submissions/v7d and tests/test_v7d_bundle.py exist;
-   run tests/test_v7d_*.py + tests/test_a6000_p8_plan.py + tests/test_a6000_v7_counters.py and
-   scripts/validate.py submissions/v7d. If anything fails, log it to P2_LOG.md and stop (the Mac side owns v7d).
-2. Start vLLM with scripts/a6000/serve.sh exactly as before. Pre-register in GATE.md (addendum 13) before the first
-   item, copying the readings of the v7d pre-registration in GAPS: v7d, C = 2, pacing rule, scale from a 4-item probe,
-   (a) paired against v4h2, v7 AND v7c on the 50 stage-1a ids, (b) the public 74 with the keep rule, counters with
-   the new repeat_reads reported, the cross_stage_refusals.py re-measure, the stated decision rule.
-3. `python scripts/a6000/p8_plan.py --arm v7d` writes the plan (probe_v7d -> v7d_s50 -> v7d_p4 -> v7d_p3); run it
-   through the supervisor as P8 did. After (a): run
-   `python3 -I docs/a6000/v7c_analysis/cross_stage_refusals.py "v7d=$HOME/g4/runs/p2/items/v7d/*/traces/trace_*.json" "v7c=$HOME/g4/runs/p2/items/v7c/*/traces/trace_*.json"`
-   and `python3 -I docs/a6000/v7c_analysis/aggregate_failures.py ~/g4/runs/p2/items/v7d` and put both outputs in
-   P2_LOG.md next to the table. (c) P3 with v7d runs only if (a) is not WORSE; otherwise stop the plan after (b).
-4. Hourly health lines, hourly results backups to the branch, the GPU guard as before. At the hard stop or when the
-   plan ends: finalize, stop vLLM and proxies, confirm `nvidia-smi` shows nothing, push, and report after each step:
-   tables, counters (repeat_reads included), the re-measure, verdicts against addendum 13, commit hashes. Do not
-   start anything else; do not edit submissions/v7d (the Mac side owns it).
+0. PULL FIRST: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -3`.
+   The head must include "v7d fix 1" (428f3a0 or later). Then read, in chunks: docs/a6000/V7C_FAILURE_ANALYSIS.md
+   (all of it; section 7 is the Mac side), docs/GAPS_2026-10-06.md (last section: the v7d pre-registration with its
+   decision rule), docs/v4h/GATE.md from "P2 addendum 12" to the end, docs/a6000/P2_LOG.md (last 40 lines),
+   scripts/a6000/PROMPTS.md P8, the header of scripts/a6000/autopilot.py and scripts/a6000/p8_plan.py.
+1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi`, `df -h ~`, `git status -sb`, the last
+   lines of P2_LOG.md. Write one block to P2_LOG.md: is the P8 supervisor alive, which step it is on (v7c_p4 / v7c_p3),
+   the last health line. P8's hard stop is 2026-10-09 16:26:49 UTC. NEVER write a new plan while P8's supervisor is
+   alive: autopilot.py re-reads the plan file at every step start, so a new plan would hijack P8's next step.
+2. VERIFY v7d exactly as the Mac shipped it (read-only; the Mac side owns submissions/v7d, do not edit it):
+   `~/g4/venv/bin/python -m pytest -q -p no:cacheprovider tests/test_v7d_bundle.py tests/test_v7d_helpers.py
+   tests/test_v7d_sandbox.py tests/test_v7d_prompts.py tests/test_v7d_counters.py tests/test_a6000_p8_plan.py
+   tests/test_a6000_v7_counters.py` and `~/g4/venv/bin/python scripts/validate.py submissions/v7d`. Then the two
+   re-measure scripts on the v7c traces already on this box, as the baseline:
+   `python3 -I docs/a6000/v7c_analysis/cross_stage_refusals.py "v7c=$HOME/g4/runs/p2/items/v7c/*/traces/trace_*.json" "v7=$HOME/g4/runs/p2/items/v7/*/traces/trace_*.json"`
+   and `python3 -I docs/a6000/v7c_analysis/aggregate_failures.py ~/g4/runs/p2/items/v7c`. Put both outputs in
+   P2_LOG.md. If any test or the validator fails: log it, push, and stop; do not fix the bundle here.
+3. PRE-REGISTER before any v7d item: GATE.md addendum 13, copied from the v7d pre-registration in GAPS (v7d, C = 2,
+   the pacing rule, scale from a 4-item probe at T = 2, (a) the 50 stage-1a ids paired against v4h2, v7 AND v7c with
+   the BETTER / WORSE / UNRESOLVED / NO EVIDENCE readings of addendum 12, (b) the public 74 with scripts/keep_rule.py
+   against eval/kaggle/g4-l4-v4h2g-p312/results.jsonl and the helper gate, the counters with repeat_reads reported,
+   the cross_stage_refusals.py re-measure, the stated decision rule for the Kaggle queue, (c) P3 with v7d only if (a)
+   is not WORSE). Name the bundle commit hash and the baseline numbers from step 2. Commit and push.
+4. PREPARE THE PLAN, only once P2_LOG.md carries P8's "DONE" line and no autopilot process is alive (if P8 is still
+   running, skip this step and say so in the report):
+   `~/g4/venv/bin/python scripts/a6000/p8_plan.py --arm v7d --dry-run` (expect ["probe_v7d", "v7d_s50", "v7d_p4", "v7d_p3"]),
+   then `~/g4/venv/bin/python scripts/a6000/p8_plan.py --arm v7d` (writes ~/g4/runs/autopilot_plan.json, points the
+   choice file at v7d). Check `nvidia-smi` shows no compute process and that the P8 autopilot state file will not
+   resume an old step (read scripts/a6000/autopilot.py's --state handling; move the old state file aside the way P8
+   did if that is what it does). Do NOT launch.
+5. REPORT, then stop: the pull hash, the test counts, the validator line, the baseline numbers, the addendum 13 commit
+   hash, whether the plan was written (step 4) or must wait for P8's DONE line, and this exact launch line for the
+   owner to paste when he is ready (serve.sh is started by the supervisor's plan the same way P8 did it):
+   `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && AUTOPILOT_HARD_STOP_H=24 setsid nohup "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1 < /dev/null & sleep 20; tail -n 2 "$HOME/g4/autopilot.log"`
+   If step 4 was skipped, the owner runs `~/g4/venv/bin/python scripts/a6000/p8_plan.py --arm v7d` first, after P8's
+   DONE line. After the launch, the plan does the rest: probe -> (a) -> re-measure -> (b) -> (c); hourly health lines
+   and backups as before; at the hard stop, finalize, stop vLLM and the proxies, confirm nvidia-smi is empty, push.
