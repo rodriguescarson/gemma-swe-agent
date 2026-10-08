@@ -178,3 +178,5 @@ not run (no capture)
 - 2026-10-08T11:32:17Z | END cleanup (hard stop): nvidia-smi compute apps: none
 - DONE 2026-10-08T11:32:20Z (hard stop)
 - 2026-10-08T16:26:49Z | LAUNCH stage 1a; HARD STOP 2026-10-09T16:26:49Z
+- 2026-10-08T16:29:43Z | step=probe_v7c | EVENT started pid 1316 (restarts so far 0; hard stop in 24.0 h)
+- 2026-10-08T16:41:14Z | step=probe_v7c | END done: done=0/4 solved=0
