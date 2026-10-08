@@ -40,8 +40,8 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
             if "/" not in r:
                 return name in ("items.jsonl", "probe_summary.json", "probe_gate.json", "ids.txt") or fnmatch.fnmatch(name, "proxy_*.jsonl") or fnmatch.fnmatch(name, "report_*.txt")
             return _p2_like(r, p3=False)
-        if top == "p3":
-            r = rel[3:]
+        if re.fullmatch(r"p3(_\w+)?", top):
+            r = rel[len(top) + 1:]
             if "/" not in r:
                 return name in ("ARM", "rebalance_report.json", "validate_report.json", "proxy.jsonl", "pairs_raw.jsonl")
             if re.fullmatch(r"s\d+/task_results\.jsonl", r):
@@ -54,7 +54,7 @@ def plan(src_root, dst_root, max_bytes=MAX_BYTES):
             return r.startswith("results/") and not r.startswith("results/logs/")
         return False
 
-    tops = [p.name for p in src_root.iterdir() if p.is_dir() and (p.name in ("p2", "p3") or re.fullmatch(r"p4(_\w+)?", p.name))] if src_root.exists() else []
+    tops = [p.name for p in src_root.iterdir() if p.is_dir() and (p.name == "p2" or re.fullmatch(r"p[34](_\w+)?", p.name))] if src_root.exists() else []
     for top in sorted(tops):
         base = src_root / top
         for dirpath, _, files in os.walk(base):

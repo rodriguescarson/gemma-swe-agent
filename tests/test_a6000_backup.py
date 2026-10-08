@@ -35,6 +35,19 @@ def test_p3_keeps_rows_and_patches_but_never_traces_capture_or_sft_rows(tmp_path
     assert not any(r.endswith(("capture.jsonl", "rows.jsonl", "rows_rebalanced.jsonl")) or "/traces/" in r for r in rels)
 
 
+def test_p3_variant_dirs_are_backed_up_like_p3(tmp_path):                      # P8: the v7c pass runs in p3_v7c next to the v7 pass in p3
+    src, dst = tmp_path / "runs", tmp_path / "repo"
+    base = src / "p3_v7c" / "items" / "v7c" / "t1"
+    for rel in ("task_results.jsonl", "patches/t1.diff", "traces/trace_t1.json"):
+        mk(base / rel)
+    for big in ("capture.jsonl", "rows.jsonl"):
+        mk(src / "p3_v7c" / big)
+    mk(src / "p3_v7c" / "ARM"); mk(src / "p3_v7c" / "pairs_raw.jsonl")
+    rels = {str(d.relative_to(dst)) for s, d in bk.plan(str(src), str(dst))}
+    assert "p3_v7c/items/v7c/t1/task_results.jsonl" in rels and "p3_v7c/ARM" in rels and "p3_v7c/pairs_raw.jsonl" in rels and "p3_v7c/items/v7c/t1/patches/t1.diff" in rels
+    assert not any(r.endswith(("capture.jsonl", "rows.jsonl")) or "/traces/" in r for r in rels)
+
+
 def test_p4_results_and_traces(tmp_path):
     src, dst = tmp_path / "runs", tmp_path / "repo"
     mk(src / "p4" / "results.jsonl"); mk(src / "p4" / "ARM"); mk(src / "p4" / "results" / "traces" / "trace_a.json"); mk(src / "p4_proxy.jsonl")

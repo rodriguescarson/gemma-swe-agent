@@ -26,6 +26,17 @@ def test_deadline_is_36_hours_after_launch():
     assert ap.time_left_s(1000.0, now=1000.0 + 35 * 3600) == 3600 and ap.time_left_s(1000.0, now=1000.0 + 37 * 3600) < 0
 
 
+def test_hard_stop_hours_can_be_set_by_the_environment(monkeypatch):
+    monkeypatch.setenv("AUTOPILOT_HARD_STOP_H", "24")                              # P8: hard stop = launch + 24 h
+    sp = importlib.util.spec_from_file_location("autopilot_lib_24", ROOT / "scripts" / "a6000" / "autopilot_lib.py")
+    lib24 = importlib.util.module_from_spec(sp); sp.loader.exec_module(lib24)
+    assert lib24.deadline_utc(1000.0) == 1000.0 + 24 * 3600
+    monkeypatch.delenv("AUTOPILOT_HARD_STOP_H")
+    sp = importlib.util.spec_from_file_location("autopilot_lib_36", ROOT / "scripts" / "a6000" / "autopilot_lib.py")
+    lib36 = importlib.util.module_from_spec(sp); sp.loader.exec_module(lib36)
+    assert lib36.deadline_utc(1000.0) == 1000.0 + 36 * 3600
+
+
 def test_stop_rule_needs_enough_items_and_trips_on_errors_or_fast_median():
     assert ap.stop_reason(done=5, errors=5, median_s=200) is None                 # too few items to judge
     assert "error" in ap.stop_reason(done=20, errors=4, median_s=200)             # 20% > 15%

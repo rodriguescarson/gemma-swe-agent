@@ -1,6 +1,8 @@
 """Pure rules of the autonomous P2 -> P4 -> P2 stage 1b -> P3 run (docs/v4h/GATE.md, 'P2 addendum 4'). No I/O."""
 
-HARD_STOP_H = 36.0
+import os
+
+HARD_STOP_H = float(os.environ.get("AUTOPILOT_HARD_STOP_H") or 36.0)   # P8 runs the supervisor with AUTOPILOT_HARD_STOP_H=24
 STOP_ERR_SHARE, STOP_MIN_ITEMS, STOP_MEDIAN_S = 0.15, 10, 60.0
 
 
