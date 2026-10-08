@@ -244,3 +244,33 @@ steps, self-repair, the 36 h hard stop at 2026-10-08 09:44 UTC).
    passes done, rows, distinct tasks, pairs, tool mix), stop vLLM and the proxies, confirm `nvidia-smi` shows no
    compute process, push everything, and end with the P6 step-4 report (the v7_s50 table and verdict, the v7 P4
    table and verdict, the counters, P3 counts, every commit hash). Then stop; do not start new runs.
+
+
+-------------------------------------------------------------------------
+P8. v7c SCREEN + ONE DATA PASS (after the box is restarted; new session)
+-------------------------------------------------------------------------
+You are a new Claude Code session on the A6000 box (WSL2 Ubuntu, friend's PC; work only in ~/g4 and Docker). Repo
+~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, pull --rebase --autostash before every
+push, commit small). Read first: docs/a6000/P2_LOG.md (last 40 lines), docs/v4h/GATE.md from "P2 addendum 11" to
+the end, docs/GAPS_2026-10-06.md (last section: the v7c pre-registration), scripts/a6000/PROMPTS.md P3/P6/P7, and the
+header of scripts/a6000/autopilot.py. Before any GPU work, confirm with the owner that the Windows session stays
+logged in and sleep is off for the next 24 h; WSL died twice when the session ended. Hard stop = launch + 24 h.
+
+1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi` (no other compute process), `df -h ~`,
+   `git status -sb`, `git pull --rebase --autostash origin wip/gemma-agent`. Confirm submissions/v7c and
+   tests/test_v7c_bundle.py exist; run tests/test_v7c_*.py + tests/test_setup_stage.py and scripts/validate.py
+   submissions/v7c. If anything fails, log it to P2_LOG.md and stop (the Mac side owns v7c).
+2. Start vLLM with scripts/a6000/serve.sh exactly as before (same settings as the v7 runs). Pre-register in GATE.md
+   (addendum 12) before the first item: v7c, same C = 2 and pacing rule, scale from a 4-item probe, readings below.
+3. Through the supervisor's plan (p6_plan.py mechanism, bundle v7c): probe (4 items) -> v7c on the 50 stage-1a ids,
+   paired vs the existing v4h2 and v7 rows on those ids -> v7c on the public 74 (sequential, pacing), judged by
+   scripts/keep_rule.py vs eval/kaggle/g4-l4-v4h2g-p312/results.jsonl and by scripts/a6000/v7_counters.py (must be
+   zero: view_usage_calls, literal_wrapper_commands, write_file_path_refusals, forced_install_empty_args; report
+   cap_refusals, repeat_outlines, loops_ge5, budget_exhausted_tasks) -> if time remains, P3 with v7c: ONE pass over
+   the 844 training ids (data/heldout1k/all_valid_ids.txt minus data/heldout1k/sample200_ids.txt), successes only,
+   captures kept, rows through build_sft + rebalance + validate, plus (chosen, rejected) pairs where a task has
+   both outcomes across this and the v7 P3 attempts.
+4. Hourly health lines, hourly results backups to the branch, the GPU guard as before. At the hard stop or when P3
+   ends: finalize, stop vLLM and proxies, confirm `nvidia-smi` shows nothing, push, and report after each step:
+   tables, counters, verdicts against the pre-registered readings, P3 counts (tasks attempted, solved, rows,
+   distinct tasks, pairs), commit hashes. Do not start anything else.
