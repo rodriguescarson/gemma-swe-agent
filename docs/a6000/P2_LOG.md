@@ -187,3 +187,5 @@ not run (no capture)
 - 2026-10-08T18:09:02Z | step=v7c_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-08T18:09:02Z | step=v7c_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-08T18:09:06Z | step=v7c_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-08T18:09:41Z | step=v7c_p4 | EVENT started pid 12151 (restarts so far 0; hard stop in 22.3 h)
+- 2026-10-08T19:09:42Z | step=v7c_p4 | done=25/74 | solved=8 | empty=2 | errors=0 | median_s=114.6 | cap=1 | gpu=100% | disk_free=890GB | restarts=0
