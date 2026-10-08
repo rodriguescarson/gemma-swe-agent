@@ -1,19 +1,16 @@
-"""The forensics counters v7b is judged by live in scripts/a6000/v7_counters.py. That file is on the hard no-touch list
-while the GPU box runs v7, so it is used here read-only (its matcher and its CLI unchanged). These tests bind its
-cap_refusals counter to what v7b's view.py really prints on the six-call loop (refuse, refuse, outline, refuse, refuse,
-outline), produced by running v7b's helpers and stored the way the harness stores replies:
+"""The forensics counters v7b is judged by live in scripts/a6000/v7_counters.py. These tests bind them to what v7b's
+view.py really prints on the six-call loop past the read cap (refuse, refuse, outline, refuse, refuse, outline),
+produced by running v7b's helpers and stored the way the harness stores replies:
 
-  * the four one-line refusals are still counted: v7b keeps v7's refusal text and the matcher looks for
+  * the four one-line refusals are counted under cap_refusals: v7b keeps v7's refusal text and the matcher looks for
     "read cap reached" (besides "search cap reached" and v6p-b's "SHARE SPENT");
+  * the two outline replies are counted under repeat_outlines (2026-10-08, v7c pre-registration in
+    docs/GAPS_2026-10-06.md: the counters split; "outline only:" moved out of cap_refusals into its own counter, so a
+    v7c run, where the outline answers identical re-reads and no cap exists, does not read as cap refusals). A v7b
+    screen's refused reads are cap_refusals + repeat_outlines (4 + 2 here); before the split they were cap_refusals 6;
   * an outline reply never reads as a view.py usage line (view_usage_calls is a must-be-zero counter), and the loop
-    counter still sees a model that repeats the identical call, whatever the replies say;
-  * the outline replies are NOT counted by today's matcher: they carry none of its three texts. For a v7 vs v7b read
-    of refused reads they should be (each one is a refused read; uncounted, v7b's number falls by a third in a looping
-    task with no change in behaviour). The matcher change, adding "outline only:" to RULES["cap_refusals"], is
-    pre-registered below as a strict xfail: it waits for the no-touch list to lift, and the test turns into a failure
-    the day the matcher learns the text, so the marker cannot outlive the fix. Until then a v7b screen adds the
-    replies that contain "outline only:" to cap_refusals by hand.
-Written before the change (strict test-first)."""
+    counter still sees a model that repeats the identical call, whatever the replies say.
+Updated before the matcher changed (strict test-first)."""
 import pytest
 
 import test_v7_helpers as v7h
@@ -41,7 +38,7 @@ def test_the_one_line_refusals_are_still_counted(tmp_path):
     outs, c = loop_run(tmp_path)
     assert [o.strip() == READ_CAP for o in outs] == [True, True, False, True, True, False], outs
     assert sum("outline only:" in o for o in outs) == 2
-    assert c["cap_refusals"] == 6, c                                   # 2026-10-08: the matcher counts the outline replies too
+    assert c["cap_refusals"] == 4, c                                   # the one-line refusals only, not the outlines
 
 
 def test_an_outline_is_not_a_usage_line_and_the_loop_is_still_seen(tmp_path):
@@ -50,6 +47,7 @@ def test_an_outline_is_not_a_usage_line_and_the_loop_is_still_seen(tmp_path):
     assert c["loops_ge5"] == 1                                          # 6 identical calls in a row, any replies
 
 
-def test_every_refused_read_is_counted_outlines_included(tmp_path):
+def test_the_outline_replies_count_under_repeat_outlines(tmp_path):
     _, c = loop_run(tmp_path)
-    assert c["cap_refusals"] == 6, c
+    assert c["repeat_outlines"] == 2 and c["cap_refusals"] == 4, c
+    assert c["cap_refusals"] + c["repeat_outlines"] == 6                # every refused read is still counted once

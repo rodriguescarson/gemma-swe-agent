@@ -134,5 +134,5 @@ def test_control_reproduces_the_forensics_numbers_on_v5h2_p4():
     c = vc.counters(str(P4), None)
     got = {k: c[k] for k in ("tasks", "solved") + vc.COUNTERS}
     assert got == {"tasks": 74, "solved": 29, "view_usage_calls": 66, "literal_wrapper_commands": 18, "write_file_path_refusals": 33,
-                   "forced_install_empty_args": 41, "cap_refusals": 0, "loops_ge5": 26, "budget_exhausted_tasks": 13,
+                   "forced_install_empty_args": 41, "cap_refusals": 0, "repeat_outlines": 0, "loops_ge5": 26, "budget_exhausted_tasks": 13,
                    "helper_unreachable_tasks": 0}, got

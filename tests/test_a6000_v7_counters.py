@@ -1,6 +1,6 @@
 """scripts/a6000/v7_counters.py: the forensics counters v7 is judged by (docs/GAPS_2026-10-06.md last section, PROMPTS P6), computed from a run's traces.
 Written before the code."""
-import importlib.util, json, pathlib, sys
+import importlib.util, json, pathlib, subprocess, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts" / "a6000")); sys.path.insert(0, str(ROOT / "scripts"))
@@ -67,3 +67,43 @@ def test_counters_can_read_a_probe_layout_via_items_dir(tmp_path):
     (d / "traces").mkdir(); (d / "traces" / "trace_t1.json").write_text(json.dumps({"steps": [_step("fixer", "run_command", {"command": "ls"}, ok("x"))]}))
     c = vc.counters(str(tmp_path), "v7", items_dir="probe_v7_T2")
     assert c["tasks"] == 1 and c["solved"] == 1
+
+
+OUTLINE_REPLY = ("4-7 def f(x)\n10-11 def g()\n"
+                 "outline only: pick a range and edit it now with `python3 /tmp/swe/edit.py pkg/e.py --lines A-B`")
+
+
+def _v7c_run(tmp_path):
+    """Two outline replies (v7b/v7c view.py) and the three cap texts (v7's search and read cap, v6p-b's SHARE SPENT)."""
+    view = _step("fixer", "run_command", {"command": "python3 /tmp/swe/view.py pkg/e.py 4 8"}, ok(OUTLINE_REPLY))
+    _write(tmp_path, "v7c", "t1", [view, view,
+        _step("locator", "run_command", {"command": "python3 /tmp/swe/locate.py x"}, ok("search cap reached: use `git grep -n <name>` or write the plan now")),
+        _step("fixer", "run_command", {"command": "python3 /tmp/swe/view.py a.py 1 5"}, ok("read cap reached before any edit: edit now with edit.py (fixer) or write the plan (locator)")),
+        _step("locator", "run_command", {"command": "python3 /tmp/swe/locate.py y"}, ok("SHARE SPENT: your 5 counted helper calls are used"))], resolved=True)
+    return tmp_path
+
+
+def test_repeat_outlines_is_its_own_counter_and_cap_refusals_keeps_only_the_cap_texts(tmp_path):
+    """2026-10-08, v7c pre-registration (docs/GAPS_2026-10-06.md): the outline answers an identical re-read, not a cap,
+    so "outline only:" is counted under repeat_outlines and no longer under cap_refusals (SHARE SPENT, search cap
+    reached, read cap reached). Written before the counter split (test-first)."""
+    c = vc.counters(str(_v7c_run(tmp_path)), "v7c")
+    assert c["repeat_outlines"] == 2 and c["cap_refusals"] == 3, {k: c[k] for k in vc.COUNTERS}
+    assert vc.COUNTERS.index("repeat_outlines") == vc.COUNTERS.index("cap_refusals") + 1
+    assert [e["task"] for e in c["examples"]["repeat_outlines"]] == ["t1", "t1"]
+    assert c["view_usage_calls"] == 0                                     # an outline is never a usage line
+
+
+def test_repeat_outlines_is_reported_not_gated_and_the_cli_is_unchanged(tmp_path):
+    out = tmp_path / "c.json"
+    p = subprocess.run([sys.executable, str(ROOT / "scripts" / "a6000" / "v7_counters.py"), str(_v7c_run(tmp_path / "run")),
+                        "--arm", "v7c", "--json", str(out)], capture_output=True, text=True)
+    assert p.returncode == 0 and "must-be-zero verdict: **PASS**" in p.stdout, p.stdout + p.stderr
+    head, rule, row = p.stdout.splitlines()[:3]
+    cols = [x.strip() for x in head.strip("|").split("|")]
+    vals = [x.strip() for x in row.strip("|").split("|")]
+    assert cols == ["tasks", "solved"] + list(vc.COUNTERS) and dict(zip(cols, vals))["repeat_outlines"] == "2", p.stdout
+    assert dict(zip(cols, vals))["cap_refusals"] == "3" and rule.count("---") == len(cols)
+    d = json.loads(out.read_text())
+    assert d["counters"]["repeat_outlines"] == 2 and d["verdict"]["pass"] is True
+    assert d["verdict"]["must_zero"] == ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]
