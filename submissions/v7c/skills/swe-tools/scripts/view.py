@@ -4,16 +4,18 @@ while the file is unchanged, is refused: re-reading the same lines never helps (
 v7 takes every range shape the model sends (docs/a6000/FAILURE_FORENSICS.md finding 1: `FILE 30-40` and a bare `FILE`
 got the usage line in 63 tasks): FILE START END, FILE START-END, FILE START:END, FILE START (START..START+119) and FILE
 (1..120); a reversed range is turned round; several ranges show the first and name the rest. The repeat check compares
-the range after parsing, so `30-40` repeats `30 40`. Only non-numeric input gets the usage sentence. Before the task's
-first OK edit.py call every view.py call is counted in the ledger (_ws.py) and refused past VIEW_CAP (v7 fix 9).
+the range after parsing, so `30-40` repeats `30 40`. Only non-numeric input gets the usage sentence.
 
-v7b (docs/GAPS_2026-10-06.md, last section, fix 1): the cap stays, but the 3rd refused read in a row (the ledger's
-refused_run) is answered with an outline of the requested file instead of the refusal line, and so is the 6th, the 9th:
-every top-level def/class (module-level if/try blocks included) and every method (a def in a class body, nested classes
-included) as `START-END kind name(args)`, one per line, at most OUTLINE_MAX; a longer outline shows the OUTLINE_MAX
-entries that start OUTLINE_BEFORE entries above the requested line and sums up the rest in "... N more" lines. Then one
-line: pick a range and edit it with edit.py --lines. A file that cannot be outlined gets one "outline unavailable (...)"
-line instead of the entries. The reply stays far below run_command's 5,000-char cut, so its last line always arrives.
+v7c (docs/GAPS_2026-10-06.md, v7c pre-registration): no read cap. Any number of distinct reads prints its lines; the
+ledger (_ws.py) only records the view.py calls made before the task's first OK edit. The 1st and 2nd identical re-read
+in a row of an unchanged range get the ALREADY SHOWN line; the 3rd gets v7b's outline of the requested file instead,
+and so do the 6th, the 9th (the run is per file and range; any other view.py call and an OK edit end it). The outline
+(v7b, unchanged): every top-level def/class (module-level if/try blocks included) and every method (a def in a class
+body, nested classes included) as `START-END kind name(args)`, one per line, at most OUTLINE_MAX; a longer outline
+shows the OUTLINE_MAX entries that start OUTLINE_BEFORE entries above the requested line and sums up the rest in
+"... N more" lines. Then one line: pick a range and edit it with edit.py --lines. A file that cannot be outlined gets
+one "outline unavailable (...)" line instead of the entries. The reply stays far below run_command's 5,000-char cut,
+so its last line always arrives.
 usage: python3 /tmp/swe/view.py FILE [START [END]]"""
 import ast, hashlib, json, os, re, sys, tempfile, warnings
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -136,17 +138,14 @@ def outline_reply(argv):
 
 
 def main(argv):
-    refusal = take_view()
-    if refusal == OUTLINE:     # v7b: the 3rd refused read in a row gets new content, not the same line again
-        print(outline_reply(argv)); return 0
-    if refusal:
-        print(refusal); return 0
     rs = ranges(argv[1:]) if argv else None
     if rs is None:
+        take_view()            # v7c: every call is recorded and none is capped; a call that is no re-read ends the run
         print("usage: view.py takes FILE then line numbers (START END, START-END or START), not %r, so send it again next, "
               "for example python3 /tmp/swe/view.py %s 30 60" % (" ".join(argv), argv[0] if argv else "path/to/file.py")); return 0
     root = ws(); rel = argv[0]; path = rel if os.path.isabs(rel) else os.path.join(root, rel)
     if not os.path.isfile(path):
+        take_view()
         print("no such file: %s, so find the path with git ls-files | grep %s and view it next" % (rel, os.path.basename(rel))); return 0
     (a, b), rest = rs[0], rs[1:]
     start, end = max(1, min(a, b)), max(a, b)
@@ -160,8 +159,11 @@ def main(argv):
     except Exception: seen = {}
     key = "%s:%d-%d" % (os.path.relpath(path, root), start, end)
     if seen.get(key) == digest:
+        if take_view(key) == OUTLINE:   # v7c: the 3rd identical re-read in a row gets new content, not the same line again
+            print(outline_reply(argv)); return 0
         print("ALREADY SHOWN: %s lines %d-%d are unchanged since you saw them, so edit now with python3 /tmp/swe/edit.py "
               "or view different lines instead" % (rel, start, end)); return 0
+    take_view()
     seen[key] = digest; json.dump(seen, open(log, "w"))
     lines = data.decode("utf-8", "replace").splitlines()
     if not lines:
