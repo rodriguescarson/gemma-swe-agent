@@ -1,0 +1,78 @@
+diff --git a/src/cattrs/strategies/_unions.py b/src/cattrs/strategies/_unions.py
+index 7cc06d8..f96f5da 100644
+--- a/src/cattrs/strategies/_unions.py
++++ b/src/cattrs/strategies/_unions.py
+@@ -49,9 +49,7 @@ def configure_tagged_union(
+     ..  versionchanged:: 25.1
+         Type aliases of unions are now also supported.
+     """
+-    if is_type_alias(union):
+-        union = union.__value__
+-    args = union.__args__
++    args = union.__value__.__args__ if is_type_alias(union) else union.__args__
+     tag_to_hook = {}
+     exact_cl_unstruct_hooks = {}
+     for cl in args:
+@@ -62,7 +60,7 @@ def configure_tagged_union(
+         def structure_union_member(val: dict, _cl=cl, _h=struct_handler) -> cl:
+             return _h(val, _cl)
+ 
+-        def unstructure_union_member(val: union, _h=unstruct_handler) -> dict:
++        def unstructure_union_member(val: Any, _h=unstruct_handler) -> dict:
+             return _h(val)
+ 
+         tag_to_hook[tag] = structure_union_member
+@@ -80,7 +78,7 @@ def configure_tagged_union(
+         cl_to_tag = defaultdict(lambda: default, cl_to_tag)
+ 
+     def unstructure_tagged_union(
+-        val: union,
++        val: Any,
+         _exact_cl_unstruct_hooks=exact_cl_unstruct_hooks,
+         _cl_to_tag=cl_to_tag,
+         _tag_name=tag_name,
+diff --git a/tests/repro_recursive_alias.py b/tests/repro_recursive_alias.py
+new file mode 100644
+index 0000000..136ed3f
+--- /dev/null
++++ b/tests/repro_recursive_alias.py
+@@ -0,0 +1,39 @@
++import pytest
++from cattrs import BaseConverter
++from cattrs.strategies import configure_tagged_union
++from dataclasses import dataclass
++from typing import Union
++
++@dataclass
++class A:
++    a: int
++
++@dataclass
++class B:
++    b: str
++
++# Recursive type alias: AOrB is used inside A
++@dataclass
++class Recursive:
++    val: "AOrB"
++
++type AOrB = Union[A, B, Recursive]
++
++def test_recursive_alias():
++    converter = BaseConverter()
++    configure_tagged_union(AOrB, converter)
++    
++    # This should work
++    assert converter.unstructure(A(1), AOrB) == {"_type": "A", "a": 1}
++    
++    # This is the recursive part
++    rec = Recursive(A(1))
++    unstruct = converter.unstructure(rec, AOrB)
++    print(f"Unstructured: {unstruct}")
++    
++    assert unstruct["_type"] == "Recursive"
++    assert unstruct["val"] == {"_type": "A", "a": 1}
++    assert converter.structure(unstruct, AOrB) == rec
++
++if __name__ == "__main__":
++    test_recursive_alias()

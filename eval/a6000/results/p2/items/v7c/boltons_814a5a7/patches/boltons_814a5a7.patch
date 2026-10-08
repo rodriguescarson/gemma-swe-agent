@@ -1,0 +1,146 @@
+diff --git a/boltons/iterutils.py b/boltons/iterutils.py
+index f0590d4..f8135c9 100644
+--- a/boltons/iterutils.py
++++ b/boltons/iterutils.py
+@@ -526,8 +526,13 @@ def xfrange(stop, start=None, step=1.0):
+     else:
+         # swap when all args are used
+         stop, start = start * 1.0, stop * 1.0
++
++    count = int(math.ceil((stop - start) / step))
++    if count <= 0:
++        return
++
+     cur = start
+-    while cur < stop:
++    for i in range(count):
+         yield cur
+         cur += step
+ 
+diff --git a/boltons/jsonutils.py b/boltons/jsonutils.py
+index bf61b03..64b5c4c 100644
+--- a/boltons/jsonutils.py
++++ b/boltons/jsonutils.py
+@@ -180,11 +180,18 @@ class JSONLIterator:
+         cur_pos = fo.tell()
+         while '\n' not in cur:
+             cur = fo.read(bsize)
++            if not cur:
++                # Seeked past the last newline; align to EOF.
++                fo.seek(0, os.SEEK_END)
++                return
+             total_read += bsize
+         try:
+             newline_offset = cur.index('\n') + total_read - bsize
+         except ValueError:
+-            raise  # TODO: seek to end?
++            # This case is actually covered by 'if not cur' above,
++            # but kept for robustness.
++            fo.seek(0, os.SEEK_END)
++            return
+         fo.seek(cur_pos + newline_offset)
+ 
+     def _init_rel_seek(self):
+@@ -198,8 +205,16 @@ class JSONLIterator:
+             if rs == 1.0:
+                 self._cur_pos = size
+             else:
++                # Fix negative-normalization sign bug.
++                # If rs is negative, it's relative to the end.
++                # size * rs will be negative, which is correct for SEEK_SET if
++                # we want to go backwards from 0, but we want backwards from end.
++                # Actually, fo.seek(target, os.SEEK_END) would be better.
+                 target = int(size * rs)
+-                fo.seek(target, os.SEEK_SET)
++                if target < 0:
++                    fo.seek(target, os.SEEK_END)
++                else:
++                    fo.seek(target, os.SEEK_SET)
+                 self._align_to_newline()
+                 self._cur_pos = fo.tell()
+ 
+diff --git a/boltons/strutils.py b/boltons/strutils.py
+index 66bfc92..10a1d5a 100644
+--- a/boltons/strutils.py
++++ b/boltons/strutils.py
+@@ -1230,6 +1230,8 @@ class MultiReplace:
+         Given an input string, run all substitutions given in the
+         constructor.
+         """
++        if not self.group_map:
++            return text
+         return self.combined_pattern.sub(self._get_value, text)
+ 
+ 
+diff --git a/boltons/tableutils.py b/boltons/tableutils.py
+index 899ee98..75b9841 100644
+--- a/boltons/tableutils.py
++++ b/boltons/tableutils.py
+@@ -565,19 +565,19 @@ class Table:
+         """
+         lines = []
+         widths = []
+-        headers = list(self.headers)
++        headers = list(self.headers) if self.headers is not None else []
+         text_data = [[to_text(cell, maxlen=maxlen) for cell in row]
+                      for row in self._data]
+         for idx in range(self._width):
+             cur_widths = [len(row[idx]) for row in text_data]
+-            if with_headers:
++            if with_headers and idx < len(headers):
+                 cur_widths.append(len(to_text(headers[idx], maxlen=maxlen)))
+-            widths.append(max(cur_widths))
+-        if with_headers:
+-            lines.append(' | '.join([h.center(widths[i])
+-                                     for i, h in enumerate(headers)]))
+-            lines.append('-|-'.join(['-' * w for w in widths]))
++            widths.append(max(cur_widths) if cur_widths else 0)
++        if with_headers and headers:
++            lines.append(' | '.join([to_text(headers[i], maxlen=maxlen).center(widths[i])
++                                     for i in range(len(headers))]))
++            lines.append('-|-'.join(['-' * widths[i] for i in range(len(headers))]))
+         for row in text_data:
+-            lines.append(' | '.join([cell.center(widths[j])
++            lines.append(' | '.join([to_text(cell, maxlen=maxlen).center(widths[j])
+                                      for j, cell in enumerate(row)]))
+         return '\n'.join(lines)
+diff --git a/boltons/timeutils.py b/boltons/timeutils.py
+index 82f201e..f64e73e 100644
+--- a/boltons/timeutils.py
++++ b/boltons/timeutils.py
+@@ -117,7 +117,15 @@ def isoparse(iso_str):
+     .. _dateutil: https://pypi.python.org/pypi/python-dateutil
+ 
+     """
+-    dt_args = [int(p) for p in _NONDIGIT_RE.split(iso_str)]
++    parts = _NONDIGIT_RE.split(iso_str)
++    dt_args = []
++    for p in parts:
++        if '.' in p:
++            sec, frac = p.split('.', 1)
++            dt_args.append(int(sec))
++            dt_args.append(int(frac[:6].ljust(6, '0')))
++        else:
++            dt_args.append(int(p))
+     return datetime(*dt_args)
+ 
+ 
+@@ -374,12 +382,17 @@ def daterange(start, stop, step=1, inclusive=False):
+         finished = operator.lt if inclusive else operator.le
+     now = start
+ 
++    # Progress invariant: stationary steps raise ValueError,
++    # wrong-direction steps yield nothing.
++    if m_step == (0, 0) and d_step == timedelta(0):
++        raise ValueError('step must be non-zero')
++
+     while not finished(now, stop):
+         yield now
+         if m_step:
+             m_y_step, cur_month = divmod((now.month - 1) + m_step, 12)
+             now = now.replace(year=now.year + m_y_step,
+-                              month=(cur_month + 1))
++                               month=(cur_month + 1))
+         now = now + d_step
+     return
+ 
