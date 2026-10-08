@@ -88,10 +88,10 @@ def test_the_call_arithmetic_and_the_caps_are_v7s():
 
 # ------------------------------------------------------------------ the Kaggle eval kernel (v5b recipe, as v7's)
 
-KERNEL_DIR, KERNEL_SLUG = "g4-l4-v7b-p312", "g4-eval-v2-smoke"
+KERNEL_DIR, KERNEL_SLUG = "g4-l4-v7b-p312", "g4-oracle-all"   # swapped 2026-10-08: the proven GPU slug went to v7c, the Saturday candidate
 TAKEN = {"g4-lora-test": "v7", "g4-eval74-v4": "v5h2", "g4-l4-v4": "v5h2b", "g4-eval74-v3": "v6p",
-         "g4-l4-v9-eog": "v6p-think", "g4-eval74-v2": "v11b probe (queued, tests/test_v7_bundle.py)"}
-SLUG_LOG = ROOT / "eval" / "kaggle" / "v2_smoke" / "g4-eval-v2-smoke.log"
+         "g4-l4-v9-eog": "v6p-think", "g4-eval74-v2": "v11b probe (queued, tests/test_v7_bundle.py)", "g4-eval-v2-smoke": "v7c"}
+SLUG_LOG = ROOT / "eval" / "kaggle" / "oracle_all" / "g4-oracle-all.log"
 
 
 def test_the_kernel_slug_is_free_and_was_made_under_the_312_image():
@@ -101,8 +101,7 @@ def test_the_kernel_slug_is_free_and_was_made_under_the_312_image():
     import re
     assert KERNEL_SLUG not in TAKEN
     log = SLUG_LOG.read_text()
-    assert "python3.12/" in log and "python3.13" not in log
-    assert re.search(r"vLLM up in \d+ s, tp 4 gpus 4", log)
+    assert "python3.12/" in log and "python3.13" not in log and "TOTAL 74 / 129" in log   # the 2026-09-26 oracle run (CPU)
     kernels = ROOT / "kernels"
     if kernels.is_dir():
         import json

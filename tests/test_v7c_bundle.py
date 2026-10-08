@@ -133,10 +133,10 @@ def test_packs_small_and_complete(tmp_path):
 
 # ------------------------------------------------------------------ the Kaggle eval kernel (v5b recipe, as v7's and v7b's)
 
-KERNEL_DIR, KERNEL_SLUG = "g4-l4-v7c-p312", "g4-oracle-all"
-TAKEN = {"g4-lora-test": "v7", "g4-eval-v2-smoke": "v7b", "g4-eval74-v4": "v5h2", "g4-eval74-v2": "v11b probe",
+KERNEL_DIR, KERNEL_SLUG = "g4-l4-v7c-p312", "g4-eval-v2-smoke"   # swapped 2026-10-08: proven GPU + 3.12 slug for the Saturday candidate
+TAKEN = {"g4-lora-test": "v7", "g4-oracle-all": "v7b", "g4-eval74-v4": "v5h2", "g4-eval74-v2": "v11b probe",
          "g4-l4-v4": "v5h2b", "g4-eval74-v3": "v6p", "g4-l4-v9-eog": "v6p-think"}
-SLUG_LOG = ROOT / "eval" / "kaggle" / "oracle_all" / "g4-oracle-all.log"
+SLUG_LOG = ROOT / "eval" / "kaggle" / "v2_smoke" / "g4-eval-v2-smoke.log"
 FREE_BUT_313 = {"g4-l4-lora-probe": "g4-l4-lora-probe", "g4-l4-v4h": "g4-l4-v4h", "g4-l4-v4h-think": "g4-l4-v4h-think",
                 "g4-l4-v4-wh28": "g4-l4-v4-wh28"}                     # slug -> eval/kaggle/<dir> holding its log
 
@@ -152,7 +152,7 @@ def test_the_kernel_slug_is_free_existing_and_was_made_under_the_312_image():
     import json, re
     assert KERNEL_SLUG not in TAKEN and not set(FREE_BUT_313) & set(TAKEN)
     log = SLUG_LOG.read_text()
-    assert "python3.12/" in log and "python3.13" not in log and "TOTAL 74 / 129" in log
+    assert "python3.12/" in log and "python3.13" not in log and re.search(r"vLLM up in \d+ s, tp 4 gpus 4", log)
     for slug, d in FREE_BUT_313.items():
         other = (ROOT / "eval" / "kaggle" / d / (slug + ".log")).read_text()
         assert "python3.13" in other and "python3.12/" not in other, slug
@@ -165,7 +165,7 @@ def test_the_kernel_slug_is_free_existing_and_was_made_under_the_312_image():
     if (kernels / KERNEL_DIR).is_dir():                                 # the Mac that generates the kernels: the taken
         for slug in TAKEN:                                              # slugs are what its kernel dirs say
             assert any(json.loads(p.read_text()).get("id") == "carsonrodrigues/" + slug for p in kernels.glob("*/kernel-metadata.json")), slug
-    assert re.search(r"\bv7\b", TAKEN["g4-lora-test"]) and TAKEN["g4-eval-v2-smoke"] == "v7b"
+    assert re.search(r"\bv7\b", TAKEN["g4-lora-test"]) and TAKEN["g4-oracle-all"] == "v7b"
 
 
 def test_eval_kernel_matches_the_recipe_and_ships_v7c(tmp_path):
@@ -196,9 +196,9 @@ def test_the_v7c_kernel_is_the_v7b_kernel_but_the_changed_files_and_the_slug():
     v7c Kaggle read compares the bundles and nothing else."""
     import json, pytest
     a_dir, b_dir = ROOT / "kernels" / "g4-l4-v7b-p312", ROOT / "kernels" / KERNEL_DIR
-    if not ((a_dir / "g4-eval-v2-smoke.ipynb").exists() and (b_dir / f"{KERNEL_SLUG}.ipynb").exists()):
+    if not ((a_dir / "g4-oracle-all.ipynb").exists() and (b_dir / f"{KERNEL_SLUG}.ipynb").exists()):
         pytest.skip("kernels/ is gitignored: both kernels are generated on the Mac")
-    a = [c["source"] for c in json.loads((a_dir / "g4-eval-v2-smoke.ipynb").read_text())["cells"]]
+    a = [c["source"] for c in json.loads((a_dir / "g4-oracle-all.ipynb").read_text())["cells"]]
     b = [c["source"] for c in json.loads((b_dir / f"{KERNEL_SLUG}.ipynb").read_text())["cells"]]
     assert len(a) == len(b)
     for x, y in zip(a, b):
