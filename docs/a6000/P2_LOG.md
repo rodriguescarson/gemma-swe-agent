@@ -195,3 +195,5 @@ not run (no capture)
 - 2026-10-08T21:16:54Z | step=v7c_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=0
 - 2026-10-08T21:16:54Z | step=v7c_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v7c rc=0
 - 2026-10-08T21:16:58Z | step=v7c_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-08T21:17:31Z | step=v7c_p3 | EVENT started pid 22792 (restarts so far 0; hard stop in 19.2 h)
+- 2026-10-08T22:17:33Z | step=v7c_p3 | done=36/844 | solved=12 | empty=2 | errors=0 | median_s=171.2 | cap=2 | gpu=86% | disk_free=890GB | restarts=0
