@@ -936,3 +936,21 @@ DROP: solved 27 < 37; net -7 < +3`
 
 #### P3
 not run (no capture)
+
+### P2 addendum 12 (P8, the v7c screen + one data pass; written 2026-10-08 16:26 UTC, before any v7c run; v7c = submissions/v7c, last bundle commit 519b405 (fixes 1+2 a49593b, fix 3 eebee8a; branch head 0e0f7db at pull time), tests 161 passed, 2 skipped (tests/test_v7c_*.py + tests/test_setup_stage.py, 2026-10-08 16:26 UTC), scripts/validate.py submissions/v7c OK)
+Why: v7's read cap produced 737 refusals on the 50 off-repo ids and 107 on the public 74 (GAPS "v7c pre-registration"); a refused call costs a harness call, so the cap drove budget exhaustion. v7c = v7b with no read cap
+(the repeat check stays; every 3rd identical re-read of an unchanged range returns the file outline), locate cap 3 kept, prompts free of cap text; counters: cap_refusals (search cap only) and repeat_outlines.
+Server unchanged from the v7 runs (scripts/a6000/serve.sh via the supervisor: vLLM int4, bf16 KV, gpu_memory_utilization 0.95); supervisor, guard, hourly health lines, hourly backups as before.
+Hard stop = supervisor launch + 24 h (AUTOPILOT_HARD_STOP_H=24, new plan file via scripts/a6000/p8_plan.py, tests/test_a6000_p8_plan.py); the owner confirmed the Windows session stays logged in and sleep is off for 24 h.
+**Probe:** v7c arm-pure on the last 4 ids of s200_valid_ids.txt at T = 2; scale = 1 / S when S > 1.15, else 1.0 (p2_race --arm-scale-from-probe; fallback 1.0); judged by the counters only, never part of a table.
+**(a) v7c on the 50 stage-1a ids,** 1 sample, C = 2, paired against the existing v4h2 AND v7 rows on the same ids (same box and settings, different days: a confound). Reading as addendum 11(a): wins - losses
+with the exact two-sided sign test and Wilson 95% CIs; BETTER net >= +5 and p < 0.10; WORSE net <= -5 and p < 0.10; UNRESOLVED when v7c's cap-hit share is >= 10 points above the comparator's and the
+verdict is not BETTER; otherwise NO EVIDENCE.
+**(b) v7c on the public 74,** sequential (T = 1), pace proxy on, the bundle's own budgets (as P4), scripts/keep_rule.py against eval/kaggle/g4-l4-v4h2g-p312/results.jsonl (KEEP = solved >= 37 and paired net >= +3),
+an A6000 screen and never a Kaggle result, plus the helper gate (<= 1 task with a can't-open).
+**Counters on (a) and (b)** (scripts/a6000/v7_counters.py): must be 0: view_usage_calls, literal_wrapper_commands, write_file_path_refusals, forced_install_empty_args; reported, not gated: cap_refusals,
+repeat_outlines, loops_ge5, budget_exhausted_tasks. A non-zero must-be-zero counter is reported with three examples (task, call, reply); it does not stop the run.
+**(c) P3 with v7c** if time remains: ONE pass over data/heldout1k/p3_ids.txt (844 ids = all_valid_ids minus the 200 sample ids), C = 2, v7c's scale, every model call captured, output in runs/p3_v7c (the v7 pass in runs/p3
+is untouched), resumable, stopped at the hard stop. Rows: build_sft (test-verified successes only, sample-200 ids refused) -> rebalance_rows (as addendum 11(c)) -> validate_rows. Preference pairs: tasks with a solved
+and a failed attempt across this pass and the v7 P3 attempts in runs/p3 (raw material; the Adaption schema is applied on the Mac).
+Order: probe -> (a) -> (b) -> (c); each step's table, counters, verdict and commit hash are reported when it ends.
