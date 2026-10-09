@@ -203,3 +203,4 @@ not run (no capture)
 - 2026-10-09T02:17:54Z | step=v7c_p3 | done=195/844 | solved=72 | empty=12 | errors=0 | median_s=159.1 | cap=23 | gpu=100% | disk_free=890GB | restarts=0
 - 2026-10-09T03:18:00Z | step=v7c_p3 | done=233/844 | solved=81 | empty=16 | errors=0 | median_s=160.9 | cap=32 | gpu=0% | disk_free=890GB | restarts=0
 - 2026-10-09T04:18:05Z | step=v7c_p3 | done=270/844 | solved=89 | empty=22 | errors=0 | median_s=163.0 | cap=38 | gpu=100% | disk_free=890GB | restarts=0
+- 2026-10-09T05:18:10Z | step=v7c_p3 | done=306/844 | solved=101 | empty=27 | errors=0 | median_s=160.2 | cap=45 | gpu=100% | disk_free=889GB | restarts=0
