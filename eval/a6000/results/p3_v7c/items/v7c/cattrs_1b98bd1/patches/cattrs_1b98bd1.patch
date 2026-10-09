@@ -1,0 +1,66 @@
+diff --git a/src/cattrs/converters.py b/src/cattrs/converters.py
+index a072c82..f56fb28 100644
+--- a/src/cattrs/converters.py
++++ b/src/cattrs/converters.py
+@@ -52,7 +52,7 @@ from ._compat import (
+     is_tuple,
+     is_union_type,
+ )
+-from .disambiguators import create_uniq_field_dis_func
++from .disambiguators import create_tag_dis_func, create_uniq_field_dis_func
+ from .dispatch import MultiStrategyDispatch
+ from .gen import (
+     AttributeOverride,
+@@ -130,6 +130,7 @@ class BaseConverter:
+         self._prefer_attrib_converters = prefer_attrib_converters
+ 
+         self.detailed_validation = detailed_validation
++        self._union_struct_registry = {}
+ 
+         # Create a per-instance cache.
+         if unstruct_strat is UnstructureStrategy.AS_DICT:
+@@ -140,6 +141,7 @@ class BaseConverter:
+             self._structure_attrs = self.structure_attrs_fromtuple
+ 
+         self._dis_func_cache = lru_cache()(self._get_dis_func)
++        self._dis_func_registry: Dict[Any, Callable[[Any], Optional[Type]]] = {}
+ 
+         self._unstructure_func = MultiStrategyDispatch(self._unstructure_identity)
+         self._unstructure_func.register_cls_list(
+@@ -657,9 +659,14 @@ class BaseConverter:
+                     )
+                 return res
+ 
+-    @staticmethod
+     def _get_dis_func(union: Any) -> Callable[[Any], Type]:
+         """Fetch or try creating a disambiguation function for a union."""
++        if union in self._dis_func_registry:
++            return self._dis_func_registry[union]
++
++        if union in self._union_struct_registry:
++            return self._union_struct_registry[union]
++
+         union_types = union.__args__
+         if NoneType in union_types:  # type: ignore
+             # We support unions of attrs classes and NoneType higher in the
+diff --git a/src/cattrs/disambiguators.py b/src/cattrs/disambiguators.py
+index 2b36fc5..9c295d6 100644
+--- a/src/cattrs/disambiguators.py
++++ b/src/cattrs/disambiguators.py
+@@ -57,3 +57,16 @@ def create_uniq_field_dis_func(
+         return fallback
+ 
+     return dis_func
++
++
++def create_tag_dis_func(
++    tag_field: str, tag_map: Mapping[Any, Type[Any]]
++) -> Callable[[Mapping[Any, Any]], Optional[Type[Any]]]:
++    """Given a tag field and a mapping of tag values to classes, generate a disambiguation function."""
++
++    def dis_func(data: Mapping[Any, Any]) -> Optional[Type[Any]]:
++        if not isinstance(data, Mapping):
++            raise ValueError("Only input mappings are supported.")
++        return tag_map.get(data.get(tag_field))
++
++    return dis_func
