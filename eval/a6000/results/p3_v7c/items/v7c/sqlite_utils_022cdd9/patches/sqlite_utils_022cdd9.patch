@@ -1,0 +1,58 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index a00e7ba..b5478b5 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -887,27 +887,33 @@ class Table(Queryable):
+         pks = self.pks
+         lookup_table = self.db[table]
+ 
+-        @functools.lru_cache(maxsize=128)
+-        def cached_lookup(lookups):
+-            return lookup_table.lookup(dict(lookups))
++        # First, ensure all unique combinations of the columns to extract exist in the lookup table.
++        # This replaces the row-by-row lookup_table.lookup() calls.
++        extract_cols_sql = ", ".join([f"[{col}]" for col in columns])
++        rename_cols_sql = ", ".join([f"[{rename.get(col) or col}]" for col in columns])
++        
++        # Insert distinct values from the current table into the lookup table.
++        # We use INSERT OR IGNORE to avoid duplicates.
++        self.db.run(
++            f"INSERT OR IGNORE INTO [{table}] ({rename_cols_sql}) "
++            f"SELECT DISTINCT {extract_cols_sql} FROM [{self.name}]"
++        )
+ 
+-        if pks == ["rowid"]:
+-            rows_iter = self.rows_where(select="rowid, *")
+-        else:
+-            rows_iter = self.rows
+-        for row in rows_iter:
+-            row_pks = tuple(row[pk] for pk in pks)
+-            lookups = tuple(
+-                (rename.get(column) or column, row[column]) for column in columns
+-            )
+-            self.update(
+-                row_pks,
+-                {first_column: cached_lookup(lookups)},
+-                assume_exists=True,
+-                pks=self.pks,
+-            )
+-            if progress:
+-                progress(1)
++        # Now perform a bulk update to set the first_column to the id from the lookup table.
++        # We use a JOIN in the WHERE clause to match rows.
++        join_conditions = " AND ".join(
++            [f"[{self.name}].[{col}] = [{table}].[{rename.get(col) or col}]" for col in columns]
++        )
++        
++        self.db.run(
++            f"UPDATE [{self.name}] SET [{first_column}] = [{table}].id "
++            f"FROM [{table}] WHERE {join_conditions}"
++        )
++        
++        if progress:
++            # Since we are doing bulk operations, we can't easily report progress per row.
++            # We'll just call it once if it was provided.
++            progress(self.count)
+         fk_column = fk_column or "{}_id".format(table)
+         # Now rename first_column and change its type to integer, and drop
+         # any other extracted columns:

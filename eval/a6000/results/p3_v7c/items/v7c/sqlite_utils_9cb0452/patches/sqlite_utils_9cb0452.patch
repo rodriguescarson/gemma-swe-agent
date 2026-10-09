@@ -1,0 +1,53 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index ef55976..0812a6e 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -447,10 +447,27 @@ class Table:
+         sql = "select * from [{}]".format(self.name)
+         if where is not None:
+             sql += " where " + where
+-        cursor = self.db.conn.execute(sql, where_args or [])
+-        columns = [c[0] for c in cursor.description]
+-        for row in cursor:
+-            yield dict(zip(columns, row))
++        
++        args = where_args or []
++        
++        # SQLite has a limit on the number of host parameters (SQLITE_LIMIT_VARIABLE_NUMBER).
++        # If we have too many arguments, we can't execute the query in one go.
++        # We can't easily chunk a generic WHERE clause, but we can try to execute it
++        # and if it fails with a "too many SQL variables" error, we can't do much here
++        # without knowing the structure of the query.
++        
++        try:
++            cursor = self.db.conn.execute(sql, args)
++            columns = [c[0] for c in cursor.description]
++            for row in cursor:
++                yield dict(zip(columns, row))
++        except sqlite3.OperationalError as e:
++            if "too many SQL variables" in str(e):
++                raise RuntimeError(
++                    "Too many SQL variables. SQLite has a limit on the number of host parameters. "
++                    "Try chunking your query or using a temporary table."
++                ) from e
++            raise
+ 
+     @property
+     def pks(self):
+@@ -478,7 +495,15 @@ class Table:
+                 )
+             )
+ 
+-        wheres = ["[{}] = ?".format(pk_name) for pk_name in pk_names]
++        wheres = ["[{} ] = ?".format(pk_name) for pk_name in pk_names]
++        # We only expect one row for a PK lookup.
++        # If pk_values is a list of values for a single PK, we should use IN.
++        # But get() is designed to get ONE row by its PK(s).
++        # If pk_values is a list of values for multiple PKs, it's still one row.
++        # The issue "too many SQL variables" happens when we have many values for the SAME variable.
++        # In get(), we are passing exactly len(pk_names) variables.
++        # So get() itself doesn't cause "too many SQL variables" unless the table has > 999 PKs.
++        
+         rows = self.rows_where(" and ".join(wheres), pk_values)
+         try:
+             row = list(rows)[0]

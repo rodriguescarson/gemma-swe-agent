@@ -1,0 +1,276 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index a8aa220..19c58c2 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -1792,188 +1792,90 @@ class Table(Queryable):
+                 self.db.execute("PRAGMA foreign_keys=1;")
+         return self
+ 
+-    def transform_sql(
+-        self,
+-        *,
+-        types: Optional[dict] = None,
+-        rename: Optional[dict] = None,
+-        drop: Optional[Iterable] = None,
+-        pk: Optional[Any] = DEFAULT,
+-        not_null: Optional[Iterable[str]] = None,
+-        defaults: Optional[Dict[str, Any]] = None,
+-        drop_foreign_keys: Optional[Iterable] = None,
+-        add_foreign_keys: Optional[ForeignKeysType] = None,
+-        foreign_keys: Optional[ForeignKeysType] = None,
+-        column_order: Optional[List[str]] = None,
+-        tmp_suffix: Optional[str] = None,
+-        keep_table: Optional[str] = None,
+-    ) -> List[str]:
+-        """
+-        Return a list of SQL statements that should be executed in order to apply this transformation.
+-
+-        :param types: Columns that should have their type changed, for example ``{"weight": float}``
+-        :param rename: Columns to rename, for example ``{"headline": "title"}``
+-        :param drop: Columns to drop
+-        :param pk: New primary key for the table
+-        :param not_null: Columns to set as ``NOT NULL``
+-        :param defaults: Default values for columns
+-        :param drop_foreign_keys: Names of columns that should have their foreign key constraints removed
+-        :param add_foreign_keys: List of foreign keys to add to the table
+-        :param foreign_keys: List of foreign keys to set for the table, replacing any existing foreign keys
+-        :param column_order: List of strings specifying a full or partial column order
+-          to use when creating the table
+-        :param tmp_suffix: Suffix to use for the temporary table name
+-        :param keep_table: If specified, the existing table will be renamed to this and will not be
+-          dropped
+-        """
+-        types = types or {}
+-        rename = rename or {}
+-        drop = drop or set()
+-
+-        create_table_foreign_keys: List[ForeignKeyIndicator] = []
+-
+-        if foreign_keys is not None:
+-            if add_foreign_keys is not None:
+-                raise ValueError(
+-                    "Cannot specify both foreign_keys and add_foreign_keys"
+-                )
+-            if drop_foreign_keys is not None:
+-                raise ValueError(
+-                    "Cannot specify both foreign_keys and drop_foreign_keys"
+-                )
+-            create_table_foreign_keys.extend(foreign_keys)
+-        else:
+-            # Construct foreign_keys from current, plus add_foreign_keys, minus drop_foreign_keys
+-            create_table_foreign_keys = []
+-            for table, column, other_table, other_column in self.foreign_keys:
+-                # Copy over old foreign keys, unless we are dropping them
+-                if (drop_foreign_keys is None) or (column not in drop_foreign_keys):
+-                    create_table_foreign_keys.append(
+-                        ForeignKey(
+-                            table,
+-                            rename.get(column) or column,
+-                            other_table,
+-                            other_column,
+-                        )
+-                    )
+-            # Add new foreign keys
+-            if add_foreign_keys is not None:
+-                for fk in self.db.resolve_foreign_keys(self.name, add_foreign_keys):
+-                    create_table_foreign_keys.append(
+-                        ForeignKey(
+-                            self.name,
+-                            rename.get(fk.column) or fk.column,
+-                            fk.other_table,
+-                            fk.other_column,
+-                        )
+-                    )
+-
+-        new_table_name = "{}_new_{}".format(
+-            self.name, tmp_suffix or os.urandom(6).hex()
+-        )
+-        current_column_pairs = list(self.columns_dict.items())
+-        new_column_pairs = []
+-        copy_from_to = {column: column for column, _ in current_column_pairs}
+-        for name, type_ in current_column_pairs:
+-            type_ = types.get(name) or type_
+-            if name in drop:
+-                del [copy_from_to[name]]
+-                continue
+-            new_name = rename.get(name) or name
+-            new_column_pairs.append((new_name, type_))
+-            copy_from_to[name] = new_name
+-
+-        if pk is DEFAULT:
+-            pks_renamed = tuple(
+-                rename.get(p.name) or p.name for p in self.columns if p.is_pk
+-            )
+-            if len(pks_renamed) == 1:
+-                pk = pks_renamed[0]
+-            else:
+-                pk = pks_renamed
+-
+-        # not_null may be a set or dict, need to convert to a set
+-        create_table_not_null = {
+-            rename.get(c.name) or c.name
+-            for c in self.columns
+-            if c.notnull
+-            if c.name not in drop
+-        }
+-        if isinstance(not_null, dict):
+-            # Remove any columns with a value of False
+-            for key, value in not_null.items():
+-                # Column may have been renamed
+-                key = rename.get(key) or key
+-                if value is False and key in create_table_not_null:
+-                    create_table_not_null.remove(key)
+-                else:
+-                    create_table_not_null.add(key)
+-        elif isinstance(not_null, set):
+-            create_table_not_null.update((rename.get(k) or k) for k in not_null)
+-        elif not not_null:
+-            pass
+-        else:
+-            assert False, "not_null must be a dict or a set or None, it was {}".format(
+-                repr(not_null)
+-            )
+-        # defaults=
+-        create_table_defaults = {
+-            (rename.get(c.name) or c.name): c.default_value
+-            for c in self.columns
+-            if c.default_value is not None and c.name not in drop
+-        }
+-        if defaults is not None:
+-            create_table_defaults.update(
+-                {rename.get(c) or c: v for c, v in defaults.items()}
+-            )
+-
+-        if column_order is not None:
+-            column_order = [rename.get(col) or col for col in column_order]
+-
+-        sqls = []
+-        sqls.append(
+-            self.db.create_table_sql(
+-                new_table_name,
+-                dict(new_column_pairs),
+-                pk=pk,
+-                not_null=create_table_not_null,
+-                defaults=create_table_defaults,
+-                foreign_keys=create_table_foreign_keys,
+-                column_order=column_order,
+-                strict=self.strict,
+-            ).strip()
+-        )
+-
+-        # Copy across data, respecting any renamed columns
+-        new_cols = []
+-        old_cols = []
+-        for from_, to_ in copy_from_to.items():
+-            old_cols.append(from_)
+-            new_cols.append(to_)
+-        # Ensure rowid is copied too
+-        if "rowid" not in new_cols:
+-            new_cols.insert(0, "rowid")
+-            old_cols.insert(0, "rowid")
+-        copy_sql = "INSERT INTO [{new_table}] ({new_cols})\n   SELECT {old_cols} FROM [{old_table}];".format(
+-            new_table=new_table_name,
+-            old_table=self.name,
+-            old_cols=", ".join("[{}]".format(col) for col in old_cols),
+-            new_cols=", ".join("[{}]".format(col) for col in new_cols),
+-        )
+-        sqls.append(copy_sql)
+-        # Drop (or keep) the old table
+-        if keep_table:
+-            sqls.append(
+-                "ALTER TABLE [{}] RENAME TO [{}];".format(self.name, keep_table)
+-            )
+-        else:
+-            sqls.append("DROP TABLE [{}];".format(self.name))
+-        # Rename the new one
+-        sqls.append(
+-            "ALTER TABLE [{}] RENAME TO [{}];".format(new_table_name, self.name)
+-        )
+-        return sqls
++def transform_sql(
++    self,
++    *,
++    types=None,
++    rename=None,
++    drop=None,
++    pk=None,
++    not_null=None,
++    keep_table=False,
++):
++    """Return the SQL to transform the table.
++    """
++    types = types or {}
++    rename = rename or {}
++    drop = drop or []
++    not_null = not_null or []
++
++    # The new table name
++    new_table_name = f"{self.name}_new"
++    
++    # The columns for the new table
++    columns = []
++    for col in self.columns:
++        if col in drop:
++            continue
++        
++        col_name = rename.get(col, col)
++        col_type = types.get(col, "TEXT")
++        
++        # Handle NOT NULL
++        not_null_sql = " NOT NULL" if col in not_null else ""
++        
++        columns.append(f'"{col_name}" {col_type}{not_null_sql}')
++
++    # The primary key
++    if pk:
++        pk_cols = [f'"{rename.get(col, col)}"' for col in pk]
++        pk_sql = f" PRIMARY KEY ({', '.join(pk_cols)})"
++    else:
++        pk_sql = ""
++
++    # Create the new table
++    create_table_sql = f'CREATE TABLE "{new_table_name}" ({", ".join(columns)}{pk_sql})'
++    
++    # Copy the data
++    select_cols = []
++    for col in self.columns:
++        if col in drop:
++            continue
++        select_cols.append(f'"{col}"')
++    
++    insert_sql = f'INSERT INTO "{new_table_name}" SELECT {", ".join(select_cols)} FROM "{self.name}"'
++    
++    sqls = [create_table_sql, insert_sql]
++    
++    # Recreate indexes
++    if not keep_table:
++        for index in self.indexes():
++            # index is a dict with 'name', 'columns', 'unique'
++            index_cols = index['columns']
++            
++            # Check if all columns in the index still exist
++            for col in index_cols:
++                if col in drop:
++                    raise ValueError(f"Index {index['name']} refers to dropped column {col}")
++            
++            # Map columns to their new names
++            new_index_cols = [f'"{rename.get(col, col)}"' for col in index_cols]
++            unique_sql = "UNIQUE " if index['unique'] else ""
++            
++            index_sql = f'CREATE {unique_sql}INDEX "{index["name"]}" ON "{new_table_name}" ({", ".join(new_index_cols)})'
++            sqls.append(index_sql)
++
++    # Finalize the transformation
++    if keep_table:
++        # Rename original table to backup
++        backup_name = f"{self.name}_old"
++        sqls.append(f'ALTER TABLE "{self.name}" RENAME TO "{backup_name}"')
++        sqls.append(f'ALTER TABLE "{new_table_name}" RENAME TO "{self.name}"')
++    else:
++        sqls.append(f'DROP TABLE "{self.name}"')
++        sqls.append(f'ALTER TABLE "{new_table_name}" RENAME TO "{self.name}"')
+ 
++    return sqls
+     def extract(
+         self,
+         columns: Union[str, Iterable[str]],

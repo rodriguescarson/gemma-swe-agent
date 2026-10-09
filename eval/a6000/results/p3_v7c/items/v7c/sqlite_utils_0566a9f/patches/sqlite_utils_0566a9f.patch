@@ -1,0 +1,98 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index ef367e1..c536325 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -331,6 +331,9 @@ _TRANSACTION_CONTROL_PREFIXES = (
+     "ROLLBACK",
+     "SAVEPOINT",
+     "RELEASE",
++    "VACUUM",
++    "ATTACH",
++    "DETACH",
+ )
+ 
+ 
+@@ -658,26 +661,69 @@ class Database:
+         :param params: Parameters to use in that query - an iterable for ``where id = ?``
+           parameters, or a dictionary for ``where id = :id``
+         :raises ValueError: if the SQL statement does not return rows - use
+-          :meth:`execute` for those statements instead
++          :meth:`execute` for those statements instead. Rejected statements are rolled back.
+         """
+-        was_in_transaction = self.conn.in_transaction
+-        cursor = self.execute(sql, params or tuple())
+-        if cursor.description is None:
++        sql_upper = sql.strip().upper()
++        if sql_upper.startswith(_TRANSACTION_CONTROL_PREFIXES):
+             raise ValueError(
+-                "query() can only be used with SQL that returns rows - "
+-                "use execute() for other statements"
++                f"query() cannot be used with transaction control or maintenance statements "
++                f"starting with {sql_upper.split()[0]} - use execute() instead"
+             )
++
++        was_in_transaction = self.conn.in_transaction
++        
++        # PRAGMA statements don't return rows in a way that cursor.description is set,
++        # and some cannot run inside transactions.
++        if sql_upper.startswith("PRAGMA"):
++            cursor = self.execute(sql, params or tuple())
++            if cursor.description is None:
++                raise ValueError(
++                    "query() can only be used with SQL that returns rows - "
++                    "use execute() for other statements"
++                )
++        else:
++            # Use a SAVEPOINT to allow rolling back if the statement doesn't return rows
++            # without affecting an outer transaction.
++            # Use a SAVEPOINT to allow rolling back if the statement doesn't return rows
++            # without affecting an outer transaction.
++            self.conn.execute("SAVEPOINT query_savepoint")
++            try:
++                cursor = self.execute(sql, params or tuple())
++                if cursor.description is None:
++                    raise ValueError(
++                        "query() can only be used with SQL that returns rows - "
++                        "use execute() for other statements"
++                    )
++                # We cannot release the savepoint yet because the cursor is still active.
++                # We will release it in the generator or when it's closed.
++            except Exception:
++                self.conn.execute("ROLLBACK TO SAVEPOINT query_savepoint")
++                raise
++
+         keys = [d[0] for d in cursor.description]
+ 
+         def rows() -> Generator[dict, None, None]:
+-            for row in cursor:
+-                yield dict(zip(keys, row))
+-            if not was_in_transaction and self.conn.in_transaction:
+-                # A row-returning write such as INSERT ... RETURNING opened
+-                # an implicit transaction - commit it now that its rows have
+-                # been consumed
+-                self.conn.execute("COMMIT")
+-
++            try:
++                for row in cursor:
++                    yield dict(zip(keys, row))
++                
++                # If this was a row-returning write (INSERT ... RETURNING), commit it now
++                # unless we are inside an explicit transaction.
++                if not was_in_transaction and self.conn.in_transaction:
++                    self.conn.execute("COMMIT")
++            finally:
++                # Release the savepoint if we are not in a transaction (COMMIT already did it)
++                # or if we are still in a transaction.
++                if not was_in_transaction and not self.conn.in_transaction:
++                    pass # Already committed
++                else:
++                    # We only need to release if we actually created a savepoint.
++                    # PRAGMA statements didn't use one.
++                    if not sql_upper.startswith("PRAGMA"):
++                        try:
++                            self.conn.execute("RELEASE SAVEPOINT query_savepoint")
++                        except sqlite3.OperationalError:
++                            pass
+         return rows()
+ 
+     def execute(

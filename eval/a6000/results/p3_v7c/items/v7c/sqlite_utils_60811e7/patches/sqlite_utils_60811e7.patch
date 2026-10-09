@@ -1,0 +1,89 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index bec68fc..a7cc01c 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -53,6 +53,8 @@ except ImportError:
+ 
+ SQLITE_MAX_VARS = 999
+ 
++ROWID_ALIASES = {"rowid", "_rowid_", "oid"}
++
+ _quote_fts_re = re.compile(r'\s+|(".*?")')
+ 
+ _virtual_table_using_re = re.compile(
+@@ -4346,7 +4348,10 @@ class Table(Queryable):
+             missing_pk_cols = [
+                 col
+                 for col in pk_cols
+-                if resolve_casing(col, existing_columns) not in existing_columns
++                if (
++                    resolve_casing(col, existing_columns) not in existing_columns
++                    and not (self.use_rowid and col in ROWID_ALIASES)
++                )
+             ]
+             if missing_pk_cols:
+                 invalid_pk_error = InvalidColumns(
+@@ -4512,37 +4517,36 @@ class Table(Queryable):
+             if not upsert and result is not None:
+                 ignored_insert = ignore and result.rowcount == 0
+                 if ignored_insert:
+-                    if list_mode:
+-                        first_record_list = cast(Sequence[Any], first_record)
+-                        if hash_id:
+-                            pass
+-                        elif isinstance(pk, str):
+-                            pk_index = column_names.index(
+-                                resolve_casing(pk, column_names)
+-                            )
+-                            self.last_pk = first_record_list[pk_index]
++                    if pk:
++                        if list_mode:
++                            first_record_list = cast(Sequence[Any], first_record)
++                            if isinstance(pk, str):
++                                pk_values = [first_record_list[column_names.index(resolve_casing(pk, column_names))]]
++                            else:
++                                pk_values = [first_record_list[column_names.index(resolve_casing(p, column_names))] for p in pk]
++                        else:
++                            first_record_dict = cast(Dict[str, Any], first_record)
++                            if isinstance(pk, str):
++                                pk_values = [first_record_dict[resolve_casing(pk, first_record_dict)]]
++                            else:
++                                pk_values = [first_record_dict[resolve_casing(p, first_record_dict)] for p in pk]
++                        
++                        row = list(self.pks_and_rows_where(pk, pk_values))[0]
++                        self.last_rowid = row["rowid"]
++                        if isinstance(pk, str):
++                            self.last_pk = row[resolve_casing(pk, row)]
+                         elif pk:
+                             self.last_pk = tuple(
+-                                first_record_list[
+-                                    column_names.index(resolve_casing(p, column_names))
+-                                ]
+-                                for p in pk
++                                row[resolve_casing(p, row)] for p in pk
+                             )
+-                    else:
+-                        first_record_dict = cast(Dict[str, Any], first_record)
++                    elif not list_mode:
+                         if hash_id:
+-                            self.last_pk = hash_record(
+-                                first_record_dict, hash_id_columns
+-                            )
+-                        elif isinstance(pk, str):
+-                            self.last_pk = first_record_dict[
+-                                resolve_casing(pk, first_record_dict)
+-                            ]
+-                        elif pk:
+-                            self.last_pk = tuple(
+-                                first_record_dict[resolve_casing(p, first_record_dict)]
+-                                for p in pk
+-                            )
++                            first_record_dict = cast(Dict[str, Any], first_record)
++                            self.last_pk = hash_record(first_record_dict, hash_id_columns)
++                        pass
++                    else:
++                        # Fallback for dict mode when pk is not provided
++                        pass
+                 else:
+                     self.last_rowid = result.lastrowid
+                     if (hash_id or pk) and self.last_rowid:
