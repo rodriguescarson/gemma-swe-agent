@@ -1,0 +1,79 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000..a5963b5
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,39 @@
++import pytest
++from pluggy import HookimplMarker
++from pluggy._callers import _multicall
++from pluggy._hooks import HookImpl
++from typing import Mapping, Sequence, Callable, Union, List
++
++hookimpl = HookimplMarker("example")
++
++def MC(methods, kwargs, firstresult=False):
++    caller = _multicall
++    hookfuncs = []
++    for method in methods:
++        f = HookImpl(None, "<temp>", method, getattr(method, "example_impl", False))
++        hookfuncs.append(f)
++    return caller("foo", hookfuncs, kwargs, firstresult)
++
++def test_stopiteration_in_wrapper():
++    @hookimpl(wrapper=True)
++    def m1():
++        yield
++        raise StopIteration("This should be passed through")
++
++    try:
++        MC([m1], {})
++    except RuntimeError as e:
++        print(f"Caught RuntimeError: {e}")
++        if e.__cause__ and isinstance(e.__cause__, StopIteration):
++            print(f"Cause is StopIteration: {e.__cause__}")
++        else:
++            print("Cause is not StopIteration")
++        raise e
++    except StopIteration as e:
++        print(f"Caught StopIteration: {e}")
++
++if __name__ == "__main__":
++    try:
++        test_stopiteration_in_wrapper()
++    except Exception as e:
++        print(f"Final exception: {type(e).__name__}: {e}")
+diff --git a/src/pluggy/_callers.py b/src/pluggy/_callers.py
+index f4a2ace..6b67a68 100644
+--- a/src/pluggy/_callers.py
++++ b/src/pluggy/_callers.py
+@@ -131,7 +131,11 @@ def _multicall(
+                     exception = None
+                     continue
+                 except BaseException as e:
+-                    exception = e
++                    if isinstance(e, RuntimeError) and isinstance(e.__cause__, StopIteration):
++                        result = e.__cause__.value
++                        exception = None
++                    else:
++                        exception = e
+                     continue
+                 _raise_wrapfail(teardown, "has second yield")  # type: ignore[arg-type]
+ 
+@@ -170,12 +174,11 @@ def _multicall(
+                         # Following is unreachable for a well behaved hook wrapper.
+                         # Try to force finalizers otherwise postponed till GC action.
+                         # Note: close() may raise if generator handles GeneratorExit.
+-                        teardown.close()
+-                    except StopIteration as si:
+-                        outcome.force_result(si.value)
+-                        continue
+                     except BaseException as e:
+-                        outcome.force_exception(e)
++                        if isinstance(e, RuntimeError) and isinstance(e.__cause__, StopIteration):
++                            outcome.force_result(e.__cause__.value)
++                        else:
++                            outcome.force_exception(e)
+                         continue
+                     _raise_wrapfail(teardown, "has second yield")
+ 

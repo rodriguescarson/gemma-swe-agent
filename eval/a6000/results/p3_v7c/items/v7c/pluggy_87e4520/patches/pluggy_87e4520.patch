@@ -1,0 +1,97 @@
+diff --git a/src/pluggy/_hooks.py b/src/pluggy/_hooks.py
+index 1480308..21f5c99 100644
+--- a/src/pluggy/_hooks.py
++++ b/src/pluggy/_hooks.py
+@@ -305,7 +305,7 @@ _NOSELF_WARN_SUPPRESS: frozenset[str] = frozenset(
+ 
+ def varnames(
+     func: object, *, legacy_noself: bool = False
+-) -> tuple[tuple[str, ...], tuple[str, ...]]:
++) -> tuple[tuple[str, ...], tuple[str, ...], dict[str, object]]:
+     """Return tuple of positional and keyword parameter names for a callable.
+ 
+     In case of a class, its ``__init__`` method is considered.
+@@ -354,9 +354,11 @@ def varnames(
+ 
+     # Determine which args have defaults
+     kwargs: tuple[str, ...]
++    defaults_dict: dict[str, object] = {}
+     if defaults:
+         index = -len(defaults)
+         args, kwargs = args[:index], args[index:]
++        defaults_dict = dict(zip(kwargs, defaults))
+     else:
+         kwargs = ()
+ 
+@@ -380,7 +382,7 @@ def varnames(
+                 stacklevel=2,
+             )
+ 
+-    return args, kwargs
++    return args, kwargs, defaults_dict
+ 
+ 
+ @final
+@@ -509,13 +511,13 @@ class HookCaller:
+         # This is written to avoid expensive operations when not needed.
+         if self.spec:
+             for argname in self.spec.argnames:
+-                if argname not in kwargs:
++                if argname not in kwargs and argname not in self.spec.defaults:
+                     notincall = ", ".join(
+                         repr(argname)
+                         for argname in self.spec.argnames
+                         # Avoid self.spec.argnames - kwargs.keys()
+                         # it doesn't preserve order.
+-                        if argname not in kwargs
++                        if argname not in kwargs and argname not in self.spec.defaults
+                     )
+                     warnings.warn(
+                         f"Argument(s) {notincall} which are declared in the hookspec "
+@@ -540,6 +542,11 @@ class HookCaller:
+             "Cannot directly call a historic hook - use call_historic instead."
+         )
+         self._verify_all_args_are_provided(kwargs)
++        if self.spec:
++            # Apply defaults from the hookspec.
++            for argname, default in self.spec.defaults.items():
++                if argname not in kwargs:
++                    kwargs[argname] = default
+         firstresult = self.spec.opts.get("firstresult", False) if self.spec else False
+         # Copy because plugins may register other plugins during iteration (#438).
+         return self._hookexec(self.name, self._hookimpls.copy(), kwargs, firstresult)
+@@ -558,8 +565,13 @@ class HookCaller:
+             from a hook implementation.
+         """
+         assert self._call_history is not None
+-        kwargs = kwargs or {}
++        kwargs = dict(kwargs) if kwargs else {}
+         self._verify_all_args_are_provided(kwargs)
++        if self.spec:
++            # Apply defaults from the hookspec.
++            for argname, default in self.spec.defaults.items():
++                if argname not in kwargs:
++                    kwargs[argname] = default
+         self._call_history.append((kwargs, result_callback))
+         # Historizing hooks don't return results.
+         # Remember firstresult isn't compatible with historic.
+@@ -729,6 +741,7 @@ class HookSpec:
+     __slots__ = (
+         "argnames",
+         "function",
++        "defaults",
+         "kwargnames",
+         "name",
+         "namespace",
+@@ -741,10 +754,7 @@ class HookSpec:
+         self.namespace = namespace
+         self.name = name
+         self.function: Callable[..., object] = getattr(namespace, name)
+-        legacy_noself = inspect.isclass(namespace) and not isinstance(
+-            inspect.getattr_static(namespace, name), staticmethod
+-        )
+-        self.argnames, self.kwargnames = varnames(
++        self.argnames, self.kwargnames, self.defaults = varnames(
+             self.function, legacy_noself=legacy_noself
+         )
+         self.opts = opts
