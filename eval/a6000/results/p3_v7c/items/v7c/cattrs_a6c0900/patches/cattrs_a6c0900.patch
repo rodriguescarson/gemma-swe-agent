@@ -1,0 +1,88 @@
+diff --git a/src/cattrs/disambiguators.py b/src/cattrs/disambiguators.py
+index f6e4392..97b1ad9 100644
+--- a/src/cattrs/disambiguators.py
++++ b/src/cattrs/disambiguators.py
+@@ -127,38 +127,55 @@ def create_default_dis_func(
+         for cl, override in zip(classes, overrides)
+     ]
+     # For each class, attempt to generate a single unique required field.
+-    uniq_attrs_dict: dict[str, type] = {}
++    # We iteratively pin classes that have a unique non-default attribute
++    # among the classes not yet pinned.
++    pinned_classes: dict[str, type] = {}
++    unpinned = cls_and_attrs[:]
++
++    while True:
++        pinned_this_round = False
++        for i, (cl, cl_reqs, back_map) in enumerate(unpinned):
++            other_classes = [
++                c_and_a
++                for c_and_a in unpinned
++                if c_and_a[0] is not cl
++            ]
++            other_reqs = reduce(or_, (c_a[1] for c_a in other_classes), set())
++            uniq = cl_reqs - other_reqs
++
++            cl_fields = fields_dict(get_origin(cl) or cl)
++            for maybe_renamed_attr_name in uniq:
++                orig_name = back_map[maybe_renamed_attr_name]
++                if cl_fields[orig_name].default in (NOTHING, MISSING):
++                    pinned_classes[maybe_renamed_attr_name] = cl
++                    unpinned.pop(i)
++                    pinned_this_round = True
++                    break
++            if pinned_this_round:
++                break
+ 
+-    # We start from classes with the largest number of unique fields
+-    # so we can do easy picks first, making later picks easier.
+-    cls_and_attrs.sort(key=lambda c_a: len(c_a[1]), reverse=True)
++        if not pinned_this_round:
++            break
+ 
+-    fallback = None  # If none match, try this.
++    if len(unpinned) > 1:
++        # We can't disambiguate more than one class as the fallback.
++        # We pick the one with the fewest fields to report as the problem,
++        # but any of them would fail.
++        cl = min(unpinned, key=lambda c_a: len(c_a[1]))[0]
++        raise TypeError(f"{cl} has no usable non-default attributes")
+ 
+-    for cl, cl_reqs, back_map in cls_and_attrs:
+-        # We do not have to consider classes we've already processed, since
+-        # they will have been eliminated by the match dictionary already.
+-        other_classes = [
+-            c_and_a
+-            for c_and_a in cls_and_attrs
+-            if c_and_a[0] is not cl and c_and_a[0] not in uniq_attrs_dict.values()
+-        ]
+-        other_reqs = reduce(or_, (c_a[1] for c_a in other_classes), set())
+-        uniq = cl_reqs - other_reqs
+-
+-        # We want a unique attribute with no default.
+-        cl_fields = fields_dict(get_origin(cl) or cl)
+-        for maybe_renamed_attr_name in uniq:
+-            orig_name = back_map[maybe_renamed_attr_name]
+-            if cl_fields[orig_name].default in (NOTHING, MISSING):
+-                break
+-        else:
+-            if fallback is None:
+-                fallback = cl
+-                continue
+-            raise TypeError(f"{cl} has no usable non-default attributes")
+-        uniq_attrs_dict[maybe_renamed_attr_name] = cl
++    fallback = unpinned[0][0] if unpinned else None
++    uniq_attrs_dict = pinned_classes
++
++    if len(unpinned) > 1:
++        # We can't disambiguate more than one class as the fallback.
++        # We pick the one with the fewest fields to report as the problem,
++        # but any of them would fail.
++        cl = min(unpinned, key=lambda c_a: len(c_a[1]))[0]
++        raise TypeError(f"{cl} has no usable non-default attributes")
+ 
++    fallback = unpinned[0][0] if unpinned else None
++    uniq_attrs_dict = pinned_classes
+     if fallback is None:
+ 
+         def dis_func(data: Mapping[Any, Any]) -> type[AttrsInstance] | None:
