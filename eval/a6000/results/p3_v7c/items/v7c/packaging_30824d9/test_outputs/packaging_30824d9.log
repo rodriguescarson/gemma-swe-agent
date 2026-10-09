@@ -1,0 +1,1427 @@
+STDOUT:
+.FF.F.FFFFFFFFF.FFFF................FF                                   [100%]
+=================================== FAILURES ===================================
+_____________________ test_lookup_on_trivial_normalization _____________________
+
+    def test_lookup_on_trivial_normalization() -> None:
+        groups: GroupsTable = {"test": ["pytest"]}
+        resolver = DependencyGroupResolver(groups)
+        parsed_group = resolver.lookup("Test")
+        assert len(parsed_group) == 1
+>       assert isinstance(parsed_group[0], Requirement)
+E       assert False
+E        +  where False = isinstance(<contextlib._GeneratorContextManager object at 0x72cb80e98530>, Requirement)
+
+tests/test_dependency_groups.py:74: AssertionError
+_______________________ test_lookup_with_include_result ________________________
+
+    def test_lookup_with_include_result() -> None:
+        groups: GroupsTable = {
+            "test": ["pytest", {"include-group": "runtime"}],
+            "runtime": ["click"],
+        }
+        resolver = DependencyGroupResolver(groups)
+        parsed_group = resolver.lookup("test")
+        assert len(parsed_group) == 2
+    
+>       assert isinstance(parsed_group[0], Requirement)
+E       assert False
+E        +  where False = isinstance(<contextlib._GeneratorContextManager object at 0x72cb7f6c6360>, Requirement)
+
+tests/test_dependency_groups.py:88: AssertionError
+____________ test_expand_contract_model_only_does_inner_lookup_once ____________
+
+    def test_expand_contract_model_only_does_inner_lookup_once() -> None:
+        groups: GroupsTable = {
+            "root": [
+                {"include-group": "mid1"},
+                {"include-group": "mid2"},
+                {"include-group": "mid3"},
+                {"include-group": "mid4"},
+            ],
+            "mid1": [{"include-group": "contract"}],
+            "mid2": [{"include-group": "contract"}],
+            "mid3": [{"include-group": "contract"}],
+            "mid4": [{"include-group": "contract"}],
+            "contract": [{"include-group": "leaf"}],
+            "leaf": ["attrs"],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+        real_inner_resolve = resolver._resolve
+        with unittest.mock.patch(
+            "packaging.dependency_groups.DependencyGroupResolver._resolve",
+            side_effect=real_inner_resolve,
+        ) as spy:
+>           resolved = resolver.resolve("root")
+                       ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:130: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1204: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+/usr/local/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1204: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+/usr/local/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1204: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+/usr/local/lib/python3.12/unittest/mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/local/lib/python3.12/unittest/mock.py:1204: in _execute_mock_call
+    result = effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4ffa40>
+group = 'leaf', requested_group = 'root', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4fcce0>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo-bar] ____
+
+group_name_declared = 'foo-bar', group_name_used = 'foo-bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f45da30>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f45ddf0>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo_bar] ____
+
+group_name_declared = 'foo_bar', group_name_used = 'foo-bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4ff710>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4ffd40>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo..bar] ___
+
+group_name_declared = 'foo..bar', group_name_used = 'foo-bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4fc1d0>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4fca40>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo-bar] ____
+
+group_name_declared = 'foo-bar', group_name_used = 'foo_bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4fd880>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4fdca0>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo_bar] ____
+
+group_name_declared = 'foo_bar', group_name_used = 'foo_bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4fcf50>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb80e989e0>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo..bar] ___
+
+group_name_declared = 'foo..bar', group_name_used = 'foo_bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f45d1c0>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f45fc20>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo-bar] ___
+
+group_name_declared = 'foo-bar', group_name_used = 'foo..bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f45d910>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f45d370>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___ test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo_bar] ___
+
+group_name_declared = 'foo_bar', group_name_used = 'foo..bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4feb40>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4fd880>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+__ test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo..bar] ___
+
+group_name_declared = 'foo..bar', group_name_used = 'foo..bar'
+
+    @pytest.mark.parametrize("group_name_declared", ["foo-bar", "foo_bar", "foo..bar"])
+    @pytest.mark.parametrize("group_name_used", ["foo-bar", "foo_bar", "foo..bar"])
+    def test_normalized_name_is_used_for_include_group_lookups(
+        group_name_declared: str, group_name_used: str
+    ) -> None:
+        groups: GroupsTable = {
+            group_name_declared: ["spam"],
+            "eggs": [{"include-group": group_name_used}],
+        }
+        resolver = DependencyGroupResolver(groups)
+    
+>       result = resolver.resolve("eggs")
+                 ^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:185: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f4fcb60>
+group = 'foo-bar', requested_group = 'eggs', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f4fff20>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+_____________________________ test_str_list_group ______________________________
+
+    def test_str_list_group() -> None:
+        groups: GroupsTable = {"test": ["pytest"]}
+>       assert resolve_dependency_groups(groups, "test") == ("pytest",)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:199: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f6c6f30>
+group = 'test', requested_group = 'test', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f6c5e80>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+__________________________ test_single_include_group ___________________________
+
+    def test_single_include_group() -> None:
+        groups: GroupsTable = {
+            "test": [
+                "pytest",
+                {"include-group": "runtime"},
+            ],
+            "runtime": ["sqlalchemy"],
+        }
+>       assert set(resolve_dependency_groups(groups, "test")) == {"pytest", "sqlalchemy"}
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:210: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f45ea20>
+group = 'test', requested_group = 'test', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f45f650>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+___________________________ test_sdual_include_group ___________________________
+
+    def test_sdual_include_group() -> None:
+        groups: GroupsTable = {
+            "test": [
+                "pytest",
+            ],
+            "runtime": ["sqlalchemy"],
+        }
+>       assert set(resolve_dependency_groups(groups, "test", "runtime")) == {
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            "pytest",
+            "sqlalchemy",
+        }
+
+tests/test_dependency_groups.py:220: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f45c650>
+group = 'test', requested_group = 'test', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f45c500>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+__________________________ test_normalized_group_name __________________________
+
+    def test_normalized_group_name() -> None:
+        groups: GroupsTable = {
+            "TEST": ["pytest"],
+        }
+>       assert resolve_dependency_groups(groups, "test") == ("pytest",)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:230: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f3ee720>
+group = 'test', requested_group = 'test', errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f3eef90>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+_______ test_resolution_collects_invalid_requirement_with_sibling_errors _______
+
+self = <[AttributeError("'Requirement' object has no attribute 'name'") raised in repr()] Requirement object at 0x72cb7f415e40>
+requirement_string = 'this is not a valid requirement!!!'
+
+    def __init__(self, requirement_string: str) -> None:
+        try:
+>           parsed = _parse_requirement(requirement_string)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/packaging/requirements.py:78: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/_parser.py:100: in parse_requirement
+    return _parse_requirement(Tokenizer(source, rules=DEFAULT_RULES))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/_parser.py:118: in _parse_requirement
+    url, specifier, marker = _parse_requirement_details(tokenizer)
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/_parser.py:164: in _parse_requirement_details
+    marker = _parse_requirement_marker(
+src/packaging/_parser.py:185: in _parse_requirement_marker
+    tokenizer.raise_syntax_error(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging._tokenizer.Tokenizer object at 0x72cb7f560100>
+message = 'Expected semicolon (after name with no version specifier) or end'
+
+    def raise_syntax_error(
+        self,
+        message: str,
+        *,
+        span_start: int | None = None,
+        span_end: int | None = None,
+    ) -> NoReturn:
+        """Raise ParserSyntaxError at the given position."""
+        span = (
+            self.position if span_start is None else span_start,
+            self.position if span_end is None else span_end,
+        )
+>       raise ParserSyntaxError(
+            message,
+            source=self.source,
+            span=span,
+        )
+E       packaging._tokenizer.ParserSyntaxError: Expected semicolon (after name with no version specifier) or end
+E           this is not a valid requirement!!!
+E                ^
+
+src/packaging/_tokenizer.py:173: ParserSyntaxError
+
+The above exception was the direct cause of the following exception:
+
+    def test_resolution_collects_invalid_requirement_with_sibling_errors() -> None:
+        # A malformed PEP 508 requirement string used to raise InvalidRequirement
+        # raw, which both escaped the aggregated "...was malformed" error group and
+        # dropped any sibling errors already collected from the same group. It should
+        # now be collected like every other failure so co-occurring errors are all
+        # reported together.
+        groups: Any = {
+            "all": [
+                {},  # invalid object -> collected before the bad requirement string
+                "this is not a valid requirement!!!",
+            ],
+        }
+    
+        with pytest.raises(
+            ExceptionGroup, match=r"\[dependency-groups\] data for 'all' was malformed"
+        ) as excinfo:
+>           resolve_dependency_groups(groups, "all")
+
+tests/test_dependency_groups.py:482: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:171: in _resolve
+    parsed = self._parse_group(group, errors)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:246: in _parse_group
+    elements.append(errors.collect(Requirement(item), InvalidRequirement))
+                                   ^^^^^^^^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <[AttributeError("'Requirement' object has no attribute 'name'") raised in repr()] Requirement object at 0x72cb7f415e40>
+requirement_string = 'this is not a valid requirement!!!'
+
+    def __init__(self, requirement_string: str) -> None:
+        try:
+            parsed = _parse_requirement(requirement_string)
+        except ParserSyntaxError as e:
+>           raise InvalidRequirement(str(e)) from e
+E           packaging.requirements.InvalidRequirement: Expected semicolon (after name with no version specifier) or end
+E               this is not a valid requirement!!!
+E                    ^
+
+src/packaging/requirements.py:80: InvalidRequirement
+_____________ test_resolution_can_capture_multiple_errors_at_once ______________
+
+    def test_resolution_can_capture_multiple_errors_at_once() -> None:
+        groups: Any = {
+            "all": [
+                {"include-group": "all-invalid"},
+                {"include-group": "all-valid"},
+            ],
+            "all-valid": [
+                {"include-group": "empty"},
+                {"include-group": "simple"},
+            ],
+            "all-invalid": [
+                {"include-group": "self-reference"},
+                {"include-group": "invalid-object"},
+                {"include-group": "invalid-type"},
+                {"include-group": "invalid-type"},
+            ],
+            "self-reference": [{"include-group": "self-reference"}],
+            "invalid-object": [{}],
+            "invalid-type": "foo",
+            "empty": [],
+            "simple": ["jsonschema<5"],
+        }
+    
+        # sanity check: even in the presence of these invalid data, we can extract the valid
+        # parts
+>       valid_resolution = resolve_dependency_groups(groups, "all-valid")
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_dependency_groups.py:515: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+src/packaging/dependency_groups.py:294: in resolve_dependency_groups
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:294: in <genexpr>
+    return tuple(str(r) for group in groups for r in resolver.resolve(group))
+                                                     ^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:154: in resolve
+    return self._resolve(group, group, errors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/packaging/dependency_groups.py:198: in _resolve
+    self._resolve(include_group, requested_group, errors)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <packaging.dependency_groups.DependencyGroupResolver object at 0x72cb7f456e10>
+group = 'simple', requested_group = 'all-valid'
+errors = _ErrorCollector(errors=[])
+
+    def _resolve(
+        self, group: str, requested_group: str, errors: _ErrorCollector
+    ) -> tuple[Requirement, ...]:
+        """
+        This is a helper for cached resolution to strings. It preserves the name of the
+        group which the user initially requested in order to present a clearer error in
+        the event that a cycle is detected.
+    
+        :param group: The normalized name of the group to resolve.
+        :param requested_group: The group which was used in the original, user-facing
+            request.
+        """
+        if group in self._resolve_cache:
+            return self._resolve_cache[group]
+    
+        parsed = self._parse_group(group, errors)
+    
+        resolved_group = []
+    
+        for item in parsed:
+            if isinstance(item, Requirement):
+                resolved_group.append(item)
+            elif isinstance(item, DependencyGroupInclude):
+                include_group = _normalize_name(item.include_group)
+    
+                # if a group is cyclic, record the error
+                # otherwise, follow the include_group reference
+                #
+                # this allows us to examine all includes in a group, even in the
+                # presence of errors
+                if include_group in self._include_graph_ancestors.get(group, ()):
+                    errors.error(
+                        CyclicDependencyGroup(
+                            requested_group, group, item.include_group
+                        )
+                    )
+                else:
+                    self._include_graph_ancestors[include_group] = (
+                        *self._include_graph_ancestors.get(group, ()),
+                        group,
+                    )
+                    resolved_group.extend(
+                        self._resolve(include_group, requested_group, errors)
+                    )
+            else:  # pragma: no cover
+>               raise NotImplementedError(
+                    f"Invalid dependency group item after parse: {item}"
+                )
+E               NotImplementedError: Invalid dependency group item after parse: <contextlib._GeneratorContextManager object at 0x72cb7f457fe0>
+
+src/packaging/dependency_groups.py:201: NotImplementedError
+- generated xml file: /tmp/sbx_v7c_packaging_30824d9/swegemma_sandbox_fc7288d1-a29_ym9gde9k/tmp/_swegemma_junit_0057876fc47c.xml -
+=========================== short test summary info ============================
+FAILED tests/test_dependency_groups.py::test_lookup_on_trivial_normalization
+FAILED tests/test_dependency_groups.py::test_lookup_with_include_result - ass...
+FAILED tests/test_dependency_groups.py::test_expand_contract_model_only_does_inner_lookup_once
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo-bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo_bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo-bar-foo..bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo-bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo_bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo_bar-foo..bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo-bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo_bar]
+FAILED tests/test_dependency_groups.py::test_normalized_name_is_used_for_include_group_lookups[foo..bar-foo..bar]
+FAILED tests/test_dependency_groups.py::test_str_list_group - NotImplementedE...
+FAILED tests/test_dependency_groups.py::test_single_include_group - NotImplem...
+FAILED tests/test_dependency_groups.py::test_sdual_include_group - NotImpleme...
+FAILED tests/test_dependency_groups.py::test_normalized_group_name - NotImple...
+FAILED tests/test_dependency_groups.py::test_resolution_collects_invalid_requirement_with_sibling_errors
+FAILED tests/test_dependency_groups.py::test_resolution_can_capture_multiple_errors_at_once
+18 failed, 20 passed in 0.58s
+
+STDERR:
