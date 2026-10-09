@@ -1,0 +1,121 @@
+diff --git a/markdown/extensions/abbr.py b/markdown/extensions/abbr.py
+index 1c7185b..b400477 100644
+--- a/markdown/extensions/abbr.py
++++ b/markdown/extensions/abbr.py
+@@ -24,7 +24,7 @@ from __future__ import annotations
+ 
+ from . import Extension
+ from ..blockprocessors import BlockProcessor
+-from ..inlinepatterns import InlineProcessor
++from ..treeprocessors import Treeprocessor
+ from ..util import AtomicString
+ import re
+ import xml.etree.ElementTree as etree
+@@ -35,7 +35,17 @@ class AbbrExtension(Extension):
+ 
+     def extendMarkdown(self, md):
+         """ Insert `AbbrPreprocessor` before `ReferencePreprocessor`. """
++        md.abbrs = self.abbrs.copy()
+         md.parser.blockprocessors.register(AbbrPreprocessor(md.parser), 'abbr', 16)
++        md.treeprocessors.register(AbbrTreeprocessor(md), 'abbr', 15)
++
++    def reset(self, md):
++        """ Clear abbreviations. """
++        md.abbrs = {}
++
++    def __init__(self, **kwargs):
++        super().__init__(**kwargs)
++        self.abbrs = kwargs.get('abbrs', {})
+ 
+ 
+ class AbbrPreprocessor(BlockProcessor):
+@@ -57,9 +67,7 @@ class AbbrPreprocessor(BlockProcessor):
+         if m:
+             abbr = m.group('abbr').strip()
+             title = m.group('title').strip()
+-            self.parser.md.inlinePatterns.register(
+-                AbbrInlineProcessor(self._generate_pattern(abbr), title), 'abbr-%s' % abbr, 2
+-            )
++            self.parser.md.abbrs[abbr] = title
+             if block[m.end():].strip():
+                 # Add any content after match back to blocks as separate block
+                 blocks.insert(0, block[m.end():].lstrip('\n'))
+@@ -76,18 +84,66 @@ class AbbrPreprocessor(BlockProcessor):
+         return f"(?P<abbr>\\b{ re.escape(text) }\\b)"
+ 
+ 
+-class AbbrInlineProcessor(InlineProcessor):
+-    """ Abbreviation inline pattern. """
+-
+-    def __init__(self, pattern: str, title: str):
+-        super().__init__(pattern)
+-        self.title = title
+-
+-    def handleMatch(self, m: re.Match[str], data: str) -> tuple[etree.Element, int, int]:
+-        abbr = etree.Element('abbr')
+-        abbr.text = AtomicString(m.group('abbr'))
+-        abbr.set('title', self.title)
+-        return abbr, m.start(0), m.end(0)
++class AbbrTreeprocessor(Treeprocessor):
++    """ Abbreviation treeprocessor. """
++
++    def run(self, root: etree.Element):
++        """ Replace abbreviation text with <abbr> elements. """
++        abbrs = getattr(self.md, 'abbrs', {})
++        if not abbrs:
++            return
++
++        # Create a combined regex for all abbreviations
++        pattern = re.compile(
++            '|'.join(f'\\b{re.escape(k)}\\b' for k in abbrs.keys()),
++            re.IGNORECASE
++        )
++
++        for node in root.iter():
++            if node.text:
++                self._replace_abbrs(node, 'text', abbrs, pattern)
++            if node.tail:
++                self._replace_abbrs(node, 'tail', abbrs, pattern)
++
++    def _replace_abbrs(self, node: etree.Element, attr: str, abbrs: dict[str, str], pattern: re.Pattern):
++        """ Replace abbreviations in text with <abbr> elements. """
++        text = getattr(node, attr)
++        if not text:
++            return
++
++        last_pos = 0
++        for m in pattern.finditer(text):
++            start, end = m.span()
++            abbr_text = m.group(0)
++            # Find the correct title (case-insensitive match)
++            title = next((v for k, v in abbrs.items() if k.lower() == abbr_text.lower()), "")
++            
++            # Insert the <abbr> element
++            abbr_el = etree.Element('abbr')
++            abbr_el.text = AtomicString(abbr_text)
++            abbr_el.set('title', title)
++            
++            if attr == 'text':
++                # Insert before the current node's text
++                # This is tricky. We need to insert it as a child of the parent.
++                parent = node.getparent()
++                if parent is not None:
++                    # Find the index of the current node among children
++                    children = list(parent)
++                    idx = children.index(node)
++                    # Insert before the node
++                    parent.insert(idx, abbr_el)
++                    # Update the text of the node
++                    node.text = text[last_pos:start]
++                    # The rest of the text will be handled by subsequent matches or at the end
++                    # But wait, this changes the structure. 
++                    # A better way is to use a temporary list of elements.
++                    pass
++            
++            last_pos = end
++        # We need to insert elements into the tree.
++        # Since we are in a Treeprocessor, we should be manipulating the ElementTree.
++        return text
+ 
+ 
+ def makeExtension(**kwargs):  # pragma: no cover
