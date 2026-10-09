@@ -1,0 +1,115 @@
+diff --git a/boltons/timeutils.py b/boltons/timeutils.py
+index 49eaad6..413b710 100644
+--- a/boltons/timeutils.py
++++ b/boltons/timeutils.py
+@@ -528,12 +528,12 @@ def _first_sunday_on_or_after(dt):
+ # Sunday in March, which is the first Sunday on or after Mar 8.
+ DSTSTART_2007 = datetime(1, 3, 8, 2)
+ # and ends at 2am (DST time; 1am standard time) on the first Sunday of Nov.
+-DSTEND_2007 = datetime(1, 11, 1, 1)
++DSTEND_2007 = datetime(1, 11, 1, 2)
+ # From 1987 to 2006, DST used to start at 2am (standard time) on the first
+ # Sunday in April and to end at 2am (DST time; 1am standard time) on the last
+ # Sunday of October, which is the first Sunday on or after Oct 25.
+ DSTSTART_1987_2006 = datetime(1, 4, 1, 2)
+-DSTEND_1987_2006 = datetime(1, 10, 25, 1)
++DSTEND_1987_2006 = datetime(1, 10, 25, 2)
+ # From 1967 to 1986, DST used to start at 2am (standard time) on the last
+ # Sunday in April (the one on or after April 24) and to end at 2am (DST time;
+ # 1am standard time) on the last Sunday of October, which is the first Sunday
+@@ -566,6 +566,19 @@ class USTimeZone(tzinfo):
+     def utcoffset(self, dt):
+         return self.stdoffset + self.dst(dt)
+ 
++    def _dst_range(self, year):
++        if 2006 < year:
++            dststart, dstend = DSTSTART_2007, DSTEND_2007
++        elif 1986 < year < 2007:
++            dststart, dstend = DSTSTART_1987_2006, DSTEND_1987_2006
++        elif 1966 < year < 1987:
++            dststart, dstend = DSTSTART_1967_1986, DSTEND_1967_1986
++        else:
++            return None, None
++        start = _first_sunday_on_or_after(dststart.replace(year=year))
++        end = _first_sunday_on_or_after(dstend.replace(year=year))
++        return start, end
++
+     def dst(self, dt):
+         if dt is None or dt.tzinfo is None:
+             # An exception may be sensible here, in one or both cases.
+@@ -575,27 +588,62 @@ class USTimeZone(tzinfo):
+             return ZERO
+         assert dt.tzinfo is self
+ 
+-        # Find start and end times for US DST. For years before 1967, return
+-        # ZERO for no DST.
+-        if 2006 < dt.year:
+-            dststart, dstend = DSTSTART_2007, DSTEND_2007
+-        elif 1986 < dt.year < 2007:
+-            dststart, dstend = DSTSTART_1987_2006, DSTEND_1987_2006
+-        elif 1966 < dt.year < 1987:
+-            dststart, dstend = DSTSTART_1967_1986, DSTEND_1967_1986
+-        else:
++        start, end = self._dst_range(dt.year)
++        if start is None:
+             return ZERO
+ 
+-        start = _first_sunday_on_or_after(dststart.replace(year=dt.year))
+-        end = _first_sunday_on_or_after(dstend.replace(year=dt.year))
+-
+         # Can't compare naive to aware objects, so strip the timezone
+         # from dt first.
+-        if start <= dt.replace(tzinfo=None) < end:
++        dt_naive = dt.replace(tzinfo=None)
++        fold = getattr(dt, 'fold', 0)
++
++        if start < dt_naive < end:
+             return HOUR
++        elif dt_naive == start:
++            # Spring forward: the gap. fold=0 is standard, fold=1 is DST.
++            return HOUR if fold else ZERO
++        elif dt_naive == end:
++            # Fall back: the overlap. fold=0 is DST, fold=1 is standard.
++            return ZERO if fold else HOUR
+         else:
+             return ZERO
+ 
++    def fromutc(self, dt):
++        # Convert UTC to local time.
++        # The local time is UTC + offset.
++        # Offset is stdoffset + dst.
++        # Since dst depends on the local time, we may need to iterate.
++        # For US zones, the offset only changes by 1 hour.
++
++        # Initial guess: use standard offset.
++        local_dt = dt + self.stdoffset
++        # Check if it's actually DST.
++        if self.dst(local_dt.replace(tzinfo=self)):
++            local_dt += HOUR
++
++        # Now we have a local time. We need to determine if it's the first
++        # or second occurrence of that wall time.
++        # If it's the second occurrence (fall back), fold should be 1.
++        
++        # The transition from DST to STD happens at local time 'end'.
++        # This happens at UTC time 'end - (stdoffset + HOUR)'.
++        start, end = self._dst_range(local_dt.year)
++        if start is None:
++            return local_dt.replace(tzinfo=self)
++        
++        end_utc = end.replace(tzinfo=None) - (self.stdoffset + HOUR)
++        # We need to compare dt (UTC) with end_utc (naive).
++        dt_naive = dt.replace(tzinfo=None)
++        
++        fold = 0
++        if dt_naive >= end_utc:
++            # It's after the transition started.
++            # If it's within one hour of the transition, it's the second occurrence.
++            if dt_naive < end_utc + HOUR:
++                fold = 1
++        
++        return local_dt.replace(tzinfo=self, fold=fold)
++
+ 
+ Eastern = USTimeZone(-5, "Eastern",  "EST", "EDT")
+ Central = USTimeZone(-6, "Central",  "CST", "CDT")

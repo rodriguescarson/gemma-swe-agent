@@ -1,0 +1,119 @@
+diff --git a/src/blackd/__init__.py b/src/blackd/__init__.py
+index bca223e..f52939d 100644
+--- a/src/blackd/__init__.py
++++ b/src/blackd/__init__.py
+@@ -76,10 +76,37 @@ class InvalidVariantHeader(Exception):
+ @click.option(
+     "--bind-port", type=int, help="Port to listen on", default=45484, show_default=True
+ )
++@click.option(
++    "--allow-origins",
++    type=str,
++    help="Comma-separated list of allowed origins for CORS.",
++    default="",
++)
++@click.option(
++    "--max-request-size",
++    type=int,
++    help="Maximum request body size in bytes.",
++    default=1024 * 1024 * 10,  # 10MB
++    show_default=True,
++)
++@click.option(
++    "--max-requests",
++    type=int,
++    help="Maximum number of concurrent requests in the executor queue.",
++    default=100,
++    show_default=True,
++)
+ @click.version_option(version=black.__version__)
+-def main(bind_host: str, bind_port: int) -> None:
++def main(
++    bind_host: str,
++    bind_port: int,
++    allow_origins: str,
++    max_request_size: int,
++    max_requests: int,
++) -> None:
+     logging.basicConfig(level=logging.INFO)
+-    app = make_app()
++    origins = tuple(allow_origins.split(",")) if allow_origins else ()
++    app = make_app(origins, max_request_size, max_requests)
+     ver = black.__version__
+     black.out(f"blackd version {ver} listening on {bind_host} port {bind_port}")
+     loop = maybe_use_uvloop()
+@@ -102,10 +129,16 @@ def executor() -> Executor:
+     return ProcessPoolExecutor()
+ 
+ 
+-def make_app() -> web.Application:
++def make_app(
++    allow_origins: tuple[str, ...] = (),
++    max_request_size: int = 1024 * 1024 * 10,
++    max_requests: int = 100,
++) -> web.Application:
+     app = web.Application(
+-        middlewares=[cors(allow_headers=(*BLACK_HEADERS, "Content-Type"))]
++        middlewares=[cors(allow_headers=(*BLACK_HEADERS, "Content-Type"), allow_origins=allow_origins)],
++        client_max_size=max_request_size,
+     )
++    app["semaphore"] = asyncio.Semaphore(max_requests)
+     app.add_routes([web.post("/", partial(handle, executor=executor()))])
+     return app
+ 
+@@ -137,9 +170,10 @@ async def handle(request: web.Request, executor: Executor) -> web.Response:
+             req_str = req_str[first_newline_position:]
+ 
+         loop = asyncio.get_event_loop()
+-        formatted_str = await loop.run_in_executor(
+-            executor, partial(black.format_file_contents, req_str, fast=fast, mode=mode)
+-        )
++        async with request.app["semaphore"]:
++            formatted_str = await loop.run_in_executor(
++                executor, partial(black.format_file_contents, req_str, fast=fast, mode=mode)
++            )
+ 
+         # Put the source first line back
+         req_str = header + req_str
+@@ -152,10 +186,11 @@ async def handle(request: web.Request, executor: Executor) -> web.Response:
+             src_name = f"In\t{then}"
+             dst_name = f"Out\t{now}"
+             loop = asyncio.get_event_loop()
+-            formatted_str = await loop.run_in_executor(
+-                executor,
+-                partial(black.diff, req_str, formatted_str, src_name, dst_name),
+-            )
++            async with request.app["semaphore"]:
++                formatted_str = await loop.run_in_executor(
++                    executor,
++                    partial(black.diff, req_str, formatted_str, src_name, dst_name),
++                )
+ 
+         return web.Response(
+             content_type=request.content_type,
+diff --git a/src/blackd/middlewares.py b/src/blackd/middlewares.py
+index 43448c2..a7bd6d7 100644
+--- a/src/blackd/middlewares.py
++++ b/src/blackd/middlewares.py
+@@ -8,7 +8,7 @@
+ Handler = Callable[[Request], Awaitable[StreamResponse]]
+ 
+ 
+-def cors(allow_headers: Iterable[str]) -> Middleware:
++def cors(allow_headers: Iterable[str], allow_origins: Iterable[str]) -> Middleware:
+     @middleware
+     async def impl(request: Request, handler: Handler) -> StreamResponse:
+         is_options = request.method == "OPTIONS"
+@@ -22,7 +22,11 @@ async def impl(request: Request, handler: Handler) -> StreamResponse:
+         if not origin:
+             return resp
+ 
+-        resp.headers["Access-Control-Allow-Origin"] = "*"
++        if origin not in allow_origins:
++            from aiohttp import web
++            return web.Response(status=403, text="Forbidden: Origin not allowed")
++
++        resp.headers["Access-Control-Allow-Origin"] = origin
+         resp.headers["Access-Control-Expose-Headers"] = "*"
+         if is_options:
+             resp.headers["Access-Control-Allow-Headers"] = ", ".join(allow_headers)

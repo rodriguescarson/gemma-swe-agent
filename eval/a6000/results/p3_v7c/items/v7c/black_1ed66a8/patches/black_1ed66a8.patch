@@ -1,0 +1,139 @@
+diff --git a/src/black/__init__.py b/src/black/__init__.py
+index 16481b8..8142174 100644
+--- a/src/black/__init__.py
++++ b/src/black/__init__.py
+@@ -543,6 +543,11 @@ def validate_regex(
+     callback=read_pyproject_toml,
+     help="Read configuration options from a configuration file.",
+ )
++@click.option(
++    "--cache-dir",
++    type=click.Path(path_type=Path),
++    help="The directory to use for the cache.",
++)
+ @click.option(
+     "--no-cache",
+     is_flag=True,
+@@ -582,6 +587,7 @@ def main(
+     workers: int | None,
+     src: tuple[str, ...],
+     config: str | None,
++    cache_dir: Path | None,
+     no_cache: bool,
+ ) -> None:
+     """The uncompromising code formatter."""
+@@ -765,6 +771,7 @@ def main(
+                 mode=mode,
+                 report=report,
+                 lines=lines,
++                cache_dir=cache_dir,
+                 no_cache=no_cache,
+             )
+         else:
+@@ -780,6 +787,7 @@ def main(
+                 mode=mode,
+                 report=report,
+                 workers=workers,
++                cache_dir=cache_dir,
+                 no_cache=no_cache,
+             )
+ 
+@@ -943,6 +951,7 @@ def reformat_one(
+     report: "Report",
+     *,
+     lines: Collection[tuple[int, int]] = (),
++    cache_dir: Path | None = None,
+     no_cache: bool = False,
+ ) -> None:
+     """Reformat a single file under `src` without spawning child processes.
+@@ -973,7 +982,7 @@ def reformat_one(
+             ):
+                 changed = Changed.YES
+         else:
+-            cache = None if no_cache else Cache.read(mode)
++            cache = None if no_cache else Cache.read(mode, cache_dir=cache_dir)
+             if cache is not None and write_back not in (
+                 WriteBack.DIFF,
+                 WriteBack.COLOR_DIFF,
+diff --git a/src/black/cache.py b/src/black/cache.py
+index 39d6cb3..b2f6591 100644
+--- a/src/black/cache.py
++++ b/src/black/cache.py
+@@ -28,28 +28,25 @@ class FileData(NamedTuple):
+     hash: str
+ 
+ 
+-def get_cache_dir() -> Path:
++def get_cache_dir(cache_dir: str | None = None) -> Path:
+     """Get the cache directory used by black.
+ 
+     Users can customize this directory on all systems using `BLACK_CACHE_DIR`
+-    environment variable. By default, the cache directory is the user cache directory
+-    under the black application.
+-
+-    This result is immediately set to a constant `black.cache.CACHE_DIR` as to avoid
+-    repeated calls.
++    environment variable or the `--cache-dir` command-line option. By default,
++    the cache directory is the user cache directory under the black application.
+     """
+-    # NOTE: Function mostly exists as a clean way to test getting the cache directory.
+-    default_cache_dir = user_cache_dir("black")
+-    cache_dir = Path(os.environ.get("BLACK_CACHE_DIR", default_cache_dir))
+-    cache_dir = cache_dir / __version__
+-    return cache_dir
+-
+-
+-CACHE_DIR = get_cache_dir()
++    if cache_dir:
++        cache_dir = Path(cache_dir)
++    else:
++        default_cache_dir = user_cache_dir("black")
++        cache_dir = Path(os.environ.get("BLACK_CACHE_DIR", default_cache_dir))
++    return cache_dir / __version__
+ 
+ 
+-def get_cache_file(mode: Mode) -> Path:
+-    return CACHE_DIR / f"cache.{mode.get_cache_key()}.pickle"
++def get_cache_file(mode: Mode, cache_dir: Path | None = None) -> Path:
++    if cache_dir is None:
++        cache_dir = get_cache_dir()
++    return cache_dir / f"cache.{mode.get_cache_key()}.pickle"
+ 
+ 
+ @dataclass
+@@ -59,13 +56,13 @@ class Cache:
+     file_data: dict[str, FileData] = field(default_factory=dict)
+ 
+     @classmethod
+-    def read(cls, mode: Mode) -> Self:
++    def read(cls, mode: Mode, cache_dir: Path | None = None) -> Self:
+         """Read the cache if it exists and is well-formed.
+ 
+         If it is not well-formed, the call to write later should
+         resolve the issue.
+         """
+-        cache_file = get_cache_file(mode)
++        cache_file = get_cache_file(mode, cache_dir=cache_dir)
+         try:
+             exists = cache_file.exists()
+         except OSError as e:
+diff --git a/src/black/concurrency.py b/src/black/concurrency.py
+index 198dbbd..8ed7490 100644
+--- a/src/black/concurrency.py
++++ b/src/black/concurrency.py
+@@ -85,6 +85,7 @@ def reformat_many(
+     mode: Mode,
+     report: Report,
+     workers: int | None,
++    cache_dir: Path | None = None,
+     no_cache: bool = False,
+ ) -> None:
+     """Reformat multiple files using a ProcessPoolExecutor."""
+@@ -162,6 +163,7 @@ async def schedule_formatting(
+     report: Report,
+     loop: asyncio.AbstractEventLoop,
+     executor: Executor,
++    cache_dir: Path | None = None,
+     no_cache: bool = False,
+ ) -> None:
+     """Run formatting of `sources` in parallel using the provided `executor`.
