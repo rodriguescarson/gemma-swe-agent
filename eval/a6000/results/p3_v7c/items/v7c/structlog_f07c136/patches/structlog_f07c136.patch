@@ -1,0 +1,199 @@
+diff --git a/src/structlog/tracebacks.py b/src/structlog/tracebacks.py
+index a6c6cef..b220781 100644
+--- a/src/structlog/tracebacks.py
++++ b/src/structlog/tracebacks.py
+@@ -173,151 +173,50 @@ def to_repr(
+     return obj_repr
+ 
+ 
+-def extract(
+-    exc_type: type[BaseException],
+-    exc_value: BaseException,
+-    traceback: TracebackType | None,
+-    *,
+-    show_locals: bool = False,
+-    locals_max_length: int = LOCALS_MAX_LENGTH,
+-    locals_max_string: int = LOCALS_MAX_STRING,
+-    locals_hide_dunder: bool = True,
+-    locals_hide_sunder: bool = False,
+-    use_rich: bool = True,
+-) -> Trace:
+-    """
+-    Extract traceback information.
+-
+-    Args:
+-        exc_type: Exception type.
+-
+-        exc_value: Exception value.
+-
+-        traceback: Python Traceback object.
+-
+-        show_locals: Enable display of local variables. Defaults to False.
+-
+-        locals_max_length:
+-            Maximum length of containers before abbreviating, or ``None`` for
+-            no abbreviation.
+-
+-        locals_max_string:
+-            Maximum length of string before truncating, or ``None`` to disable
+-            truncating.
+-
+-        locals_hide_dunder:
+-            Hide locals prefixed with double underscore.
+-            Defaults to True.
+-
+-        locals_hide_sunder:
+-            Hide locals prefixed with single underscore.
+-            This implies hiding *locals_hide_dunder*.
+-            Defaults to False.
+-
+-        use_rich: If ``True`` (the default), use rich_ to compute the repr.
+-            If ``False`` or if rich_ is not installed, fall back to a simpler
+-            algorithm.
+-
+-    Returns:
+-        A Trace instance with structured information about all exceptions.
+-
+-    .. versionadded:: 22.1.0
+-    .. versionchanged:: 24.3.0
+-       Added *locals_max_length*, *locals_hide_sunder*, *locals_hide_dunder*
+-       and *use_rich* arguments.
+-    """
+-
+-    stacks: list[Stack] = []
+-    is_cause = False
+-
+-    while True:
+-        stack = Stack(
+-            exc_type=safe_str(exc_type.__name__),
+-            exc_value=safe_str(exc_value),
+-            exc_notes=[
+-                safe_str(note) for note in getattr(exc_value, "__notes__", ())
+-            ],
+-            is_cause=is_cause,
+-        )
+-
+-        if isinstance(exc_value, SyntaxError):
+-            stack.syntax_error = SyntaxError_(
+-                offset=exc_value.offset or 0,
+-                filename=exc_value.filename or "?",
+-                lineno=exc_value.lineno or 0,
+-                line=exc_value.text or "",
+-                msg=exc_value.msg,
+-            )
+-
+-        stacks.append(stack)
+-        append = stack.frames.append  # pylint: disable=no-member
+-
+-        def get_locals(
+-            iter_locals: Iterable[tuple[str, object]],
+-        ) -> Iterable[tuple[str, object]]:
+-            """Extract locals from an iterator of key pairs."""
+-            if not (locals_hide_dunder or locals_hide_sunder):
+-                yield from iter_locals
+-                return
+-            for key, value in iter_locals:
+-                if locals_hide_dunder and key.startswith("__"):
+-                    continue
+-                if locals_hide_sunder and key.startswith("_"):
+-                    continue
+-                yield key, value
+-
+-        for frame_summary, line_no in walk_tb(traceback):
+-            filename = frame_summary.f_code.co_filename
+-            if filename and not filename.startswith("<"):
+-                filename = os.path.abspath(filename)
+-            # Rich has this, but we are not rich and like to keep all frames:
+-            # if frame_summary.f_locals.get("_rich_traceback_omit", False):
+-            #     continue  # noqa: ERA001
+-
+-            frame = Frame(
+-                filename=filename or "?",
+-                lineno=line_no,
+-                name=frame_summary.f_code.co_name,
+-                locals=(
+-                    {
+-                        key: to_repr(
+-                            value,
+-                            max_length=locals_max_length,
+-                            max_string=locals_max_string,
+-                            use_rich=use_rich,
+-                        )
+-                        for key, value in get_locals(
+-                            frame_summary.f_locals.items()
+-                        )
+-                    }
+-                    if show_locals
+-                    else None
+-                ),
++def extract(exc_type, exc_value, traceback, *, show_locals, limit=None):
++    """Extract the traceback of an exception."""
++    stacks = []
++    
++    def _extract(et, ev, tb):
++        if tb is None:
++            return
++        
++        # Handle ExceptionGroup (Python 3.11+)
++        if hasattr(ev, "__exceptions__"):
++            for e in ev.__exceptions__:
++                # ExceptionGroup exceptions don't have their own tracebacks 
++                # in the same way, but we can try to extract them.
++                # This is a simplified approach.
++                _extract(type(e), e, e.__traceback__)
++        
++        # Standard traceback extraction
++        curr_tb = tb
++        while curr_tb:
++            frame = curr_tb.tb_frame
++            stacks.append(
++                Stack(
++                    frame=Frame(
++                        filename=frame.f_code.co_filename,
++                        name=frame.f_code.co_name,
++                        line=curr_tb.tb_lineno,
++                        locals=frame.f_locals if show_locals else None,
++                    ),
++                    line=curr_tb.tb_lineno,
++                )
+             )
+-            append(frame)
+-
+-        cause = getattr(exc_value, "__cause__", None)
+-        if cause and cause.__traceback__:
+-            exc_type = cause.__class__
+-            exc_value = cause
+-            traceback = cause.__traceback__
+-            is_cause = True
+-            continue
+-
+-        cause = exc_value.__context__
+-        if (
+-            cause
+-            and cause.__traceback__
+-            and not getattr(exc_value, "__suppress_context__", False)
+-        ):
+-            exc_type = cause.__class__
+-            exc_value = cause
+-            traceback = cause.__traceback__
+-            is_cause = False
+-            continue
+-
+-        # No cover, code is reached but coverage doesn't recognize it.
+-        break  # pragma: no cover
++            curr_tb = curr_tb.tb_next
++            if limit and len(stacks) >= limit:
++                break
++
++    _extract(exc_type, exc_value, traceback)
++    
++    # Handle cause and context
++    if hasattr(exc_value, "__cause__") and exc_value.__cause__ is not None:
++        cause = exc_value.__cause__
++        _extract(type(cause), cause, cause.__traceback__)
++    elif hasattr(exc_value, "__context__") and exc_value.__context__ is not None:
++        context = exc_value.__context__
++        _extract(type(context), context, context.__traceback__)
+ 
+     return Trace(stacks=stacks)
+ 
