@@ -326,3 +326,5 @@ not run (no capture)
 - 2026-10-10T04:01:00Z | EVENT P9 PLAN written (nothing launched): P8's plan and state moved aside as runs/autopilot_plan_v7c_done.json and runs/autopilot_state_v7c_done.json (the old state carried P8's launch_epoch, 2026-10-08 16:26:49 UTC, already past its 24 h stop, and child_step v7c_p3; left in place the new supervisor would have hard-stopped at once). New runs/autopilot_plan.json by scripts/a6000/p8_plan.py --arm v7d: steps probe_v7d, v7d_s50, v7d_p4, v7d_p3; runs/autopilot_choice.json -> v7d; no state file, so the supervisor starts a fresh 24 h clock at launch. GPU at write time: see the next line.
 - 2026-10-10T04:01:00Z | EVENT P9 GPU at plan time: 48407 MiB, 2 %, compute apps visible inside WSL: 0 (the 48 GB is held from outside WSL if this is not near 1 GB; the supervisor's GPU guard waits for it to be free, it does not kill it). Launch line is in the report; the owner launches.
 - 2026-10-10T04:22:51Z | LAUNCH stage 1a; HARD STOP 2026-10-11T04:22:51Z
+- 2026-10-10T04:24:55Z | step=probe_v7d | EVENT started pid 1452 (restarts so far 0; hard stop in 24.0 h)
+- 2026-10-10T04:36:25Z | step=probe_v7d | END done: done=0/4 solved=0
