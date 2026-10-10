@@ -84,8 +84,55 @@ def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=No
     return report
 
 
+def validate_stitched(path, exclude=frozenset(), max_tokens=14336, tok=None, require_thought=False, min_seqs=1):
+    """Stitched sequences (train/stitch_rows.py): {"text", "spans": [[a, b, w]], "meta"}. Checks: <bos> start, the spans are exactly the
+    model spans of the text (train/spans.py), at least one span trained, no duplicate text, token cap, excluded tasks absent, and
+    with --require-thought at least one NON-EMPTY thought channel per sequence."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from train.spans import supervised_char_spans
+    problems, seen = [], set()
+    n, toks, thought_seqs, trained_chars, masked_chars, stages = 0, [], 0, 0, 0, Counter()
+    for i, line in enumerate(open(path)):
+        if not line.strip():
+            continue
+        r = json.loads(line); n += 1
+        t, sp, m = r.get("text"), r.get("spans"), r.get("meta") or {}
+        if not isinstance(t, str) or not t.startswith("<bos>"):
+            problems.append((i, "text does not start with <bos>")); continue
+        if not isinstance(sp, list) or not sp or any(len(x) != 3 for x in sp):
+            problems.append((i, "spans missing or malformed")); continue
+        if [(a, b) for a, b, w in sp] != list(supervised_char_spans(t)):
+            problems.append((i, "spans are not the model spans of the text"))
+        if not any(w > 0 for a, b, w in sp):
+            problems.append((i, "no span with weight > 0"))
+        trained_chars += sum(b - a for a, b, w in sp if w > 0); masked_chars += sum(b - a for a, b, w in sp if w == 0)
+        has_thought = any(mm.group(0) != "<|channel>thought\n<channel|>" for mm in THOUGHT_RE.finditer(t))
+        thought_seqs += has_thought
+        if require_thought and not has_thought:
+            problems.append((i, "no non-empty thought channel"))
+        if m.get("task") in exclude:
+            problems.append((i, f"eval-set task {m.get('task')}"))
+        h = hashlib.sha1(t.encode("utf-8", "replace")).hexdigest()
+        if h in seen:
+            problems.append((i, "duplicate sequence"))
+        seen.add(h)
+        nt = len(tok.encode(t, add_special_tokens=False).ids) if tok is not None else m.get("tokens")
+        if nt is not None:
+            toks.append(nt)
+            if nt > max_tokens:
+                problems.append((i, f"{nt} tokens > {max_tokens}"))
+        stages[m.get("stage")] += 1
+    if n < min_seqs:
+        problems.append((-1, f"{n} sequences < min {min_seqs}"))
+    pct = lambda xs, q: sorted(xs)[int(q * (len(xs) - 1))] if xs else None  # noqa: E731
+    return {"sequences": n, "stages": dict(stages), "sequences_with_thought": thought_seqs, "trained_chars": trained_chars, "masked_chars": masked_chars,
+            "tokens_p50_p90_max": [pct(toks, .5), pct(toks, .9), max(toks) if toks else None], "tokens_total": sum(toks),
+            "problems": len(problems), "first_problems": problems[:20], "ok": not problems}
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--stitched", action="store_true", help="validate stitched sequences (train/stitch_rows.py output) instead of rows")
     ap.add_argument("rows"); ap.add_argument("--exclude-ids", action="append", default=[])
     ap.add_argument("--min-rows", type=int, default=10000); ap.add_argument("--max-tokens", type=int, default=30000)
     ap.add_argument("--report", default=None); ap.add_argument("--no-tokenizer", action="store_true")
@@ -94,7 +141,9 @@ def main():
     excl = set()
     for p in a.exclude_ids:
         excl |= {l.strip() for l in open(p) if l.strip()}
-    rep = validate(a.rows, excl, a.min_rows, a.max_tokens, None if a.no_tokenizer else tokenizer(), a.require_thought)
+    tok = None if a.no_tokenizer else tokenizer()
+    rep = (validate_stitched(a.rows, excl, a.max_tokens, tok, a.require_thought, a.min_rows) if a.stitched
+           else validate(a.rows, excl, a.min_rows, a.max_tokens, tok, a.require_thought))
     print(json.dumps(rep, indent=1))
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True); json.dump(rep, open(a.report, "w"), indent=1)

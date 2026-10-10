@@ -140,3 +140,35 @@ def test_sequences_over_the_token_cap_are_dropped():
     rows[-1]["completion"] = rows[-1]["completion"].replace("Changed a.py.", "x" * 200000)
     seqs, held, rep = ST.stitch(rows, max_tokens=14336)
     assert rep["over_max_tokens"] == 1 and rep["sequences"] == 0
+
+
+def test_validate_stitched_accepts_the_stitcher_output_and_flags_broken_sequences(tmp_path):
+    from train import validate_rows as V
+    rows = chain() + [dict(r, prompt=r["prompt"].replace("FIX IT", "FIX THAT")) for r in chain(task="t2", traj="cap|t2")]   # two distinct texts
+    seqs, held, rep = ST.stitch(rows)
+    good = tmp_path / "seqs.jsonl"; good.write_text("".join(json.dumps(s) + "\n" for s in seqs))
+    r = V.validate_stitched(str(good), max_tokens=14336, require_thought=True)
+    assert r["ok"] and r["sequences"] == 2 and r["sequences_with_thought"] == 2 and r["trained_chars"] > 0, r["first_problems"]
+    bad = dict(seqs[0]); bad["spans"] = [[0, 5, 1.0]]                                    # not the model spans
+    dup = dict(seqs[1])
+    nothought = dict(seqs[1]); nothought["text"] = nothought["text"].replace("read first", "").replace("now edit", "").replace("done", "")
+    (tmp_path / "bad.jsonl").write_text("".join(json.dumps(s) + "\n" for s in [bad, seqs[1], dup]))
+    r2 = V.validate_stitched(str(tmp_path / "bad.jsonl"), require_thought=True)
+    kinds = {p[1] for p in r2["first_problems"]}
+    assert not r2["ok"] and "spans are not the model spans of the text" in kinds and "duplicate sequence" in kinds
+    assert V.validate_stitched(str(good), exclude={"t2"})["problems"] == 1
+    r3 = subprocess.run([sys.executable, str(ROOT / "train" / "validate_rows.py"), "--stitched", str(good), "--min-rows", "1", "--no-tokenizer", "--require-thought"], capture_output=True, text=True)
+    assert r3.returncode == 0 and '"ok": true' in r3.stdout, r3.stdout[-400:] + r3.stderr[-400:]
+
+
+def test_holdout_auto_draws_tasks_when_the_named_ones_are_absent(tmp_path):
+    rows = chain(task="a", traj="x|a") + chain(task="b", traj="x|b") + chain(task="c", traj="x|c")
+    assert len(ST.auto_holdout(rows, 2, seed=1)) == 2 and ST.auto_holdout(rows, 2, seed=1) == ST.auto_holdout(rows, 2, seed=1)
+    inp = tmp_path / "rows.jsonl"; inp.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "hold.txt").write_text("zzz\n")
+    out = tmp_path / "seqs.jsonl"
+    r = subprocess.run([sys.executable, str(ROOT / "train" / "stitch_rows.py"), str(inp), "--out", str(out), "--report", str(tmp_path / "rep.json"),
+                        "--holdout-tasks", str(tmp_path / "hold.txt"), "--holdout-out", str(tmp_path / "held.jsonl"), "--holdout-auto", "1"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-600:]
+    drawn = (tmp_path / "seqs.jsonl.holdout_tasks.txt").read_text().split()
+    assert len(drawn) == 1 and len(out.read_text().splitlines()) == 2 and len((tmp_path / "held.jsonl").read_text().splitlines()) == 1

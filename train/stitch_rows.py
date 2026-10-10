@@ -82,6 +82,13 @@ def count_tokens(text, tok):
     return len(tok.encode(text, add_special_tokens=False).ids) if tok is not None else int(len(text) / CHARS_PER_TOKEN)
 
 
+def auto_holdout(rows, n, seed=1):
+    """n tasks chosen by a seeded draw among the tasks present (used when no holdout file names tasks of this collection)."""
+    import random
+    tasks = sorted({r["meta"]["task"] for r in rows})
+    return set(random.Random(seed).sample(tasks, min(n, len(tasks))))
+
+
 def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0.15, seed=1, holdout=frozenset()):
     groups, rep = defaultdict(list), Counter()
     for r in rows:
@@ -139,9 +146,15 @@ def main(argv=None):
     ap.add_argument("--max-seqs-per-task-stage", type=int, default=10); ap.add_argument("--max-tokens", type=int, default=14336)
     ap.add_argument("--tokenizer-json", default=None); ap.add_argument("--read-share", type=float, default=0.15); ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--holdout-tasks", default=None); ap.add_argument("--holdout-out", default=None)
+    ap.add_argument("--holdout-auto", type=int, default=0, help="when the holdout file names no task of these rows, draw this many tasks (seeded) and write them to <out>.holdout_tasks.txt")
     a = ap.parse_args(argv)
     rows = [json.loads(l) for l in open(a.rows) if l.strip()]
-    hold = {l.strip() for l in open(a.holdout_tasks) if l.strip()} if a.holdout_tasks else frozenset()
+    hold = {l.strip() for l in open(a.holdout_tasks) if l.strip()} if a.holdout_tasks else set()
+    present = {r["meta"]["task"] for r in rows}
+    if a.holdout_auto and not (hold & present):
+        hold = auto_holdout(rows, a.holdout_auto, a.seed)
+        Path(a.out + ".holdout_tasks.txt").write_text("".join(t + "\n" for t in sorted(hold)))
+        print(f"holdout: none of the named tasks are in these rows; drew {sorted(hold)} -> {a.out}.holdout_tasks.txt")
     seqs, held, rep = stitch(rows, a.max_seqs_per_task_stage, a.max_tokens, load_tokenizer(a.tokenizer_json), a.read_share, a.seed, hold)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w") as f:

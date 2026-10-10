@@ -399,3 +399,58 @@ A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch
 4. PRE-REGISTER GATE.md addendum 14 = the GAPS "P10 pre-registration" text + date, pulled commit, test counts, step-3 latency. Commit, push.
 5. PLAN (supervisor dead): move ~/g4/runs/autopilot_state.json and autopilot_plan.json aside as *_v7d_done.json; `~/g4/venv/bin/python scripts/a6000/p10_plan.py --dry-run` (expect probe_pair, pair_s50, p3_think), then without --dry-run (choice file = v5h2-think until the pair's post hook p10_choose.py applies the rule: v12 unless WORSE). Do NOT launch.
 6. REPORT, then stop: pull hash, stack line, test counts, validator lines, step-3 latency, addendum commit, and the launch line: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && AUTOPILOT_HARD_STOP_H=24 setsid nohup "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1 < /dev/null & sleep 20; tail -n 2 "$HOME/g4/autopilot.log"`. After launch the plan runs alone: probe -> 50-id pair (table + choice) -> collection pass until the hard stop; hourly health lines and backups; finalize, stop vLLM, push. Rows are built on the Mac (P11); do not train here yet.
+
+P11. THE THINKING-ON QLoRA ON THE BOX: ROWS, PROBE, RUN, PACKAGE (after P10's collection pass has ended; new session; GPU idle)
+----------------------------------------------------------------------------------------------------------------------
+You are a new Claude Code session on the A6000 box (WSL2 Ubuntu, friend's PC; work only in ~/g4 and Docker). Repo
+~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify, `git pull --rebase --autostash origin
+wip/gemma-agent` before every push, commit small; weights and data never enter git). Training and serving never overlap on
+this one GPU: never start vLLM or the supervisor in this session. Each long step runs in the background; you poll its log
+and stop when it needs the owner.
+
+0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -5`. Read in
+   chunks: docs/a6000/TRAIN_LOCAL.md (all of it: the thresholds are pre-registered there), the docstrings of
+   train/stitch_rows.py, train/qlora_train.py, scripts/a6000/train.sh, and P2_LOG.md's last 30 lines (the P10 pass must have
+   its DONE line: "p3_think" finished or hit the hard stop, supervisor finalized).
+1. STATE: `pgrep -af "autopilot|vllm|or_proxy|pace_proxy|race|qlora"` (anything alive = stop and say so), `nvidia-smi`
+   (> 1 GB used with no process = stale WSL VRAM: owner runs `wsl --shutdown` in Windows PowerShell, reopens with lab.bat
+   linux; restart at 0), `df -h ~` (need >= 150 GB free: 63 GB bf16 base + checkpoints), `ls ~/g4/runs/p3_think` (capture*.jsonl,
+   items/, results). One block to P2_LOG.md.
+2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc must be 0; its GATE/P2_LOG
+   paragraph is the data report). `wc -l ~/g4/runs/p3_think/rows.jsonl`.
+3. ENV + BASE: `bash scripts/a6000/train.sh env` (must print `cuda ok`), then `bash scripts/a6000/train.sh dequant` (~10 min;
+   writes ~/g4/model-bf16/DEQUANT.json with checked_against_library 3).
+4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json `ok: true`,
+   `sequences_with_thought == sequences`, >= 500 sequences; paste stitch_report.json's numbers (sequences, tokens, breaks,
+   healed, compactions, span_* counts) into GATE.md addendum 15 with the date and the pulled commit. If the gate fails,
+   log why to P2_LOG.md, push, stop.
+5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (about
+   1 h). Append probe_report.json's verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k and the repeat losses to
+   addendum 15, commit, push. FULL -> step 6. REDUCED -> re-stitch with `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think
+   think1 --max-seqs-per-task-stage 6` then step 6 with `--max-tokens 12288`. FALLBACK -> `gzip -k ~/g4/runs/p3_think/rows.jsonl`,
+   note the path, stop (the Mac trains the hosted way).
+6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]`; ~13-18 h. Poll hourly: status + the last `eval` line
+   (nll_text, nll_tool) to P2_LOG.md; `alarm_tok_s_halved: true` on 3 consecutive steps = report and keep going. If the
+   process dies, the same command resumes from the cursor. At `done`: summary.json (best_nll_text, steps, elapsed_h) to
+   addendum 15.
+7. PACKAGE: the collector bundle is the one named in ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python
+   train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name
+   think1 --key-style loud --stages $(v12: agent; v5h2-think: fixer,verifier)`; then `~/g4/venv/bin/python scripts/adapters_dataset.py
+   --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit
+   the bundle WITHOUT adapters/*.safetensors (git status must show no .safetensors), push.
+8. REPORT, then stop: pull hash, rows count, stitch numbers, probe verdict + reasons, run summary, the dataset slug, the
+   bundle path. The Mac side runs the Kaggle probe kernel, the L4 pair and the slot (TRAIN_LOCAL.md "After training").
+
+P11s. THE SAME, UNDER 4000 CHARACTERS (the goal field's limit; paste this one)
+----------------------------------------------------------------------------------------------------------------------
+A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify; `git pull --rebase --autostash origin wip/gemma-agent` before every push; commit small; weights/data never in git). One GPU: never start vLLM or the supervisor here. Long steps run in the background; poll their logs.
+
+0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -5`. Read in chunks: docs/a6000/TRAIN_LOCAL.md (thresholds are pre-registered there), docstrings of train/stitch_rows.py, train/qlora_train.py, scripts/a6000/train.sh, last 30 lines of docs/a6000/P2_LOG.md (P10's p3_think must be finished/finalized).
+1. STATE: `pgrep -af "autopilot|vllm|or_proxy|pace_proxy|race|qlora"` (anything alive = stop, say so); `nvidia-smi` (>1 GB used, no process = stale WSL VRAM: owner runs `wsl --shutdown`, reopens, restart at 0); `df -h ~` (>=150 GB free); `ls ~/g4/runs/p3_think`. One block to P2_LOG.md.
+2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc 0); `wc -l ~/g4/runs/p3_think/rows.jsonl`.
+3. ENV+BASE: `bash scripts/a6000/train.sh env` (must print `cuda ok`); `bash scripts/a6000/train.sh dequant` (~10 min; ~/g4/model-bf16/DEQUANT.json, checked_against_library 3).
+4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json ok true, sequences_with_thought == sequences, >=500 sequences. Put stitch_report.json numbers (sequences, tokens, breaks, healed, compactions, span_*) in GATE.md addendum 15 with date + pulled commit. Fail = log to P2_LOG.md, push, stop.
+5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (~1 h). Add probe_report.json verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k, repeat losses to addendum 15; commit, push. FULL -> 6. REDUCED -> re-stitch with `... stitch ~/g4/runs/p3_think think1 --max-seqs-per-task-stage 6`, then 6 with `--max-tokens 12288`. FALLBACK -> `gzip -k ~/g4/runs/p3_think/rows.jsonl`, note the path, stop.
+6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]` (~13-18 h). Hourly: status + last `eval` line (nll_text, nll_tool) to P2_LOG.md; alarm_tok_s_halved true on 3 consecutive steps = report, keep going; if the process dies, the same command resumes. At `done`: summary.json (best_nll_text, steps, elapsed_h) to addendum 15.
+7. PACKAGE: ARM = content of ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name think1 --key-style loud --stages <v12: agent | v5h2-think: fixer,verifier>`; `~/g4/venv/bin/python scripts/adapters_dataset.py --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit the bundle without any .safetensors, push.
+8. REPORT, stop: pull hash, rows, stitch numbers, probe verdict + reasons, run summary, dataset slug, bundle path. The Mac runs the Kaggle probe kernel, the L4 pair and the slot.

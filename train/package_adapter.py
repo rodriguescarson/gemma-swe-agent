@@ -4,7 +4,8 @@
         --name v11a --key-style loud|loud2 [--stages fixer,verifier]
 
 Writes <out>/ = a copy of <bundle> plus adapters/<name>/{adapter_config.json, adapter_model.safetensors}, an
-`adapter: <name>` line before `model:` in sub_agents/<stage>.yaml for each stage, and adapters/MANIFEST.json (sha256
+`adapter: <name>` line before `model:` in sub_agents/<stage>.yaml for each stage (stage `agent` = the root agent.yaml of a
+single-agent bundle), and adapters/MANIFEST.json (sha256
 of every adapter file, merged with any manifest already in the bundle). Only the two PEFT files are copied; the tgz's
 config.json, tokenizer, chat template and trainer_state stay behind. Exit 2 = refused, nothing written.
 
@@ -111,9 +112,10 @@ def write_rewritten(src, dst, header, data_start):
 
 
 def stage_files(bundle: Path, stages):
+    """stage 'agent' = the bundle's root agent.yaml (a single-agent bundle such as submissions/v12); any other name = sub_agents/<name>.yaml."""
     files = {}
     for s in stages:
-        p = bundle / "sub_agents" / f"{s}.yaml"
+        p = bundle / "agent.yaml" if s == "agent" else bundle / "sub_agents" / f"{s}.yaml"
         if not p.is_file():
             raise Refuse(f"stage {s!r}: {p} does not exist")
         if not re.search(r"(?m)^model: ", p.read_text()):
@@ -195,7 +197,7 @@ def main(argv=None):
     ap.add_argument("--out", required=True, help="destination bundle dir (must not exist)")
     ap.add_argument("--name", default="v11a")
     ap.add_argument("--key-style", required=True, choices=sorted(PREFIX))
-    ap.add_argument("--stages", default="fixer,verifier", help="comma list of sub_agents/<stage>.yaml that get the adapter")
+    ap.add_argument("--stages", default="fixer,verifier", help="comma list of sub_agents/<stage>.yaml that get the adapter; 'agent' = the root agent.yaml")
     a = ap.parse_args(argv)
     stages = [s.strip() for s in a.stages.split(",") if s.strip()]
     try:

@@ -191,3 +191,17 @@ def test_packaged_bundle_passes_the_official_compiler(tmp_path, style):
     assert "fixer model=openai/gemma-4-31b-it-qat-w4a16-ct:v11a" in v.stdout, v.stdout
     assert "verifier model=openai/gemma-4-31b-it-qat-w4a16-ct:v11a" in v.stdout, v.stdout
     assert "locator model=openai/gemma-4-31b-it-qat-w4a16-ct " in v.stdout, v.stdout
+
+
+def test_stage_agent_means_the_root_agent_yaml_of_a_single_agent_bundle(tmp_path):
+    """submissions/v12 has no sub_agents/: `--stages agent` puts the adapter line into agent.yaml (PROMPTS P11 step 7)."""
+    import shutil
+    make_peft(tmp_path / "ad")
+    src = tmp_path / "v12"
+    shutil.copytree(ROOT / "submissions" / "v12", src, ignore=shutil.ignore_patterns("__pycache__", "*.pyc", "._*", ".DS_Store"))
+    p = run(tmp_path / "ad", "--bundle", src, "--out", tmp_path / "out", "--name", "think1", "--key-style", "loud", "--stages", "agent")
+    assert p.returncode == 0, p.stdout + p.stderr
+    y = (tmp_path / "out" / "agent.yaml").read_text()
+    assert y.count("adapter:") == 1 and "\nadapter: think1\nmodel: " in y
+    assert (tmp_path / "out" / "adapters" / "think1" / "adapter_model.safetensors").is_file()
+    assert run(tmp_path / "ad", "--bundle", src, "--out", tmp_path / "out2", "--name", "x", "--key-style", "loud", "--stages", "fixer").returncode == 2
