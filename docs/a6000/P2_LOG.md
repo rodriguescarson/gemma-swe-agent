@@ -352,3 +352,4 @@ not run (no capture)
 - 2026-10-10T10:03:42Z | step=v7d_p3 | done=38/844 | solved=10 | empty=1 | errors=0 | median_s=149.6 | cap=6 | gpu=100% | disk_free=889GB | restarts=0
 - 2026-10-10T11:03:48Z | step=v7d_p3 | done=74/844 | solved=17 | empty=4 | errors=0 | median_s=165.8 | cap=14 | gpu=100% | disk_free=889GB | restarts=0
 - 2026-10-10T12:03:53Z | step=v7d_p3 | done=117/844 | solved=33 | empty=4 | errors=0 | median_s=152.5 | cap=19 | gpu=100% | disk_free=889GB | restarts=0
+- 2026-10-10T13:03:58Z | step=v7d_p3 | done=158/844 | solved=54 | empty=5 | errors=0 | median_s=152.3 | cap=24 | gpu=100% | disk_free=889GB | restarts=0
