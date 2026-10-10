@@ -1143,3 +1143,13 @@ Order: probe -> (a) -> re-measure -> (b) -> (c); each step's table, counters, ve
 | v7 vs v4h2 | 50 | 5 | 2 | 0.453 | -0.04 | NO EVIDENCE | 46 (5/2) |
 | v7c vs v4h2 | 50 | 6 | 2 | 0.289 | -0.06 | NO EVIDENCE | 47 (6/2) |
 | v7d vs v4h2 | 50 | 5 | 2 | 0.453 | +0.00 | NO EVIDENCE | 44 (4/2) |
+
+### P4 A6000 screen RESULT: v7d on the public 74 (2026-10-10 09:03 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 27/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 27/74 (base 34/74) | wins 1 losses 8 net -7 | rule: solved >= 37 and net >= +3
+won: fastapi_15589
+lost: fastapi_14616 fastapi_9753 requests_6644 rich_3063 rich_3067 rich_3506 rich_3718 rich_4077
+DROP: solved 27 < 37; net -7 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 8; errored rows 0; median task seconds 122; S(1) over clean windows = 1.14; over the whole log 1.14 (3110 calls; 0 of 19 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
