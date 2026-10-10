@@ -382,7 +382,14 @@ from unittest.mock import MagicMock
 from adk_submission import compile_submission, discover_adapters
 from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS, build_submission_limits
 from swegemma.tools import create_tools
-from swegemma.models import setup_gemma_model_registry
+try:
+    from swegemma.models import setup_gemma_model_registry as _registry_for
+    _registry_for = lambda name, _f=_registry_for: _f()
+except ImportError:   # the 2026-10-09 wheelhouse (swegemma 0.2.11): scripts/swe_compat.py
+    from adk_submission import ModelRegistry
+    from google.adk.models.lite_llm import LiteLlm
+    def _registry_for(name):
+        r = ModelRegistry(); r.register(name, LiteLlm(model='openai/' + name, api_base='http://127.0.0.1:8000/v1', api_key='EMPTY', num_retries=5)); return r
 from google.adk.models.lite_llm import _function_declaration_to_tool_param
 from google.adk.models.llm_request import LlmRequest
 from google.adk.tools.base_tool import BaseTool
@@ -392,7 +399,7 @@ d = sys.argv[1]
 limits, gen = build_submission_limits()
 registry = create_tools(MagicMock())
 root = compile_submission(submission_dir=d, adapter_manifest=discover_adapters(d, adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS),
-                          tool_registry=registry, model_registry=setup_gemma_model_registry(), limits=limits,
+                          tool_registry=registry, model_registry=_registry_for('gemma-4-31b-it-qat-w4a16-ct'), limits=limits,
                           generation_constraints=gen)
 
 async def canonical(agent):
@@ -570,7 +577,11 @@ def test_generation_configs():
         assert g["max_output_tokens"] == max_out, a["name"]
         assert g["thinking_config"]["include_thoughts"] is False, a["name"]
         args = a["additional_args"]
-        assert args["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False, a["name"]
+        # 2026-10-09 scorer (adk_submission 0.2.13): the merged default thinking_budget 4096 turns thinking ON before
+        # include_thoughts is read (docs/a6000/V7C_FAILURE_ANALYSIS.md section 8); the old resolver honoured include_thoughts.
+        import importlib.util as _iu; _sp = _iu.spec_from_file_location("swe_compat", ROOT / "scripts" / "swe_compat.py"); _sc = _iu.module_from_spec(_sp); _sp.loader.exec_module(_sc)
+        expected_on = not _sc.stack()["old_helpers"]
+        assert args["extra_body"]["chat_template_kwargs"]["enable_thinking"] is expected_on, (a["name"], args)
         assert "reasoning_effort" not in args and "seed" not in g, a["name"]
 
 

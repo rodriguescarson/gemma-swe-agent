@@ -152,3 +152,54 @@ Checked in the installed scorer stack (adk_eval_core 0.1.0, adk_submission 0.2.1
    paired vs v4h2/v7/v7c -> public 74), pre-registered as GATE addendum 13; the re-measure above after (a).
 2. The Kaggle queue (v7c -> v5h2 -> v11b probe) is unchanged; v7d replaces v7c in it only on Carson's call after (a).
 3. Step 3 (test-file search through locate.py) next, test-first, in its own bundle directory.
+
+## 8. 2026-10-10: the scorer moved under us on 2026-10-09 (wheelhouse swegemma 0.2.11 + adk_submission 0.2.13)
+
+Found when the three Saturday Kaggle kernels (v7c on g4-eval-v2-smoke, v5h2 on g4-eval74-v4, the v11b probe on g4-eval74-v2)
+all died two minutes in, at 06:28, 07:27 and 07:34 IST, on `ModuleNotFoundError: No module named 'swegemma.models.discovery'`
+(eval/overnight/progress.log, the kernel logs). No GPU time was spent. The wheelhouse dataset was republished at 2026-10-09
+14:43 UTC: adk_submission 0.2.12 -> 0.2.13, swegemma 0.2.7 -> 0.2.11 (the only two wheels whose sha changed against the
+2026-10-04 listing). Checked by unpacking both wheels, not from the forum.
+
+**What broke, and the fix (commit after this one).** swegemma 0.2.11 deleted `swegemma/models/discovery.py`
+(`validate_single_declared_model`) and `swegemma/models/registry.py` (`setup_gemma_model_registry`). Our kernel template
+(scripts/make_eval_kernel.py), scripts/validate.py, scripts/a6000/run_eval.py and four bundle tests imported them; so does
+the organisers' Getting Started notebook (last run 2026-10-01), which would fail the same way today. `scripts/swe_compat.py`
+now gives `declared_model()` (the old helper, else `adk_submission.discovery.discover_declared_models` with the one-model
+check) and `compile_only_model_registry()` (the old helper, else a ModelRegistry of LiteLlm clients for the declared name);
+the kernel template inlines the same two fallbacks (tests/test_swe_compat.py keeps them in step). The Mac venv now carries
+the new wheels (uv pip install of the two wheelhouse files); all nine local kernel dirs were regenerated and differ from the
+previous notebooks only in the two template cells.
+
+**What changed in the scorer, read from the new code.**
+1. **Thinking is ON for every bundle that turned it off the old way.** The organisers' generation constraints
+   (`swegemma.config.build_submission_limits`, unchanged since 0.2.7) merge a default `thinking_config: {thinking_budget: 4096}`
+   into every bundle. adk_submission 0.2.12's resolver read `include_thoughts: false` as enable_thinking False and ignored the
+   budget; 0.2.13's `apply_thinking_config_to_model` reads a positive budget as enable_thinking True BEFORE it looks at
+   include_thoughts. Compiling v7d on the new stack: every stage gets `chat_template_kwargs.enable_thinking: True,
+   thinking_token_budget: 4096`. The same release lowered the schema floor to `thinking_budget >= 0` ("0 disables thinking").
+   So every one of our bundles (v4h2, v5h2, v7c, v7d, the adapter bundles; all `include_thoughts: false`) now thinks on the
+   scorer, with up to 4,096 reasoning tokens per call, inside the same 5-minute cap. This holds for every submission scored
+   since 2026-10-09 and for every competitor who relied on include_thoughts. **Fix: `thinking_budget: 0`** in the sampling
+   yaml (`scripts/make_t0.py SRC DST` makes the copy, one line added; tests/test_make_t0.py shows the untouched source
+   compiles to thinking on and the copy to off). `thinking_level: none` also turns it off but is not a google.genai
+   ThinkingLevel value (a warning today). The old compiler (the A6000 box's venv) refuses a 0 budget (schema `>= 1`), so
+   a -t0 bundle runs only on the new stack; its behaviour on the old stack is the twin's (thinking was already off there),
+   so the box's screens of v7c/v7d stand for v7c-t0/v7d-t0. Bundles made: v7c-t0, v5h2-t0, v4h2g_v11b_probe-t0, v7d-t0.
+2. **Undeclared or failing tool calls no longer kill the task** (`swegemma.harness.agent_runner.ToolErrorPlugin`: the error
+   comes back as a tool response). Our "unknown tool -> patch discarded" class (R61, the "helpers are never tool names"
+   sentences) is defused on the scorer; the sentences stay, they cost nothing.
+3. **submit_patch strips test and runner-config files from the diff itself** (`strip_protected_files_from_patch` with the
+   task's test files), so "Failed to apply test_patch" and our check.py revert are belt and braces now.
+4. **Tool results are dicts, not JSON strings** (`parse_tool_response` in tools/execution.py and tools/workspace.py; JSON
+   with ensure_ascii=False): the double-encoding of 09-27 finding 4 is gone; read_file coerces string line numbers.
+5. vLLM server: `max_loras` default 8 -> 1, `max_lora_rank` inferred from the adapter (rounded up), `anthropic` wheel added.
+   P3 trajectories captured on the box (old stack) differ from scorer-side tool-result shapes; a note for the SFT work.
+
+**Today's plan, changed.** The Saturday queue re-runs as v7c-t0 -> v5h2-t0 -> v11b-probe-t0 on the same three slugs
+(kernels g4-l4-v7c-t0-p312, g4-l4-v5h2-t0-p312, g4-l4-v11b-probe-t0-p312; recipes identical to the twins', only the bundle
+payload differs). Without -t0 the runs would have measured thinking-on bundles and spent the week's GPU quota on an
+unintended configuration. The next Kaggle submission must be a -t0 bundle for the same reason. The box's venv moves to the
+new wheels only after its v7d run ends (its race containers pip-install harness/wheels on every task, so the repo's wheel
+mirror cannot change while it runs); that is the P10 prompt. v7d-t0 is ready and has no kernel; whether it joins the queue
+is Carson's call under the addendum 13 rule.

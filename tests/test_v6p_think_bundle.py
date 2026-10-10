@@ -47,11 +47,11 @@ def _enable_thinking(bundle):
     from unittest.mock import MagicMock
     from adk_submission import compile_submission, discover_adapters
     from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS, build_submission_limits
-    from swegemma.models import setup_gemma_model_registry
+    import sys; sys.path.insert(0, str(ROOT / "scripts")); from swe_compat import compile_only_model_registry, declared_model   # both scorer stacks
     from swegemma.tools import create_tools
     limits, gen = build_submission_limits()
     root = compile_submission(submission_dir=str(bundle), adapter_manifest=discover_adapters(str(bundle), ALLOWED_ADAPTER_EXTENSIONS),
-                              tool_registry=create_tools(MagicMock()), model_registry=setup_gemma_model_registry(),
+                              tool_registry=create_tools(MagicMock()), model_registry=compile_only_model_registry(declared_model(str(bundle))),
                               limits=limits, generation_constraints=gen)
     out, stack = {}, [root]
     while stack:
@@ -70,7 +70,11 @@ def test_compiled_requests_enable_thinking_on_every_llm_stage_and_off_in_v6p():
     stages = {"setup", "locator", "fixer_a", "fixer_b", "fixer_c", "selector", "verifier"}
     assert set(on) == set(off) == stages
     assert all(v == (True, None) for v in on.values()), on                # thinking on, no reasoning_effort level
-    assert all(v == (False, None) for v in off.values()), off
+    import importlib.util as _iu; _sp = _iu.spec_from_file_location("swe_compat", ROOT / "scripts" / "swe_compat.py"); _sc = _iu.module_from_spec(_sp); _sp.loader.exec_module(_sc)
+    if _sc.stack()["old_helpers"]:                                        # adk_submission <= 0.2.12: include_thoughts false = thinking off
+        assert all(v == (False, None) for v in off.values()), off
+    else:                                                                 # 0.2.13 (the 2026-10-09 scorer): the merged default budget 4096 turns it ON;
+        assert all(v == (True, None) for v in off.values()), off           # only thinking_budget: 0 turns it off (scripts/make_t0.py, analysis section 8)
 
 
 def test_validate_py_compiles_the_twin():

@@ -50,11 +50,11 @@ def _compile(b):
     from unittest.mock import MagicMock
     from adk_submission import compile_submission, discover_adapters
     from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS, build_submission_limits
-    from swegemma.models import setup_gemma_model_registry
+    import sys; sys.path.insert(0, str(ROOT / "scripts")); from swe_compat import compile_only_model_registry, declared_model   # both scorer stacks
     from swegemma.tools import create_tools
     limits, gen = build_submission_limits()
     return compile_submission(submission_dir=str(b), adapter_manifest=discover_adapters(str(b), ALLOWED_ADAPTER_EXTENSIONS),
-                              tool_registry=create_tools(MagicMock()), model_registry=setup_gemma_model_registry(), limits=limits, generation_constraints=gen)
+                              tool_registry=create_tools(MagicMock()), model_registry=compile_only_model_registry(declared_model(str(b))), limits=limits, generation_constraints=gen)
 
 
 # ------------------------------------------------------------------------------------------------ the shares

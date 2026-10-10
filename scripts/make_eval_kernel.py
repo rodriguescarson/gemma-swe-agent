@@ -211,9 +211,16 @@ CELL_VLLM = r'''
 import litellm, torch
 from adk_submission import VllmConfig, VllmServer, discover_adapters
 from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS
-from swegemma.models.discovery import validate_single_declared_model
+try:   # swegemma <= 0.2.7 had the helper (scripts/swe_compat.py keeps this block and the kernel's in step)
+    from swegemma.models.discovery import validate_single_declared_model as _declared_one
+except ImportError:   # the 2026-10-09 wheelhouse: swegemma 0.2.11 deleted it; adk_submission 0.2.13 discovers the declared models
+    from adk_submission.discovery import discover_declared_models
+    def _declared_one(d):
+        found = sorted(discover_declared_models(str(d)))
+        assert len(found) == 1, found
+        return found[0]
 litellm.drop_params = True
-declared = validate_single_declared_model(AGENT_DIR)
+declared = _declared_one(AGENT_DIR)
 adapters = discover_adapters(str(AGENT_DIR), adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS)
 models = None
 if not ORACLE:
@@ -235,7 +242,16 @@ from google.adk.apps._configs import EventsCompactionConfig
 from adk_eval_core.tracing import SessionTrace
 from swegemma.config import EvalConfig, build_submission_limits
 from swegemma.evaluate import Evaluator
-from swegemma.models import setup_gemma_model_registry
+try:   # swegemma <= 0.2.7 (scripts/swe_compat.py keeps this block and the kernel's in step)
+    from swegemma.models import setup_gemma_model_registry as _fallback_registry
+except ImportError:   # swegemma 0.2.11: no server-less registry helper; the oracle/CPU path needs one that resolves the declared name
+    from adk_submission import ModelRegistry
+    from google.adk.models.lite_llm import LiteLlm
+    def _fallback_registry():
+        r = ModelRegistry(); base = declared.split('/')[-1]
+        for n in dict.fromkeys([declared, base, 'openai/' + base]):
+            r.register(n, LiteLlm(model='openai/' + base, api_base='http://127.0.0.1:8000/v1', api_key='EMPTY', num_retries=5))
+        return r
 def run_sync(fn):
     try: loop = asyncio.get_running_loop()
     except RuntimeError: loop = None
@@ -244,7 +260,7 @@ def run_sync(fn):
     return asyncio.run(fn())
 limits, gen = build_submission_limits()
 ec = EvalConfig(tasks_path=DATA_DIR / 'tasks.jsonl', snapshots_dir=DATA_DIR / 'snapshots', results_dir=W / 'results',
-    submission_dir=AGENT_DIR, models=models or setup_gemma_model_registry(), sandbox='subprocess', limits=limits,
+    submission_dir=AGENT_DIR, models=models or _fallback_registry(), sandbox='subprocess', limits=limits,
     generation_constraints=gen, adapter_manifest=adapters,
     context_cache_config=ContextCacheConfig(min_tokens=@MIN_TOKENS@, ttl_seconds=@TTL@, cache_intervals=@CACHE_INTERVALS@),
     events_compaction_config=EventsCompactionConfig(compaction_interval=@INTERVAL@, overlap_size=@OVERLAP@, token_threshold=@THRESHOLD@, event_retention_size=@RETENTION@),

@@ -60,7 +60,7 @@ def main(argv=None):
     from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS, EvalConfig, build_submission_limits
     from swegemma.evaluate import Evaluator
     from swegemma.models import load_tasks
-    from swegemma.models.discovery import validate_single_declared_model
+    from swe_compat import declared_model as validate_single_declared_model   # both scorer stacks (scripts/swe_compat.py)
     litellm.drop_params = True
     bundle, out_dir = Path(a.bundle).resolve(), Path(a.out).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -161,7 +161,7 @@ def test_the_kernel_slug_is_free_existing_and_was_made_under_the_312_image():
     if kernels.is_dir():
         users = {p.parent.name for p in kernels.glob("*/kernel-metadata.json")
                  if json.loads(p.read_text()).get("id") == "carsonrodrigues/" + KERNEL_SLUG}
-        assert users <= {KERNEL_SLUG, KERNEL_DIR}, users
+        assert users <= {KERNEL_SLUG, KERNEL_DIR, "g4-l4-v7c-t0-p312"}, users   # 2026-10-10: v7c-t0 (thinking off on the new scorer) runs as the same slug
     if (kernels / KERNEL_DIR).is_dir():                                 # the Mac that generates the kernels: the taken
         for slug in TAKEN:                                              # slugs are what its kernel dirs say
             assert any(json.loads(p.read_text()).get("id") == "carsonrodrigues/" + slug for p in kernels.glob("*/kernel-metadata.json")), slug
