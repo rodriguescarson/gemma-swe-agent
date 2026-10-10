@@ -1,7 +1,8 @@
 """LoRA SFT of Gemma 4 31B (QAT bf16 weights, same June lineage as the served W4A16 checkpoint) on harness-format trajectories.
 Loss only on assistant turns (tool outputs, system and user masked). Model split across all visible GPUs (device_map=auto).
 Usage: python sft.py --data file.jsonl --out /root/train_out/run1 [--limit 50] [--epochs 1] [--rank 16] [--max_len 16384]"""
-import argparse, json, math, os, random, time
+import argparse, json, math, os, random, time, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import LoraConfig, get_peft_model
@@ -23,27 +24,7 @@ def render(messages, tools, add_gen=False):
 
 MODEL_OPEN, TURN_CLOSE, TR_OPEN, TR_CLOSE = "<|turn>model\n", "<turn|>", "<|tool_response>", "<tool_response|>"
 
-def supervised_char_spans(text):
-    """Char spans the model itself produced: inside each model turn, minus inline tool-response blocks.
-    Gemma 4 merges consecutive assistant messages into one model turn and renders tool results inline, so
-    prefix-diff masking fails; span masking on the final rendering does not."""
-    spans, pos = [], 0
-    while True:
-        s = text.find(MODEL_OPEN, pos)
-        if s < 0: break
-        s += len(MODEL_OPEN)
-        e = text.find(TURN_CLOSE, s)
-        e = len(text) if e < 0 else e + len(TURN_CLOSE)       # train on the turn-close token too (the model must stop)
-        cur = s
-        while True:
-            t = text.find(TR_OPEN, cur, e)
-            if t < 0: spans.append((cur, e)); break
-            spans.append((cur, t + len(TR_OPEN)))              # the model emits <|tool_response> to hand over, then waits
-            c = text.find(TR_CLOSE, t, e)
-            if c < 0: break
-            cur = c + len(TR_CLOSE)
-        pos = e
-    return [(a, b) for a, b in spans if b > a]
+from train.spans import supervised_char_spans  # noqa: E402  (moved 2026-10-11; tests/test_sft_masking.py)
 
 def encode(ex):
     full = tok.apply_chat_template(ex["messages"], tools=ex["tools"], tokenize=False)

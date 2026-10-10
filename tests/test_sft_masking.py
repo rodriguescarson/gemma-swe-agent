@@ -1,12 +1,12 @@
 """Span masking for Gemma 4's chat format: prefix-diff masking supervised only 0.6% of tokens because the template merges
 assistant messages into one model turn and inlines tool responses."""
-import ast, pathlib
+import ast, json, pathlib, random, re
 src = (pathlib.Path(__file__).parent.parent / "train/sft.py").read_text()
-mod = ast.parse(src); ns = {}
-for node in mod.body:
-    if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "MODEL_OPEN" for t in getattr(node.targets[0], "elts", [])) or \
-       isinstance(node, ast.FunctionDef) and node.name == "supervised_char_spans":
-        exec(compile(ast.Module([node], []), "sft", "exec"), ns)
+spans_src = (pathlib.Path(__file__).parent.parent / "train/spans.py").read_text()   # the span code moved here on 2026-10-11
+mod = ast.parse(spans_src); ns = {"re": re, "json": json, "random": random}
+for node in mod.body:                                   # every constant line plus the function, nothing else imported
+    if isinstance(node, ast.Assign) or isinstance(node, ast.FunctionDef) and node.name == "supervised_char_spans":
+        exec(compile(ast.Module([node], []), "spans", "exec"), ns)
 spans_of = ns["supervised_char_spans"]
 
 def picked(text): return "".join(text[a:b] for a, b in spans_of(text))
