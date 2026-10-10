@@ -348,3 +348,5 @@ not run (no capture)
 - 2026-10-10T09:03:03Z | step=v7d_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=0
 - 2026-10-10T09:03:03Z | step=v7d_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v7d rc=0
 - 2026-10-10T09:03:07Z | step=v7d_p4 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-10T09:03:40Z | step=v7d_p3 | EVENT started pid 24429 (restarts so far 0; hard stop in 19.3 h)
+- 2026-10-10T10:03:42Z | step=v7d_p3 | done=38/844 | solved=10 | empty=1 | errors=0 | median_s=149.6 | cap=6 | gpu=100% | disk_free=889GB | restarts=0
