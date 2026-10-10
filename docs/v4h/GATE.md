@@ -1089,3 +1089,24 @@ DROP: solved 25 < 37; net -9 < +3`
 
 #### P3
 not run (no capture)
+
+### P2 addendum 13 (P9, the v7d screen; written 2026-10-10 04:00 UTC, before any v7d run; v7d = submissions/v7d, bundle commit 428f3a0 "v7d fix 1" (branch head 8fce792 at pull time), tests 175 passed (tests/test_v7d_*.py + test_a6000_p8_plan.py + test_a6000_v7_counters.py, 2026-10-10 04:00 UTC), scripts/validate.py submissions/v7d OK)
+Copied from docs/GAPS_2026-10-06.md "v7d pre-registration" (Mac, 2026-10-09 00:30 IST). v7d = v7c with view.py never refusing a read: an identical re-read of an unchanged range prints its lines again under one
+first-line SHOWN AGAIN note; the 3rd identical re-read in a row still gets the outline; _ws.py's code, the locate cap (3), every other helper, the prompts (but the two spans that promised a refusal) and the yamls are v7c's.
+Server, supervisor, GPU guard, hourly health lines and hourly backups unchanged from P8; hard stop = supervisor launch + 24 h (AUTOPILOT_HARD_STOP_H=24); plan from scripts/a6000/p8_plan.py --arm v7d (steps probe_v7d, v7d_s50, v7d_p4, v7d_p3; output dirs p4_v7d and p3_v7d).
+**Probe:** v7d arm-pure on the last 4 ids of s200_valid_ids.txt at T = 2, C = 2, the same pacing rule (scale = 1 / S when S > 1.15, else 1.0; fallback 1.0); judged by the counters only, never part of a table.
+**(a) v7d on the 50 stage-1a ids,** 1 sample, C = 2, paired against the v4h2, v7 AND v7c rows on the same ids (same box and settings, different days: a confound). Readings as addendum 12: wins - losses with the exact two-sided sign test and
+Wilson 95% CIs; BETTER net >= +5 and sign p < 0.10; WORSE net <= -5 and p < 0.10; UNRESOLVED when v7d's cap-hit share is >= 10 points above the comparator's and the verdict is not BETTER; otherwise NO EVIDENCE.
+**(b) v7d on the public 74,** sequential (T = 1), pace proxy on, the bundle's own budgets, scripts/keep_rule.py against eval/kaggle/g4-l4-v4h2g-p312/results.jsonl (KEEP = solved >= 37 and paired net >= +3; an A6000 screen, never a Kaggle result),
+helper gate <= 1 can't-open task. References on this box: v7c 25/74 (net -9), v7 27/74 (net -7), v5h2 29/74 (net -5).
+**Counters** (scripts/a6000/v7_counters.py), on (a) and (b): must be 0: view_usage_calls, literal_wrapper_commands, write_file_path_refusals, forced_install_empty_args; reported, not gated: cap_refusals, repeat_outlines, repeat_reads (new),
+loops_ge5, budget_exhausted_tasks. A non-zero must-be-zero counter is reported with three examples (task, call, reply); it does not stop the run. (v7c on (a) failed two of them: view_usage_calls 4, literal_wrapper_commands 2.)
+**Re-measure after (a)** (docs/a6000/v7c_analysis/cross_stage_refusals.py on the v7d items, and aggregate_failures.py): bare refusals (ALREADY SHOWN) 0 of N (by construction, a check that the right bundle ran); the items whose first fixer view was a
+re-read, solved vs the rest. Baseline measured here on the box before any v7d item (2026-10-10): v7c 50 items, 20 solved, bare refusals 231 (locator 55, fixer 176), first-fixer-view re-read 11 -> 1 solved against 39 -> 19 for the rest, fixer re-reads identical
+to a locator call 59; v7 50 items, 19 solved, refusals 81, 7 -> 1 against 43 -> 18. aggregate_failures.py on v7c: loop items 11 of 50, identical-repeat calls 422 of 1764 (23.9 %), all run_command, 4096-token completions 0. The numbers to move: the
+first-fixer-view solve rate toward the rest, the repeat share, the loop items.
+**Decision rule for the Kaggle queue, stated now:** v7d replaces v7c in the queue only if (a) is BETTER or NO EVIDENCE with the first-fixer-view items solving at least as often as the rest and repeat_reads loops (loops_ge5 on view.py) not above v7c's;
+WORSE or a new loop class keeps v7c. The decision itself is Carson's.
+**(c) P3 with v7d,** one pass over data/heldout1k/p3_ids.txt (844 ids), only if (a) is not WORSE; successes only, output in runs/p3_v7d, rows through build_sft + rebalance + validate, pairs where a task has both outcomes. If (a) is WORSE the plan still lists v7d_p3
+and the owner removes that step before launch or stops after (b).
+Order: probe -> (a) -> re-measure -> (b) -> (c); each step's table, counters, verdict and commit hash are reported when it ends.
