@@ -1,0 +1,169 @@
+diff --git a/boltons/iterutils.py b/boltons/iterutils.py
+index f0590d4..09b81eb 100644
+--- a/boltons/iterutils.py
++++ b/boltons/iterutils.py
+@@ -526,10 +526,11 @@ def xfrange(stop, start=None, step=1.0):
+     else:
+         # swap when all args are used
+         stop, start = start * 1.0, stop * 1.0
+-    cur = start
+-    while cur < stop:
+-        yield cur
+-        cur += step
++    count = int((stop - start) / step)
++    if (stop - start) % step != 0:
++        count += 1
++    for i in range(count):
++        yield start + i * step
+ 
+ 
+ def frange(stop, start=None, step=1.0):
+diff --git a/boltons/jsonutils.py b/boltons/jsonutils.py
+index bf61b03..9a6a0ff 100644
+--- a/boltons/jsonutils.py
++++ b/boltons/jsonutils.py
+@@ -156,7 +156,7 @@ class JSONLIterator:
+             raise ValueError("'rel_seek' expected a float between"
+                              " -1.0 and 1.0, not %r" % rel_seek)
+         elif rel_seek < 0:
+-            rel_seek = 1.0 - rel_seek
++            rel_seek = 1.0 + rel_seek
+         self._rel_seek = rel_seek
+         self._blocksize = 4096
+         if rel_seek is not None:
+@@ -181,10 +181,16 @@ class JSONLIterator:
+         while '\n' not in cur:
+             cur = fo.read(bsize)
+             total_read += bsize
++            if not cur:
++                # Seeked past EOF
++                fo.seek(cur_pos)
++                return
+         try:
+             newline_offset = cur.index('\n') + total_read - bsize
+         except ValueError:
+-            raise  # TODO: seek to end?
++            # This should be handled by the 'if not cur' check
++            fo.seek(cur_pos)
++            return
+         fo.seek(cur_pos + newline_offset)
+ 
+     def _init_rel_seek(self):
+diff --git a/boltons/strutils.py b/boltons/strutils.py
+index 66bfc92..fd46780 100644
+--- a/boltons/strutils.py
++++ b/boltons/strutils.py
+@@ -1221,6 +1221,8 @@ class MultiReplace:
+ 
+     def _get_value(self, match):
+         """Given a match object find replacement value."""
++        if match.lastgroup is None:
++            return match.group(0)
+         return self.group_map[match.lastgroup]
+ 
+     def sub(self, text):
+diff --git a/boltons/tableutils.py b/boltons/tableutils.py
+index 899ee98..3fbf312 100644
+--- a/boltons/tableutils.py
++++ b/boltons/tableutils.py
+@@ -563,21 +563,31 @@ class Table:
+             with_headers (bool): Whether to include a header row at the top.
+             maxlen (int): Max length of data in each cell.
+         """
+-        lines = []
+-        widths = []
+-        headers = list(self.headers)
++        if not self._data or not any(self._data):
++            return ''
++
+         text_data = [[to_text(cell, maxlen=maxlen) for cell in row]
+                      for row in self._data]
++        widths = []
+         for idx in range(self._width):
+-            cur_widths = [len(row[idx]) for row in text_data]
+-            if with_headers:
+-                cur_widths.append(len(to_text(headers[idx], maxlen=maxlen)))
+-            widths.append(max(cur_widths))
+-        if with_headers:
+-            lines.append(' | '.join([h.center(widths[i])
+-                                     for i, h in enumerate(headers)]))
+-            lines.append('-|-'.join(['-' * w for w in widths]))
++            cur_widths = [len(row[idx]) for row in text_data if idx < len(row)]
++            if with_headers and self.headers:
++                if idx < len(self.headers):
++                    cur_widths.append(len(to_text(self.headers[idx], maxlen=maxlen)))
++            widths.append(max(cur_widths) if cur_widths else 0)
++
++        lines = []
++        if with_headers and self.headers:
++            header_row = [to_text(h, maxlen=maxlen) for h in self.headers]
++            # Only render header row if there's at least one header
++            if any(header_row):
++                lines.append(' | '.join([h.center(widths[i])
++                                         for i, h in enumerate(header_row)
++                                         if i < len(widths)]))
++                lines.append('-|-'.join(['-' * w for w in widths]))
++
+         for row in text_data:
+             lines.append(' | '.join([cell.center(widths[j])
+-                                     for j, cell in enumerate(row)]))
++                                     for j, cell in enumerate(row)
++                                     if j < len(widths)]))
+         return '\n'.join(lines)
+diff --git a/boltons/timeutils.py b/boltons/timeutils.py
+index 82f201e..5abb058 100644
+--- a/boltons/timeutils.py
++++ b/boltons/timeutils.py
+@@ -117,7 +117,35 @@ def isoparse(iso_str):
+     .. _dateutil: https://pypi.python.org/pypi/python-dateutil
+ 
+     """
+-    dt_args = [int(p) for p in _NONDIGIT_RE.split(iso_str)]
++    # Split by non-digits, but keep the dot for fractional seconds.
++    # _NONDIGIT_RE is r'\D', which splits on everything that's not a digit.
++    # This means it splits on the dot too.
++    # We need to handle the case where the input has fractional seconds.
++    # Example: '2023-01-01T12:00:00.851'
++    # _NONDIGIT_RE.split('2023-01-01T12:00:00.851') -> ['2023', '01', '01', '12', '00', '00', '851']
++    # The problem is that '851' is treated as 851 microseconds, but it should be 851000.
++    
++    # Let's use a more robust way to parse the ISO string.
++    import re
++    # Find all sequences of digits, potentially with a leading dot.
++    # But the standard isoformat() is YYYY-MM-DDTHH:MM:SS.ffffff
++    # We can split by non-digits, but we need to know if the last part was fractional.
++    
++    # If we use the original logic but check if the original string had a dot:
++    parts = _NONDIGIT_RE.split(iso_str)
++    # Filter out empty strings from split
++    parts = [p for p in parts if p]
++    
++    dt_args = []
++    for i, p in enumerate(parts):
++        if i == len(parts) - 1 and '.' in iso_str:
++            # The last part is fractional seconds if there was a dot in the string.
++            # We need to normalize it to microseconds (6 digits).
++            frac_part = iso_str.split('.')[-1]
++            frac_val = frac_part[:6].ljust(6, '0')
++            dt_args.append(int(frac_val))
++        else:
++            dt_args.append(int(p))
+     return datetime(*dt_args)
+ 
+ 
+@@ -376,11 +404,14 @@ def daterange(start, stop, step=1, inclusive=False):
+ 
+     while not finished(now, stop):
+         yield now
++        prev_now = now
+         if m_step:
+             m_y_step, cur_month = divmod((now.month - 1) + m_step, 12)
+             now = now.replace(year=now.year + m_y_step,
+-                              month=(cur_month + 1))
++                                month=(cur_month + 1))
+         now = now + d_step
++        if now == prev_now:
++            raise ValueError('step must make progress toward stop')
+     return
+ 
+ 
