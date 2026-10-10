@@ -54,7 +54,8 @@ def test_rows_success_only_dedup_and_shapes(world):
     rows, stats = B.build([str(cap)], str(tasks), [str(results)])
     assert stats["rows"] == 2 and stats["duplicate"] == 1 and stats["unsolved_or_unknown"] == 1 and stats["cut_off"] == 1 and stats["empty_reply"] == 1
     first, second = rows
-    assert {k: v for k, v in first["meta"].items() if k != "traj"} == {"task": "t_ok", "stage": "fixer", "continuation": False, "tool": "read_file"}
+    assert {k: v for k, v in first["meta"].items() if k != "traj"} == {"task": "t_ok", "stage": "fixer", "continuation": False, "tool": "read_file",
+                                                                     "thinking": False, "reasoning_chars": 0}   # 2026-10-11: thinking-on rows carry both
     assert first["prompt"].startswith("<bos>") and first["prompt"].endswith(EMPTY_THOUGHT)          # generation prompt supplies the channel
     assert first["completion"].startswith("<|tool_call>call:read_file{") and first["completion"].endswith("<|tool_response>")
     assert second["meta"]["continuation"] is True and second["completion"] == EMPTY_THOUGHT + "Changed a.py.<turn|>"

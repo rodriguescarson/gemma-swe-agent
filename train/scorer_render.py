@@ -28,6 +28,7 @@ TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<|tool_call>", "<tool_call|>"
 TOOL_RESPONSE_OPEN = "<|tool_response>"          # the stop token after a tool call (recon.py: completion = call + 1)
 END_OF_TURN = "<turn|>"
 EMPTY_THOUGHT = "<|channel>thought\n<channel|>"  # the empty thought channel the model emits itself (facts 3.3)
+THOUGHT_OPEN, THOUGHT_CLOSE = "<|channel>thought\n", "<channel|>"   # the template: THOUGHT_OPEN + reasoning + "\n" + THOUGHT_CLOSE
 
 
 def to_vllm_conversation(messages):
@@ -50,6 +51,11 @@ def to_vllm_conversation(messages):
                 tc["function"]["arguments"] = json.loads(a) if a and not isinstance(a, (dict, list)) else (a or {})
                 tcs.append(tc)
             out["tool_calls"] = tcs
+        if m["role"] == "assistant":                     # vLLM mirrors reasoning_content -> reasoning; the template renders it as the
+            for k in ("reasoning_content", "reasoning"):  # thought channel for assistant turns after the last user message (2026-10-11)
+                if isinstance(m.get(k), str) and m[k]:
+                    out["reasoning_content"] = m[k]; out["reasoning"] = m[k]
+                    break
         if m["role"] == "tool" and "tool_call_id" in m:
             out["tool_call_id"] = m["tool_call_id"]
         if isinstance(m.get("name"), str):
@@ -76,11 +82,28 @@ def canonical_tool_calls(tool_calls):
     return s[s.index(TOOL_CALL_OPEN):s.rindex(TOOL_CALL_CLOSE) + len(TOOL_CALL_CLOSE)]
 
 
-def canonical_completion(message, continuation: bool):
+def thought_of(message):
+    """The reasoning the model produced for this reply (reasoning_parser gemma4 puts it in reasoning_content), or ""."""
+    for k in ("reasoning_content", "reasoning"):
+        v = message.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    return ""
+
+
+def thought_channel(text):
+    """The thought channel exactly as the template renders it from reasoning_content (and as the model emits it)."""
+    return THOUGHT_OPEN + text + "\n" + THOUGHT_CLOSE
+
+
+def canonical_completion(message, continuation: bool, thinking: bool = False):
     """What the model's raw output is for this reply (facts 3.3): the canonical re-render of its tool calls followed by
-    the <|tool_response> stop token, or its text followed by end-of-turn; continuation calls carry the empty thought
-    channel in front (94.5% of calls match this exactly on e74_v3)."""
-    head = EMPTY_THOUGHT if continuation else ""
+    the <|tool_response> stop token, or its text followed by end-of-turn. In front: the model's own thought channel
+    when it reasoned (thinking on since the 2026-10-09 scorer: `<|channel>thought\n{reasoning}\n<channel|>`), else the
+    empty thought channel on continuation calls and on thinking-on first calls (the generation prompt supplies it only
+    when thinking is off); 94.5% of thinking-off calls matched this exactly on e74_v3."""
+    reasoning = thought_of(message)
+    head = thought_channel(reasoning) if reasoning else (EMPTY_THOUGHT if (continuation or thinking) else "")
     if message.get("tool_calls"):
         return head + canonical_tool_calls(message["tool_calls"]) + TOOL_RESPONSE_OPEN
     return head + (message.get("content") or "") + END_OF_TURN

@@ -23,7 +23,7 @@ from collections import Counter
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from train.scorer_render import canonical_completion, render  # noqa: E402
+from train.scorer_render import canonical_completion, render, thought_of  # noqa: E402
 
 STAGE_MARK = 'Your internal name is "'
 
@@ -79,7 +79,7 @@ def load_results(paths):
     return out
 
 
-def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_only=True, max_prompt_chars=160000, pairs=()):
+def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_only=True, max_prompt_chars=160000, pairs=(), require_thinking=False):
     """captures share the results in results_paths; pairs = [(capture, [results...])] bind a capture to its own sample's
     results, so a solved and an unsolved sample of the same task never share a verdict."""
     idx = TaskIndex(tasks_path)
@@ -116,7 +116,12 @@ def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_
                 stats["too_long"] += 1
                 continue
             continuation = body["messages"][-1].get("role") == "tool"
-            completion = canonical_completion(msg, continuation)
+            thinking = bool((body.get("chat_template_kwargs") or {}).get("enable_thinking"))
+            reasoning = thought_of(msg)
+            if require_thinking and thinking and not reasoning:
+                stats["no_reasoning"] += 1
+                continue
+            completion = canonical_completion(msg, continuation, thinking)
             h = hashlib.sha1((prompt + "\x00" + completion).encode("utf-8", "replace")).hexdigest()
             if h in seen:
                 stats["duplicate"] += 1
@@ -124,7 +129,8 @@ def build(captures, tasks_path, results_paths, exclude_ids=frozenset(), success_
             seen.add(h)
             rows.append({"prompt": prompt, "completion": completion,
                          "meta": {"task": tid, "traj": f"{os.path.basename(cap)}|{tid}", "stage": stage_of(body), "continuation": continuation,
-                                  "tool": (msg.get("tool_calls") or [{}])[0].get("function", {}).get("name") if msg.get("tool_calls") else None}})
+                                  "tool": (msg.get("tool_calls") or [{}])[0].get("function", {}).get("name") if msg.get("tool_calls") else None,
+                                  "thinking": thinking, "reasoning_chars": len(reasoning)}})
             stats["rows"] += 1
     return rows, stats
 
@@ -139,6 +145,7 @@ def main():
     ap.add_argument("--exclude-ids", action="append", default=[])
     ap.add_argument("--all-outcomes", action="store_true", help="keep calls from unsolved tasks too")
     ap.add_argument("--max-prompt-chars", type=int, default=160000)
+    ap.add_argument("--require-thinking", action="store_true", help="thinking-on captures: drop (and count) replies with no reasoning_content")
     a = ap.parse_args()
     excl = set()
     for p in a.exclude_ids:
@@ -148,15 +155,16 @@ def main():
         ap.error("give --capture (with --results) or --pair CAPTURE=RESULTS")
     if a.capture and not a.results:
         ap.error("--capture needs --results")
-    rows, stats = build(a.capture, a.tasks, a.results, excl, not a.all_outcomes, a.max_prompt_chars, pairs)
+    rows, stats = build(a.capture, a.tasks, a.results, excl, not a.all_outcomes, a.max_prompt_chars, pairs, a.require_thinking)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
     tasks = Counter(r["meta"]["task"] for r in rows)
     stages = Counter(r["meta"]["stage"] for r in rows)
+    thought = sum(1 for r in rows if r["meta"].get("reasoning_chars"))
     print(json.dumps({"stats": dict(stats), "tasks": len(tasks), "rows_per_task": round(len(rows) / max(1, len(tasks)), 1),
-                      "stages": dict(stages)}, indent=1))
+                      "stages": dict(stages), "rows_with_thought": thought, "thinking_rows": sum(1 for r in rows if r["meta"].get("thinking"))}, indent=1))
 
 
 if __name__ == "__main__":

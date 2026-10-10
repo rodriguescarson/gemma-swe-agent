@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
+import json, re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -32,8 +32,12 @@ def tokenizer():
         return None
 
 
-def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=None):
+THOUGHT_RE = re.compile(r"<\|channel>thought\n.*?<channel\|>", re.S)   # the (possibly empty) thought channel in front of a completion
+
+
+def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=None, require_thought=False):
     problems, seen = [], set()
+    thought_rows = 0
     tasks, stages, tools, ptoks, ctoks, cont = Counter(), Counter(), Counter(), [], [], 0
     n = 0
     for i, line in enumerate(open(path)):
@@ -45,8 +49,14 @@ def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=No
             problems.append((i, "prompt does not start with <bos>"))
         if not isinstance(c, str) or not (c.endswith("<|tool_response>") or c.endswith("<turn|>")):
             problems.append((i, "completion has no terminal token"))
-        elif c.replace("<|channel>thought\n<channel|>", "").strip() in ("<|tool_response>", "<turn|>"):
+        elif THOUGHT_RE.sub("", c, count=1).strip() in ("<|tool_response>", "<turn|>"):
             problems.append((i, "empty completion"))
+        if isinstance(c, str):
+            mt = THOUGHT_RE.match(c)
+            has_thought = bool(mt) and mt.group(0) != "<|channel>thought\n<channel|>"
+            thought_rows += has_thought
+            if require_thought and not has_thought:
+                problems.append((i, "no thought channel (thinking-on rows must carry reasoning)"))
         if m.get("task") in exclude:
             problems.append((i, f"eval-set task {m.get('task')}"))
         if m.get("stage") not in STAGES:
@@ -67,7 +77,7 @@ def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=No
         problems.append((-1, f"{n} rows < min {min_rows}"))
     pct = lambda xs, q: sorted(xs)[int(q * (len(xs) - 1))] if xs else None  # noqa: E731
     report = {"rows": n, "tasks": len(tasks), "rows_per_task": round(n / max(1, len(tasks)), 1), "stages": dict(stages),
-              "tools": dict(tools.most_common(12)), "continuation_rows": cont,
+              "tools": dict(tools.most_common(12)), "continuation_rows": cont, "rows_with_thought": thought_rows,
               "prompt_tokens_p50_p90_max": [pct(ptoks, .5), pct(ptoks, .9), max(ptoks) if ptoks else None],
               "completion_tokens_p50_p90_max": [pct(ctoks, .5), pct(ctoks, .9), max(ctoks) if ctoks else None],
               "problems": len(problems), "first_problems": problems[:20], "ok": not problems}
@@ -79,11 +89,12 @@ def main():
     ap.add_argument("rows"); ap.add_argument("--exclude-ids", action="append", default=[])
     ap.add_argument("--min-rows", type=int, default=10000); ap.add_argument("--max-tokens", type=int, default=30000)
     ap.add_argument("--report", default=None); ap.add_argument("--no-tokenizer", action="store_true")
+    ap.add_argument("--require-thought", action="store_true", help="every completion must carry a non-empty thought channel (thinking-on data)")
     a = ap.parse_args()
     excl = set()
     for p in a.exclude_ids:
         excl |= {l.strip() for l in open(p) if l.strip()}
-    rep = validate(a.rows, excl, a.min_rows, a.max_tokens, None if a.no_tokenizer else tokenizer())
+    rep = validate(a.rows, excl, a.min_rows, a.max_tokens, None if a.no_tokenizer else tokenizer(), a.require_thought)
     print(json.dumps(rep, indent=1))
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True); json.dump(rep, open(a.report, "w"), indent=1)
