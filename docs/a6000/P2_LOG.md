@@ -332,3 +332,6 @@ not run (no capture)
 - 2026-10-10T04:37:03Z | step=v7d_s50 | EVENT started pid 5799 (restarts so far 0; hard stop in 23.8 h)
 - 2026-10-10T05:37:05Z | step=v7d_s50 | done=40/50 | solved=15 | empty=1 | errors=0 | median_s=142.1 | cap=2 | gpu=100% | disk_free=900GB | restarts=0
 - 2026-10-10T05:54:39Z | step=v7d_s50 | END done: done=50/50 solved=19
+- 2026-10-10T05:54:41Z | step=v7d_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-10T05:54:42Z | step=v7d_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-10T05:54:46Z | step=v7d_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0

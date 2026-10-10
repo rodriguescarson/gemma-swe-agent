@@ -1110,3 +1110,36 @@ WORSE or a new loop class keeps v7c. The decision itself is Carson's.
 **(c) P3 with v7d,** one pass over data/heldout1k/p3_ids.txt (844 ids), only if (a) is not WORSE; successes only, output in runs/p3_v7d, rows through build_sft + rebalance + validate, pairs where a task has both outcomes. If (a) is WORSE the plan still lists v7d_p3
 and the owner removes that step before launch or stops after (b).
 Order: probe -> (a) -> re-measure -> (b) -> (c); each step's table, counters, verdict and commit hash are reported when it ends.
+
+### P2 v7d on the stage-1a ids (vs v4h2, v7, v7c stage 1a) RESULT (2026-10-10 05:54 UTC)
+##### all items
+**v7d on the stage-1a ids (vs v4h2, v7, v7c stage 1a): 50 ids, arms v4h2, v7, v7c, v7d; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7 | 50 | 19 | 0.259-0.518 | 10 | 0 | 1 | 167 | 18 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v7 vs v4h2 | 50 | 5 | 2 | 0.453 | -0.04 | NO EVIDENCE | 46 (5/2) |
+| v7c vs v4h2 | 50 | 6 | 2 | 0.289 | -0.06 | NO EVIDENCE | 47 (6/2) |
+| v7d vs v4h2 | 50 | 5 | 2 | 0.453 | +0.00 | NO EVIDENCE | 44 (4/2) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**v7d on the stage-1a ids (vs v4h2, v7, v7c stage 1a) without contended items: 50 ids, arms v4h2, v7, v7c, v7d; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7 | 50 | 19 | 0.259-0.518 | 10 | 0 | 1 | 167 | 18 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v7 vs v4h2 | 50 | 5 | 2 | 0.453 | -0.04 | NO EVIDENCE | 46 (5/2) |
+| v7c vs v4h2 | 50 | 6 | 2 | 0.289 | -0.06 | NO EVIDENCE | 47 (6/2) |
+| v7d vs v4h2 | 50 | 5 | 2 | 0.453 | +0.00 | NO EVIDENCE | 44 (4/2) |
