@@ -517,3 +517,4 @@ not run (no capture)
 - 2026-10-11T17:55:47Z | step=p3_think | done=152/844 | solved=43 | empty=37 | errors=0 | median_s=308.2 | cap=84 | gpu=100% | disk_free=888GB | restarts=0
 - 2026-10-11T18:55:52Z | step=p3_think | done=180/844 | solved=60 | empty=40 | errors=0 | median_s=308.2 | cap=94 | gpu=100% | disk_free=888GB | restarts=0
 - 2026-10-11T19:55:57Z | step=p3_think | done=209/844 | solved=74 | empty=46 | errors=0 | median_s=308.1 | cap=108 | gpu=100% | disk_free=888GB | restarts=0
+- 2026-10-11T20:56:02Z | step=p3_think | done=232/844 | solved=80 | empty=54 | errors=0 | median_s=308.2 | cap=125 | gpu=100% | disk_free=887GB | restarts=0
