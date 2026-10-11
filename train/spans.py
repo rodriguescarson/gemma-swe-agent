@@ -68,7 +68,7 @@ def describe_span(text, a, b):
 def weight_spans(text, spans, read_share=READ_SHARE, seed=1, read_tool="read_file"):
     """-> ([(a, b, w), ...], report) applying the rules above to the spans of one sequence."""
     info = [describe_span(text, a, b) for a, b in spans]
-    seen, w, rep = set(), [], {"text": 0, "tool": 0, "repeat": 0, "error": 0, "read_over_share": 0, "thought": 0}
+    seen, w, rep = set(), [], {"text": 0, "tool": 0, "repeat": 0, "error": 0, "read_over_share": 0, "thought": 0, "thought_masked": 0}
     for d in info:
         rep[d["kind"]] += 1
         rep["thought"] += d["thought"]
@@ -93,6 +93,7 @@ def weight_spans(text, spans, read_share=READ_SHARE, seed=1, read_tool="read_fil
         for i in drop:
             w[i] = 0.0
         rep["read_over_share"] = len(drop)
+    rep["thought_masked"] = sum(1 for i, d in enumerate(info) if d["thought"] and w[i] == 0)   # a masked call span masks its thought too (reported)
     return [(a, b, w[i]) for i, (a, b) in enumerate(spans)], rep
 
 

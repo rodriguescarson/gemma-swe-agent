@@ -35,7 +35,7 @@ def tokenizer():
 THOUGHT_RE = re.compile(r"<\|channel>thought\n.*?<channel\|>", re.S)   # the (possibly empty) thought channel in front of a completion
 
 
-def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=None, require_thought=False):
+def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=None, require_thought=False, min_thought_share=0.0):
     problems, seen = [], set()
     thought_rows = 0
     tasks, stages, tools, ptoks, ctoks, cont = Counter(), Counter(), Counter(), [], [], 0
@@ -75,23 +75,28 @@ def validate(path, exclude=frozenset(), min_rows=10000, max_tokens=30000, tok=No
         tasks[m.get("task")] += 1; stages[m.get("stage")] += 1; tools[m.get("tool")] += 1; cont += bool(m.get("continuation"))
     if n < min_rows:
         problems.append((-1, f"{n} rows < min {min_rows}"))
+    thought_share = round(thought_rows / n, 4) if n else 0.0
+    if min_thought_share and thought_share < min_thought_share:
+        problems.append((-1, f"thought share {thought_share} < min {min_thought_share} (rows with a non-empty thought channel / rows)"))
     pct = lambda xs, q: sorted(xs)[int(q * (len(xs) - 1))] if xs else None  # noqa: E731
     report = {"rows": n, "tasks": len(tasks), "rows_per_task": round(n / max(1, len(tasks)), 1), "stages": dict(stages),
-              "tools": dict(tools.most_common(12)), "continuation_rows": cont, "rows_with_thought": thought_rows,
+              "tools": dict(tools.most_common(12)), "continuation_rows": cont, "rows_with_thought": thought_rows, "thought_share": thought_share,
               "prompt_tokens_p50_p90_max": [pct(ptoks, .5), pct(ptoks, .9), max(ptoks) if ptoks else None],
               "completion_tokens_p50_p90_max": [pct(ctoks, .5), pct(ctoks, .9), max(ctoks) if ctoks else None],
               "problems": len(problems), "first_problems": problems[:20], "ok": not problems}
     return report
 
 
-def validate_stitched(path, exclude=frozenset(), max_tokens=14336, tok=None, require_thought=False, min_seqs=1):
+def validate_stitched(path, exclude=frozenset(), max_tokens=14336, tok=None, require_thought=False, min_seqs=1, min_thought_share=0.0):
     """Stitched sequences (train/stitch_rows.py): {"text", "spans": [[a, b, w]], "meta"}. Checks: <bos> start, the spans are exactly the
     model spans of the text (train/spans.py), at least one span trained, no duplicate text, token cap, excluded tasks absent, and
-    with --require-thought at least one NON-EMPTY thought channel per sequence."""
+    with --require-thought at least one NON-EMPTY thought channel per sequence; with --min-thought-share the share of model spans that
+    start with a non-empty thought channel (the P11 gate: >= 0.8, the same bar as the capture gate (a))."""
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from train.spans import supervised_char_spans
+    from train.spans import describe_span, supervised_char_spans
     problems, seen = [], set()
     n, toks, thought_seqs, trained_chars, masked_chars, stages = 0, [], 0, 0, 0, Counter()
+    model_spans = thought_spans = 0
     for i, line in enumerate(open(path)):
         if not line.strip():
             continue
@@ -101,8 +106,10 @@ def validate_stitched(path, exclude=frozenset(), max_tokens=14336, tok=None, req
             problems.append((i, "text does not start with <bos>")); continue
         if not isinstance(sp, list) or not sp or any(len(x) != 3 for x in sp):
             problems.append((i, "spans missing or malformed")); continue
-        if [(a, b) for a, b, w in sp] != list(supervised_char_spans(t)):
+        model_sp = supervised_char_spans(t)
+        if [(a, b) for a, b, w in sp] != list(model_sp):
             problems.append((i, "spans are not the model spans of the text"))
+        model_spans += len(model_sp); thought_spans += sum(describe_span(t, a, b)["thought"] for a, b in model_sp)
         if not any(w > 0 for a, b, w in sp):
             problems.append((i, "no span with weight > 0"))
         trained_chars += sum(b - a for a, b, w in sp if w > 0); masked_chars += sum(b - a for a, b, w in sp if w == 0)
@@ -124,8 +131,12 @@ def validate_stitched(path, exclude=frozenset(), max_tokens=14336, tok=None, req
         stages[m.get("stage")] += 1
     if n < min_seqs:
         problems.append((-1, f"{n} sequences < min {min_seqs}"))
+    thought_share = round(thought_spans / model_spans, 4) if model_spans else 0.0
+    if min_thought_share and thought_share < min_thought_share:
+        problems.append((-1, f"thought share {thought_share} < min {min_thought_share} (model spans starting with a non-empty thought channel / model spans)"))
     pct = lambda xs, q: sorted(xs)[int(q * (len(xs) - 1))] if xs else None  # noqa: E731
-    return {"sequences": n, "stages": dict(stages), "sequences_with_thought": thought_seqs, "trained_chars": trained_chars, "masked_chars": masked_chars,
+    return {"sequences": n, "stages": dict(stages), "sequences_with_thought": thought_seqs,
+            "model_spans": model_spans, "thought_spans": thought_spans, "thought_share": thought_share, "trained_chars": trained_chars, "masked_chars": masked_chars,
             "tokens_p50_p90_max": [pct(toks, .5), pct(toks, .9), max(toks) if toks else None], "tokens_total": sum(toks),
             "problems": len(problems), "first_problems": problems[:20], "ok": not problems}
 
@@ -137,13 +148,14 @@ def main():
     ap.add_argument("--min-rows", type=int, default=10000); ap.add_argument("--max-tokens", type=int, default=30000)
     ap.add_argument("--report", default=None); ap.add_argument("--no-tokenizer", action="store_true")
     ap.add_argument("--require-thought", action="store_true", help="every completion must carry a non-empty thought channel (thinking-on data)")
+    ap.add_argument("--min-thought-share", type=float, default=0.0, help="gate: rows (or stitched model spans) with a non-empty thought channel / all, >= this (P11: 0.8)")
     a = ap.parse_args()
     excl = set()
     for p in a.exclude_ids:
         excl |= {l.strip() for l in open(p) if l.strip()}
     tok = None if a.no_tokenizer else tokenizer()
-    rep = (validate_stitched(a.rows, excl, a.max_tokens, tok, a.require_thought, a.min_rows) if a.stitched
-           else validate(a.rows, excl, a.min_rows, a.max_tokens, tok, a.require_thought))
+    rep = (validate_stitched(a.rows, excl, a.max_tokens, tok, a.require_thought, a.min_rows, a.min_thought_share) if a.stitched
+           else validate(a.rows, excl, a.min_rows, a.max_tokens, tok, a.require_thought, a.min_thought_share))
     print(json.dumps(rep, indent=1))
     if a.report:
         Path(a.report).parent.mkdir(parents=True, exist_ok=True); json.dump(rep, open(a.report, "w"), indent=1)

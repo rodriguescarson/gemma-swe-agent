@@ -124,3 +124,14 @@ def test_final_summary_lists_every_p4_run_dir(tmp_path):
         (d / "results.jsonl").write_text((ROOT / "eval" / "kaggle" / "g4-l4-v4h2g-p312" / "results.jsonl").read_text())
     text = fs.summary_text(str(tmp_path / "p2"), str(tmp_path / "p4"), str(tmp_path / "no_p3"), ids=["t0"], runs_root=str(tmp_path))
     assert text.count("P4 A6000 screen RESULT") == 2 and "v7 on the public 74" in text and "v5h2 on the public 74" in text
+
+
+def test_data_report_carries_the_thought_share_from_the_validator(tmp_path):
+    """P11 step 2 (2026-10-11): the rows gate reads rows_with_thought / rows from validate_report.json, printed in the data report."""
+    (tmp_path / "validate_report.json").write_text(json.dumps({"rows": 200, "rows_with_thought": 180, "ok": True}))
+    P = _mod("p3_build")
+    line = P.thought_line(str(tmp_path))
+    assert "180 of 200" in line and "share 0.90" in line and ">= 0.80" in line
+    assert "missing" in P.thought_line(str(tmp_path / "nowhere"))
+    (tmp_path / "validate_report.json").write_text(json.dumps({"rows": 0, "rows_with_thought": 0}))
+    assert "0 of 0" in P.thought_line(str(tmp_path))

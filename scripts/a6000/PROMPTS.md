@@ -417,13 +417,17 @@ and stop when it needs the owner.
    linux; restart at 0), `df -h ~` (need >= 150 GB free: 63 GB bf16 base + checkpoints), `ls ~/g4/runs/p3_think` (capture*.jsonl,
    items/, results). One block to P2_LOG.md.
 2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc must be 0; its GATE/P2_LOG
-   paragraph is the data report). `wc -l ~/g4/runs/p3_think/rows.jsonl`.
+   paragraph is the data report). `wc -l ~/g4/runs/p3_think/rows.jsonl`. Rows gate (GAPS "gate (a) extended"): the report's
+   `thoughts:` line must show share >= 0.80 (rebalanced rows whose completion starts with a non-empty thought channel); below
+   it, log to P2_LOG.md, push, stop (the thoughts did not reach the rows; the owner decides).
 3. ENV + BASE: `bash scripts/a6000/train.sh env` (must print `cuda ok`), then `bash scripts/a6000/train.sh dequant` (~10 min;
    writes ~/g4/model-bf16/DEQUANT.json with checked_against_library 3).
-4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json `ok: true`,
-   `sequences_with_thought == sequences`, >= 500 sequences; paste stitch_report.json's numbers (sequences, tokens, breaks,
-   healed, compactions, span_* counts) into GATE.md addendum 15 with the date and the pulled commit. If the gate fails,
-   log why to P2_LOG.md, push, stop.
+4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json `ok: true` (it now
+   also requires thought_share >= 0.8: model spans starting with a non-empty thought / model spans), `sequences_with_thought ==
+   sequences`, >= 40 sequences (one per solved trajectory with v12; the run's schedule scales with the count, `bash
+   scripts/a6000/train.sh recipe N`, applied by `train.sh full`); paste stitch_report.json's numbers (sequences, tokens, breaks, healed, compactions, span_*
+   counts incl. span_thought_masked, thought_share) into GATE.md addendum 15 with the date and the pulled commit. If the gate
+   fails, log why to P2_LOG.md, push, stop.
 5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (about
    1 h). Append probe_report.json's verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k and the repeat losses to
    addendum 15, commit, push. FULL -> step 6. REDUCED -> re-stitch with `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think
@@ -447,9 +451,9 @@ A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch
 
 0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -5`. Read in chunks: docs/a6000/TRAIN_LOCAL.md (thresholds are pre-registered there), docstrings of train/stitch_rows.py, train/qlora_train.py, scripts/a6000/train.sh, last 30 lines of docs/a6000/P2_LOG.md (P10's p3_think must be finished/finalized).
 1. STATE: `pgrep -af "autopilot|vllm|or_proxy|pace_proxy|race|qlora"` (anything alive = stop, say so); `nvidia-smi` (>1 GB used, no process = stale WSL VRAM: owner runs `wsl --shutdown`, reopens, restart at 0); `df -h ~` (>=150 GB free); `ls ~/g4/runs/p3_think`. One block to P2_LOG.md.
-2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc 0); `wc -l ~/g4/runs/p3_think/rows.jsonl`.
+2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc 0); `wc -l ~/g4/runs/p3_think/rows.jsonl`. Rows gate: the report's `thoughts:` line shows share >= 0.80; below it, log to P2_LOG.md, push, stop.
 3. ENV+BASE: `bash scripts/a6000/train.sh env` (must print `cuda ok`); `bash scripts/a6000/train.sh dequant` (~10 min; ~/g4/model-bf16/DEQUANT.json, checked_against_library 3).
-4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json ok true, sequences_with_thought == sequences, >=500 sequences. Put stitch_report.json numbers (sequences, tokens, breaks, healed, compactions, span_*) in GATE.md addendum 15 with date + pulled commit. Fail = log to P2_LOG.md, push, stop.
+4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json ok true (incl. thought_share >= 0.8), sequences_with_thought == sequences, >=40 sequences (one per solved trajectory with v12; `train.sh full` scales epochs by the count). Put stitch_report.json numbers (sequences, tokens, breaks, healed, compactions, span_* incl. span_thought_masked, thought_share) in GATE.md addendum 15 with date + pulled commit. Fail = log to P2_LOG.md, push, stop.
 5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (~1 h). Add probe_report.json verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k, repeat losses to addendum 15; commit, push. FULL -> 6. REDUCED -> re-stitch with `... stitch ~/g4/runs/p3_think think1 --max-seqs-per-task-stage 6`, then 6 with `--max-tokens 12288`. FALLBACK -> `gzip -k ~/g4/runs/p3_think/rows.jsonl`, note the path, stop.
 6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]` (~13-18 h). Hourly: status + last `eval` line (nll_text, nll_tool) to P2_LOG.md; alarm_tok_s_halved true on 3 consecutive steps = report, keep going; if the process dies, the same command resumes. At `done`: summary.json (best_nll_text, steps, elapsed_h) to addendum 15.
 7. PACKAGE: ARM = content of ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name think1 --key-style loud --stages <v12: agent | v5h2-think: fixer,verifier>`; `~/g4/venv/bin/python scripts/adapters_dataset.py --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit the bundle without any .safetensors, push.
@@ -463,6 +467,9 @@ A6000 box, WSL2, repo ~/g4/gemma-swe-agent on wip/gemma-agent (never main, never
 never touch autopilot_plan.json / autopilot_state.json / autopilot_choice.json, never start or stop vLLM, Docker or the autopilot.
 Only P2_LOG.md may be appended (one block), then commit + push.
 
+0. PULL (the checks below need the current scripts; the run is not touched: the autopilot reads its plan from ~/g4/runs and the
+   containers install harness/wheels, which did not change): `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin
+   wip/gemma-agent && git log --oneline -3` (the head must include "gate (a) extended" or be later).
 1. ALIVE: `pgrep -afi "autopilot.py|vllm|EngineCore|pace_proxy"` (the autopilot and, during a step, vLLM + a proxy must be alive),
    `tail -n 5 ~/g4/autopilot.log`, `nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader`, `docker ps --format
    '{{.Names}} {{.Status}}'`, `tail -n 3 docs/a6000/P2_LOG.md`. If the autopilot is NOT alive and P2_LOG.md has no DONE line for
@@ -472,11 +479,15 @@ Only P2_LOG.md may be appended (one block), then commit + push.
    `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p2/proxy_pair_s50.jsonl --proxy-log`
    Expected with thinking on: completion tokens per call around 250 or more and 8-9 s latency per call (the sub13 traces); around 50
    tokens and 3 s means thinking is OFF through the harness: say so in the first line of the report.
-3. GATE (a) (once ~/g4/runs/p3_think/capture_s1.jsonl exists; re-run at each check, the share should hold above 0.8):
-   `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p3_think --min-share 0.8 --json ~/g4/think_gate.json`
-   Report the whole line: GATE PASS/FAIL, the key seen (reasoning or reasoning_content), reasoning chars, carried thoughts.
+3. GATE (a) + RENDER GATE (once ~/g4/runs/p3_think/capture_s1.jsonl exists; re-run at each check, the shares should hold):
+   `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p3_think --min-share 0.8 --render --json ~/g4/think_gate.json`
+   Two lines, report both whole. GATE = the captures (PASS/FAIL, the key seen: reasoning or reasoning_content, reasoning chars,
+   carried thoughts). RENDER GATE = the training renderer and stitcher on the same captures (GAPS "gate (a) extended"): thinking
+   flag on every call with budget 4096, completions with thought >= 0.80, exact chain pairs >= 0.80 (healed = the next prompt did
+   NOT carry the thought), breaks <= 0.02, model spans with thought >= 0.80. GATE PASS with RENDER GATE FAIL means the thoughts are
+   captured but do not reach the rows or the chain: put the numbers in the first line of the report; P11 must not start on that data.
 4. PAIR TABLE (after the pair_s50 step): `cat ~/g4/runs/p2/*.md 2>/dev/null | tail -n 40` and `cat ~/g4/runs/autopilot_choice.json`
    (the P10 rule: v12 unless WORSE). Report the table and the choice as they are.
-5. LOG + REPORT: append one block to docs/a6000/P2_LOG.md ("- <UTC> | P10c check: alive=..., signature=..., gate=..., choice=..."),
+5. LOG + REPORT: append one block to docs/a6000/P2_LOG.md ("- <UTC> | P10c check: alive=..., signature=..., gate=..., render=..., choice=..."),
    commit, `git pull --rebase --autostash origin wip/gemma-agent && git push origin wip/gemma-agent`. Then report the five items in
    order, numbers verbatim, and stop.

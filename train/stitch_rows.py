@@ -127,6 +127,8 @@ def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0
         rep["supervised_chars"] += sum(b - a for a, b, w in s["spans"] if w > 0)
         rep["masked_chars"] += sum(b - a for a, b, w in s["spans"] if w == 0)
     rep = dict(rep)                                       # a Counter.update would try to add the strings below
+    model_spans = rep.get("span_text", 0) + rep.get("span_tool", 0)
+    rep["thought_share"] = round(rep.get("span_thought", 0) / model_spans, 4) if model_spans else 0.0   # the P11 stitch gate: >= 0.8
     rep.update({"groups": len(groups), "sequences": len(seqs), "holdout_sequences": len(held),
                 "tokens": sum(s["meta"]["tokens"] for s in seqs), "holdout_tokens": sum(s["meta"]["tokens"] for s in held),
                 "tasks": len({s["meta"]["task"] for s in seqs}), "tokenizer": "given" if tok is not None else f"estimate {CHARS_PER_TOKEN} chars/token"})

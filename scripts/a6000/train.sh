@@ -5,6 +5,7 @@
 #   bash scripts/a6000/train.sh env                       # build ~/g4/train-venv (scripts/a6000/train_env.sh)
 #   bash scripts/a6000/train.sh dequant                   # ~/g4/model (W4A16) -> ~/g4/model-bf16 (train/dequant_ct.py, ~10 min, 63 GB)
 #   bash scripts/a6000/train.sh stitch  <p3_out> <name>   # <p3_out>/rows.jsonl -> ~/g4/runs/train_<name>/{seqs,holdout,seqs_probe}.jsonl + validation
+#   bash scripts/a6000/train.sh recipe  <sequences>        # the full run's schedule for that many sequences (< 200: grad_accum 2, more epochs; GAPS 2026-10-11)
 #   bash scripts/a6000/train.sh probe   <name>            # the 1-hour feasibility probe (background; tail its log)
 #   bash scripts/a6000/train.sh full    <name> [args...]  # the run (background, resumable: run again with the same name)
 #   bash scripts/a6000/train.sh status  <name>            # last log lines, cursor, GPU
@@ -24,6 +25,13 @@ gpu_idle() {
   return 0
 }
 
+recipe() {   # GAPS 2026-10-11 "stitch gate re-registered": a single-agent collector = one sequence per solved trajectory; < 200 sequences train
+  local n=${1:-0}; [ "$n" -le 0 ] && n=1   # more epochs at grad_accum 2 (about 180 optimizer steps), the held-out stop rule guards overfitting
+  if [ "$n" -ge 200 ]; then echo "--grad-accum 8 --epochs 1 --eval-every 40 --save-every 40"; return; fi
+  local e=$(( (360 + n - 1) / n )); [ "$e" -gt 6 ] && e=6; [ "$e" -lt 1 ] && e=1
+  echo "--grad-accum 2 --epochs $e --eval-every 10 --save-every 10"
+}
+
 cmd=${1:-}; shift || true
 case "$cmd" in
   env) bash "$HERE/train_env.sh" "$VENV" ;;
@@ -40,7 +48,7 @@ case "$cmd" in
     HOLD="$ROOT/data/v11/v11b_holdout_tasks.txt"; [ -f "$RUN/seqs.jsonl.holdout_tasks.txt" ] && HOLD="$RUN/seqs.jsonl.holdout_tasks.txt"
     "$PY" "$ROOT/train/stitch_rows.py" "$P3/rows.jsonl" --out "$RUN/seqs_probe.jsonl" --report "$RUN/stitch_probe_report.json" --tokenizer-json "$TOK" \
       --holdout-tasks "$HOLD" --max-tokens 16384 "$@" >/dev/null
-    "$PY" "$ROOT/train/validate_rows.py" --stitched "$RUN/seqs.jsonl" --min-rows 500 --max-tokens 14336 --no-tokenizer --require-thought --report "$RUN/validate_stitched.json" \
+    "$PY" "$ROOT/train/validate_rows.py" --stitched "$RUN/seqs.jsonl" --min-rows 40 --max-tokens 14336 --no-tokenizer --require-thought --min-thought-share 0.8 --report "$RUN/validate_stitched.json" \
       --exclude-ids "$ROOT/data/heldout1k/sample200_ids.txt" --exclude-ids "$ROOT/data/heldout1k/s200_valid_ids.txt" | tail -12 ;;
   probe|full)
     NAME=${1:?name}; shift || true; RUN="$HOME/g4/runs/train_$NAME"; mkdir -p "$RUN"
@@ -52,6 +60,7 @@ case "$cmd" in
       OUT="$RUN/probe"; ARGS=(--probe --seqs "$RUN/seqs_probe.jsonl" --holdout "$RUN/holdout.jsonl" --max-tokens 16384)
     else
       OUT="$RUN/run"; ARGS=(--seqs "$RUN/seqs.jsonl" --holdout "$RUN/holdout.jsonl" --max-tokens 14336 --resume)
+      N=$(wc -l < "$RUN/seqs.jsonl" | tr -d " "); read -r -a REC <<< "$(recipe "$N")"; ARGS+=("${REC[@]}")   # explicit args after it win
     fi
     mkdir -p "$OUT"; LOG="$OUT/train.out"
     echo "$PY $ROOT/train/qlora_train.py ${ARGS[*]} --base $BF16 --out $OUT $*" > "$OUT/CMD"
@@ -64,5 +73,6 @@ case "$cmd" in
       [ -f "$RUN/$d/cursor.json" ] && cat "$RUN/$d/cursor.json" && echo; [ -f "$RUN/$d/probe_report.json" ] && grep -E '"verdict"|"tok_s"|"peak' "$RUN/$d/probe_report.json"
       tail -5 "$RUN/$d/train.out" 2>/dev/null; done
     nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader ;;
-  *) sed -n 2,12p "$0"; exit 2 ;;
+  recipe) recipe "${1:?sequences}" ;;
+  *) sed -n 2,13p "$0"; exit 2 ;;
 esac

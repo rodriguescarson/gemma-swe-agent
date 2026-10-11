@@ -69,6 +69,16 @@ def commands(out, tasks, passes=1):
             "validate": [PY, "train/validate_rows.py", f"{out}/rows_rebalanced.jsonl", *ex, "--min-rows", "0", "--no-tokenizer", "--report", f"{out}/validate_report.json"]}
 
 
+def thought_line(out):
+    """The P11 rows gate (2026-10-11): rows whose completion starts with a non-empty thought channel / rows, from validate_report.json."""
+    try:
+        v = json.load(open(f"{out}/validate_report.json"))
+    except Exception:
+        return "- thoughts: validate_report.json missing (no rows were validated)\n"
+    n, t = int(v.get("rows") or 0), int(v.get("rows_with_thought") or 0)
+    return f"- thoughts: {t} of {n} rebalanced rows carry a non-empty thought channel (share {(t / n) if n else 0.0:.2f}; the P11 rows gate is >= 0.80)\n"
+
+
 def pair_count(attempts):
     """Tasks with both a solved and a failed attempt (a preference pair needs two attempts of one task)."""
     return sum(1 for v in attempts.values() if any(v) and not all(v))
@@ -117,6 +127,7 @@ def main(argv=None):
             f"- SFT rows (test-verified successes only, sample-200 ids refused): {nrows}; after rebalance (drop repeats, read_file share 0.15, 200 per task, unknown tools dropped): {nreb}\n"
             f"- rebalance profile: `{json.dumps(prof)[:400]}`\n"
             f"- validation rc: {res['validate'][0]} (build rc {res['sft'][0]}, rebalance rc {res['rebalance'][0]}); `{res['validate'][1].strip()[-160:]}`\n"
+            + thought_line(out) +
             f"- preference pairs (a solved and a failed attempt of the same task): **{pair_count(attempts)}** (raw material in pairs_raw.jsonl: task, solved passes, failed passes; the Adaption SDK's "
             f"alignment schema is applied on the Mac, the package is not installed here)\n")
     print(text)

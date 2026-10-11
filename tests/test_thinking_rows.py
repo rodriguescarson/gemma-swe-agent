@@ -116,3 +116,85 @@ def test_validate_rows_counts_thoughts_and_can_require_them(world, tmp_path):
     bad.write_text(json.dumps({"prompt": "<bos>x", "completion": "<|channel>thought\nI think.\n<channel|><turn|>", "meta": {"task": "t_ok", "stage": "fixer"}}) + "\n")
     r3 = subprocess.run([sys.executable, str(ROOT / "train" / "validate_rows.py"), str(bad), "--min-rows", "0", "--no-tokenizer"], capture_output=True, text=True)
     assert r3.returncode == 1 and "empty completion" in r3.stdout
+
+
+# --- end to end on the vLLM 0.19 shape (2026-10-11, gate (a) extended): capture -> rows -> stitched sequence -> validator -> supervised tokens ---
+TOK_JSON = ROOT / "adapters" / "v11b" / "tokenizer.json"
+
+
+def v019_rows():
+    """What the box captures with the scorer wheels: thinking in the body top-level (extra_body merged by the SDK), the reply's
+    thought under `reasoning` only, earlier thoughts carried back under both keys."""
+    def b(messages):
+        return {"model": "m", "messages": messages, "tools": TOOLS, "chat_template_kwargs": {"enable_thinking": True}, "thinking_token_budget": 4096}
+    def rep(reasoning, tool_call=None, text=None):
+        msg = {"role": "assistant", "content": text, "reasoning": reasoning}
+        if tool_call:
+            msg["tool_calls"] = [tool_call]
+        return {"choices": [{"message": msg, "finish_reason": "stop"}], "usage": {"prompt_tokens": 10, "completion_tokens": 300}}
+    hist = base_msgs() + [{"role": "assistant", "content": "", "reasoning_content": R1, "reasoning": R1, "tool_calls": [CALL]},
+                          {"role": "tool", "tool_call_id": "c0", "content": json.dumps({"status": "ok", "content": "SECRET_TOOL_OUTPUT"})}]
+    return [{"t": 1, "body": b(base_msgs()), "response": rep(R1, CALL)},
+            {"t": 2, "body": b(hist), "response": rep(R2, text="Fixed.")}]
+
+
+@pytest.fixture
+def v019_world(tmp_path):
+    tasks = tmp_path / "tasks.jsonl"
+    tasks.write_text(json.dumps({"instance_id": "t_ok", "problem_statement": STMT}) + "\n")
+    results = tmp_path / "task_results.jsonl"
+    results.write_text(json.dumps({"instance_id": "t_ok", "resolved": True}) + "\n")
+    cap = tmp_path / "capture_s1.jsonl"
+    cap.write_text("".join(json.dumps(r) + "\n" for r in v019_rows()))
+    return tmp_path, tasks, results, cap
+
+
+def test_vllm_019_capture_becomes_one_exact_sequence_whose_every_model_span_carries_the_thought(v019_world):
+    from train import stitch_rows as ST
+    from train import validate_rows as V
+    tmp, tasks, results, cap = v019_world
+    rows, stats = B.build([str(cap)], str(tasks), [str(results)])
+    assert stats["rows"] == 2 and all(r["meta"]["thinking"] and r["meta"]["reasoning_chars"] for r in rows)
+    seqs, held, rep = ST.stitch(rows)
+    assert rep["sequences"] == 1 and rep["breaks"] == 0 and rep["healed"] == 0 and rep["compactions"] == 0
+    assert rep["span_text"] == 1 and rep["span_tool"] == 1 and rep["span_thought"] == 2 and rep["thought_share"] == 1.0
+    assert rep["span_thought_masked"] == 1 and ST.stitch(rows, read_share=1.0)[2]["span_thought_masked"] == 0   # the lone read_file is over the 15 % share: its thought is masked with it
+    text = seqs[0]["text"]
+    assert text.count("<|channel>thought\n") == 2 and R1 in text and R2 in text and "SECRET_TOOL_OUTPUT" in text
+    out = tmp / "seqs.jsonl"
+    out.write_text("".join(json.dumps(s) + "\n" for s in seqs))
+    v = V.validate_stitched(str(out), require_thought=True, min_thought_share=0.8)
+    assert v["ok"] and v["thought_spans"] == 2 and v["model_spans"] == 2 and v["thought_share"] == 1.0, v["first_problems"]
+    # drop the second thought: half the spans carry one -> the 0.8 gate fails, 0.5 passes
+    text2 = text.replace("<|channel>thought\n" + R2 + "\n<channel|>", "")
+    from train import spans as S
+    half = {"text": text2, "spans": [[a, b, 1.0] for a, b in S.supervised_char_spans(text2)], "meta": dict(seqs[0]["meta"])}
+    (tmp / "half.jsonl").write_text(json.dumps(half) + "\n")
+    v2 = V.validate_stitched(str(tmp / "half.jsonl"), min_thought_share=0.8)
+    assert not v2["ok"] and v2["thought_share"] == 0.5 and any("thought share" in p[1] for p in v2["first_problems"])
+    assert V.validate_stitched(str(tmp / "half.jsonl"), min_thought_share=0.5)["ok"]
+    # the rows validator carries the same share and gate
+    rows_f = tmp / "rows.jsonl"
+    rows_f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    vr = V.validate(str(rows_f), min_rows=0, min_thought_share=0.8)
+    assert vr["ok"] and vr["thought_share"] == 1.0
+    rows[1]["completion"] = R.EMPTY_THOUGHT + "Fixed.<turn|>"
+    rows_f.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    vr2 = V.validate(str(rows_f), min_rows=0, min_thought_share=0.8)
+    assert not vr2["ok"] and vr2["thought_share"] == 0.5
+
+
+@pytest.mark.skipif(not TOK_JSON.exists(), reason="the Gemma tokenizer.json is not in this checkout")
+def test_the_thought_tokens_are_supervised_and_the_tool_output_is_not(v019_world):
+    from tokenizers import Tokenizer
+    from train import qlora_lib as Q
+    from train import stitch_rows as ST
+    tmp, tasks, results, cap = v019_world
+    rows, _ = B.build([str(cap)], str(tasks), [str(results)])
+    seqs, _, _ = ST.stitch(rows, read_share=1.0)                       # keep the lone read_file span (the 15 % rule would mask it, thought included)
+    tok = Tokenizer.from_file(str(TOK_JSON))
+    ids, pos, tgt, w = Q.token_targets(seqs[0]["text"], [tuple(s) for s in seqs[0]["spans"]], tok)
+    sup = tok.decode(tgt, skip_special_tokens=False)
+    assert R1 in sup and R2 in sup and "call:read_file" in sup and "Fixed." in sup
+    assert "SECRET_TOOL_OUTPUT" not in sup and "Problem Statement" not in sup and "internal name" not in sup
+    assert set(w) == {1.0} and len(pos) > 20
