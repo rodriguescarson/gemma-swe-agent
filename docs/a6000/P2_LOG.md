@@ -483,3 +483,4 @@ not run (no capture)
 - 2026-10-11T04:23:19Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
 - 2026-10-11T04:23:41Z | END cleanup (hard stop): nvidia-smi compute apps: none
 - DONE 2026-10-11T04:23:43Z (hard stop)
+- 2026-10-11 P10 prep STATE (head 95d8d912): P8 DONE line present (04:23:43Z), no autopilot/vllm/or_proxy/race/swegemma alive (only a stray multiprocessing resource_tracker, pid 813). nvidia-smi: 48520/49140 MiB used, NO compute process = stale WSL GPU memory. df: 845G free. docker daemon not running in WSL (no docker.sock), nothing to remove. git: clean. STOPPED before step 2: owner must run `wsl --shutdown` in Windows PowerShell, reopen with lab.bat linux, then restart prep at step 0.
