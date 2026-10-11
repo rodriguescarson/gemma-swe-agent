@@ -1,0 +1,81 @@
+diff --git a/boltons/setutils.py b/boltons/setutils.py
+index 950b130..2d079bb 100644
+--- a/boltons/setutils.py
++++ b/boltons/setutils.py
+@@ -56,6 +56,7 @@ __all__ = ['IndexedSet', 'complement']
+ 
+ 
+ _COMPACTION_FACTOR = 8
++_MAX_DEAD_INTERVALS = 384
+ 
+ # TODO: inherit from set()
+ # TODO: .discard_many(), .remove_many()
+@@ -143,7 +144,7 @@ class IndexedSet(MutableSet):
+         if not ii_map:
+             del items[:]
+             del ded[:]
+-        elif len(ded) > 384:
++        elif len(ded) > _MAX_DEAD_INTERVALS:
+             self._compact()
+         elif self._dead_index_count > (len(items) / _COMPACTION_FACTOR):
+             self._compact()
+@@ -250,12 +251,26 @@ class IndexedSet(MutableSet):
+         self._cull()
+ 
+     def discard(self, item):
+-        "discard(item) -> discard item from the set (does not raise)"
++        """discard(item) -> discard item from the set (does not raise)"""
+         try:
+             self.remove(item)
+         except KeyError:
+             pass
+ 
++    def _bulk_discard(self, items):
++        """_bulk_discard(items) -> rebuild set in one pass, removing items"""
++        to_discard = set(items)
++        new_list = []
++        new_map = {}
++        for item in self.item_list:
++            if item is not _MISSING and item not in to_discard:
++                new_map[item] = len(new_list)
++                new_list.append(item)
++        self.item_list[:] = new_list
++        self.item_index_map.clear()
++        self.item_index_map.update(new_map)
++        self.dead_indices.clear()
++
+     def clear(self):
+         "clear() -> empty the set"
+         del self.item_list[:]
+@@ -354,16 +369,25 @@ class IndexedSet(MutableSet):
+             self.add(o)
+ 
+     def intersection_update(self, *others):
+-        "intersection_update(*others) -> discard self.difference(*others)"
+-        for val in self.difference(*others):
+-            self.discard(val)
++        """intersection_update(*others) -> discard self.difference(*others)"""
++        to_discard = list(self.difference(*others))
++        if len(to_discard) > _MAX_DEAD_INTERVALS:
++            self._bulk_discard(to_discard)
++        else:
++            for val in to_discard:
++                self.discard(val)
+ 
+     def difference_update(self, *others):
+-        "difference_update(*others) -> discard self.intersection(*others)"
++        """difference_update(*others) -> discard self.intersection(*others)"""
+         if self in others:
+             self.clear()
+-        for val in self.intersection(*others):
+-            self.discard(val)
++            return
++        to_discard = list(self.intersection(*others))
++        if len(to_discard) > _MAX_DEAD_INTERVALS:
++            self._bulk_discard(to_discard)
++        else:
++            for val in to_discard:
++                self.discard(val)
+ 
+     def symmetric_difference_update(self, other):  # note singular 'other'
+         "symmetric_difference_update(other) -> in-place XOR with other"

@@ -1,0 +1,120 @@
+diff --git a/src/structlog/tracebacks.py b/src/structlog/tracebacks.py
+index d2d1221..6e17d9c 100644
+--- a/src/structlog/tracebacks.py
++++ b/src/structlog/tracebacks.py
+@@ -101,13 +101,10 @@ def safe_str(_object: Any) -> str:
+ 
+ def to_repr(obj: Any, max_string: int | None = None) -> str:
+     """Get repr string for an object, but catch errors."""
+-    if isinstance(obj, str):
+-        obj_repr = obj
+-    else:
+-        try:
+-            obj_repr = repr(obj)
+-        except Exception as error:  # noqa: BLE001
+-            obj_repr = f"<repr-error {str(error)!r}>"
++    try:
++        obj_repr = repr(obj)
++    except Exception as error:  # noqa: BLE001
++        obj_repr = f"<repr-error {str(error)!r}>"
+ 
+     if max_string is not None and len(obj_repr) > max_string:
+         truncated = len(obj_repr) - max_string
+@@ -122,7 +119,10 @@ def extract(
+     traceback: TracebackType | None,
+     *,
+     show_locals: bool = False,
+-    locals_max_string: int = LOCALS_MAX_STRING,
++    locals_max_length: int | None = LOCALS_MAX_STRING,
++    locals_hide_sunder: bool = False,
++    locals_hide_dunder: bool = False,
++    suppress: bool = False,
+ ) -> Trace:
+     """
+     Extract traceback information.
+@@ -136,7 +136,7 @@ def extract(
+ 
+         show_locals: Enable display of local variables. Defaults to False.
+ 
+-        locals_max_string:
++        locals_max_length:
+             Maximum length of string before truncating, or ``None`` to disable.
+ 
+         max_frames: Maximum number of frames in each stack
+@@ -173,18 +173,22 @@ def extract(
+             filename = frame_summary.f_code.co_filename
+             if filename and not filename.startswith("<"):
+                 filename = os.path.abspath(filename)
++            
++            locals_dict = None
++            if show_locals:
++                locals_dict = {}
++                for key, value in frame_summary.f_locals.items():
++                    if locals_hide_sunder and key.startswith("_"):
++                        continue
++                    if locals_hide_dunder and key.startswith("__"):
++                        continue
++                    locals_dict[key] = to_repr(value, max_string=locals_max_length)
++            
+             frame = Frame(
+                 filename=filename or "?",
+                 lineno=line_no,
+                 name=frame_summary.f_code.co_name,
+-                locals=(
+-                    {
+-                        key: to_repr(value, max_string=locals_max_string)
+-                        for key, value in frame_summary.f_locals.items()
+-                    }
+-                    if show_locals
+-                    else None
+-                ),
++                locals=locals_dict,
+             )
+             append(frame)
+ 
+@@ -201,6 +205,7 @@ def extract(
+             cause
+             and cause.__traceback__
+             and not getattr(exc_value, "__suppress_context__", False)
++            and not suppress
+         ):
+             exc_type = cause.__class__
+             exc_value = cause
+@@ -245,24 +250,33 @@ class ExceptionDictTransformer:
+     def __init__(
+         self,
+         show_locals: bool = True,
+-        locals_max_string: int = LOCALS_MAX_STRING,
++        locals_max_string: int | None = LOCALS_MAX_STRING,
+         max_frames: int = MAX_FRAMES,
++        locals_hide_sunder: bool = False,
++        locals_hide_dunder: bool = False,
++        suppress: bool = False,
+     ) -> None:
+-        if locals_max_string < 0:
++        if locals_max_string is not None and locals_max_string < 0:
+             msg = f'"locals_max_string" must be >= 0: {locals_max_string}'
+             raise ValueError(msg)
+         if max_frames < 2:
+             msg = f'"max_frames" must be >= 2: {max_frames}'
+             raise ValueError(msg)
+         self.show_locals = show_locals
+-        self.locals_max_string = locals_max_string
++        self.locals_max_length = locals_max_string
+         self.max_frames = max_frames
++        self.locals_hide_sunder = locals_hide_sunder
++        self.locals_hide_dunder = locals_hide_dunder
++        self.suppress = suppress
+ 
+     def __call__(self, exc_info: ExcInfo) -> list[dict[str, Any]]:
+         trace = extract(
+             *exc_info,
+             show_locals=self.show_locals,
+-            locals_max_string=self.locals_max_string,
++            locals_max_length=self.locals_max_length,
++            locals_hide_sunder=self.locals_hide_sunder,
++            locals_hide_dunder=self.locals_hide_dunder,
++            suppress=self.suppress,
+         )
+ 
+         for stack in trace.stacks:

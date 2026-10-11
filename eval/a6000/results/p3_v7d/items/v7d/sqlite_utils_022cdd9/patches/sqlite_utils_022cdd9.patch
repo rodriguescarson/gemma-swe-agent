@@ -1,0 +1,56 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index a00e7ba..cc1b713 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -886,28 +886,30 @@ class Table(Queryable):
+         first_column = columns[0]
+         pks = self.pks
+         lookup_table = self.db[table]
++        # The original implementation used lookup_table.lookup(),
++        # which handles table creation and insertion.
++        # To replicate this in bulk, we first need to populate the lookup table
++        # with all unique combinations of the columns being extracted.
++
++        # Get all unique combinations of the columns to extract
++        cols_sql = ", ".join(f"[{col}]" for col in columns)
++        unique_rows_sql = f"SELECT DISTINCT {cols_sql} FROM [{self.name}]"
++        unique_rows = self.db.execute(unique_rows_sql).fetchall()
++
++        # Insert these unique rows into the lookup table
++        # We need to handle the column renaming
++        lookup_cols = [rename.get(col) or col for col in columns]
++        lookup_table.insert_all(
++            [dict(zip(lookup_cols, row)) for row in unique_rows],
++            pk="id",
++        )
+ 
+-        @functools.lru_cache(maxsize=128)
+-        def cached_lookup(lookups):
+-            return lookup_table.lookup(dict(lookups))
+-
+-        if pks == ["rowid"]:
+-            rows_iter = self.rows_where(select="rowid, *")
+-        else:
+-            rows_iter = self.rows
+-        for row in rows_iter:
+-            row_pks = tuple(row[pk] for pk in pks)
+-            lookups = tuple(
+-                (rename.get(column) or column, row[column]) for column in columns
+-            )
+-            self.update(
+-                row_pks,
+-                {first_column: cached_lookup(lookups)},
+-                assume_exists=True,
+-                pks=self.pks,
+-            )
+-            if progress:
+-                progress(1)
++        where_sql = " AND ".join(
++            f"[{table}].[{rename.get(column) or column}] = [{self.name}].[{column}]"
++            for column in columns
++        )
++        sql = f"UPDATE [{self.name}] SET [{first_column}] = (SELECT id FROM [{table}] WHERE {where_sql}) WHERE EXISTS (SELECT 1 FROM [{table}] WHERE {where_sql})"
++        self.db.execute(sql)
+         fk_column = fk_column or "{}_id".format(table)
+         # Now rename first_column and change its type to integer, and drop
+         # any other extracted columns:

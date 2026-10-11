@@ -1,0 +1,188 @@
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 072ab1f..2ac91e8 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -445,11 +445,10 @@ class Field(typing.Generic[_InternalType]):
+     # Properties
+ 
+     @property
+-    def context(self) -> dict | None:
+-        """The context dictionary for the parent :class:`Schema`."""
+-        if self.parent:
+-            return self.parent.context
+-        return None
++    def context(self) -> typing.Any | None:
++        """The context for the parent :class:`Schema`."""
++        from marshmallow.schema import CONTEXT
++        return CONTEXT.get(None)
+ 
+ 
+ class Raw(Field[typing.Any]):
+@@ -540,8 +539,6 @@ class Nested(Field):
+     def schema(self) -> Schema:
+         """The nested Schema object."""
+         if not self._schema:
+-            # Inherit context from parent.
+-            context = getattr(self.parent, "context", {})
+             if callable(self.nested) and not isinstance(self.nested, type):
+                 nested = self.nested()
+             else:
+@@ -554,7 +551,6 @@ class Nested(Field):
+ 
+             if isinstance(nested, Schema):
+                 self._schema = copy.copy(nested)
+-                self._schema.context.update(context)
+                 # Respect only and exclude passed from parent and re-initialize fields
+                 set_class = typing.cast(type[set], self._schema.set_class)
+                 if self.only is not None:
+@@ -2045,10 +2041,12 @@ class Function(Field):
+ 
+     def _call_or_raise(self, func, value, attr):
+         if len(utils.get_func_args(func)) > 1:
+-            if self.parent.context is None:
++            from marshmallow.schema import CONTEXT
++            context = CONTEXT.get(None)
++            if context is None:
+                 msg = f"No context available for Function field {attr!r}"
+                 raise ValidationError(msg)
+-            return func(value, self.parent.context)
++            return func(value, context)
+         return func(value)
+ 
+ 
+diff --git a/src/marshmallow/schema.py b/src/marshmallow/schema.py
+index 1bd72c5..9b5ee29 100644
+--- a/src/marshmallow/schema.py
++++ b/src/marshmallow/schema.py
+@@ -13,6 +13,7 @@ from abc import ABCMeta
+ from collections import defaultdict
+ from collections.abc import Mapping
+ 
++import contextvars
+ from marshmallow import class_registry, types
+ from marshmallow import fields as ma_fields
+ from marshmallow.decorators import (
+@@ -39,6 +40,24 @@ from marshmallow.utils import (
+ )
+ 
+ 
++CONTEXT = contextvars.ContextVar("marshmallow.context")
++
++
++class Context:
++    """Context manager for setting the marshmallow context."""
++
++    def __init__(self, value: typing.Any):
++        self.value = value
++        self.token = None
++
++    def __enter__(self):
++        self.token = CONTEXT.set(self.value)
++        return self
++
++    def __exit__(self, exc_type, exc_val, exc_tb):
++        CONTEXT.reset(self.token)
++
++
+ def _get_fields(attrs):
+     """Get fields from a class
+ 
+@@ -329,7 +348,7 @@ class Schema(metaclass=SchemaMeta):
+         only: types.StrSequenceOrSet | None = None,
+         exclude: types.StrSequenceOrSet = (),
+         many: bool | None = None,
+-        context: dict | None = None,
++        context: typing.Any | None = None,
+         load_only: types.StrSequenceOrSet = (),
+         dump_only: types.StrSequenceOrSet = (),
+         partial: bool | types.StrSequenceOrSet | None = None,
+@@ -355,7 +374,7 @@ class Schema(metaclass=SchemaMeta):
+             if unknown is None
+             else validate_unknown_parameter_value(unknown)
+         )
+-        self.context = context or {}
++        self.context = context
+         self._normalize_nested_options()
+         #: Dictionary mapping field_names -> :class:`Field` objects
+         self.fields: dict[str, ma_fields.Field] = {}
+@@ -468,7 +487,7 @@ class Schema(metaclass=SchemaMeta):
+             ret[key] = value
+         return ret
+ 
+-    def dump(self, obj: typing.Any, *, many: bool | None = None):
++    def dump(self, obj: typing.Any, *, many: bool | None = None, context: typing.Any | None = None):
+         """Serialize an object to native Python data types according to this
+         Schema's fields.
+ 
+@@ -485,19 +504,29 @@ class Schema(metaclass=SchemaMeta):
+             Validation no longer occurs upon serialization.
+         """
+         many = self.many if many is None else bool(many)
+-        if self._hooks[PRE_DUMP]:
+-            processed_obj = self._invoke_dump_processors(
+-                PRE_DUMP, obj, many=many, original_data=obj
+-            )
+-        else:
+-            processed_obj = obj
++        token = None
++        if context is not None:
++            token = CONTEXT.set(context)
++        elif self.context is not None:
++            token = CONTEXT.set(self.context)
+ 
+-        result = self._serialize(processed_obj, many=many)
++        try:
++            if self._hooks[PRE_DUMP]:
++                processed_obj = self._invoke_dump_processors(
++                    PRE_DUMP, obj, many=many, original_data=obj
++                )
++            else:
++                processed_obj = obj
+ 
+-        if self._hooks[POST_DUMP]:
+-            result = self._invoke_dump_processors(
+-                POST_DUMP, result, many=many, original_data=obj
+-            )
++            result = self._serialize(processed_obj, many=many)
++
++            if self._hooks[POST_DUMP]:
++                result = self._invoke_dump_processors(
++                    POST_DUMP, result, many=many, original_data=obj
++                )
++        finally:
++            if token is not None:
++                CONTEXT.reset(token)
+ 
+         return result
+ 
+@@ -641,6 +670,7 @@ class Schema(metaclass=SchemaMeta):
+         many: bool | None = None,
+         partial: bool | types.StrSequenceOrSet | None = None,
+         unknown: str | None = None,
++        context: typing.Any | None = None,
+     ):
+         """Deserialize a data structure to an object defined by this Schema's fields.
+ 
+@@ -661,9 +691,19 @@ class Schema(metaclass=SchemaMeta):
+             A :exc:`ValidationError <marshmallow.exceptions.ValidationError>` is raised
+             if invalid data are passed.
+         """
+-        return self._do_load(
+-            data, many=many, partial=partial, unknown=unknown, postprocess=True
+-        )
++        token = None
++        if context is not None:
++            token = CONTEXT.set(context)
++        elif self.context is not None:
++            token = CONTEXT.set(self.context)
++
++        try:
++            return self._do_load(
++                data, many=many, partial=partial, unknown=unknown, postprocess=True
++            )
++        finally:
++            if token is not None:
++                CONTEXT.reset(token)
+ 
+     def loads(
+         self,

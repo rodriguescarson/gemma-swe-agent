@@ -1,0 +1,62 @@
+diff --git a/pyparsing/results.py b/pyparsing/results.py
+index bd50400..c7c40d1 100644
+--- a/pyparsing/results.py
++++ b/pyparsing/results.py
+@@ -684,19 +684,46 @@ class ParseResults:
+         """
+         ret = self.copy()
+         # replace values with copies if they are of known mutable types
+-        for i, obj in enumerate(self._toklist):
++        # keep track of original -> copy mapping to maintain aliases
++        memo = {}
++
++        def _deepcopy_obj(obj):
++            # Use id() for unhashable types like lists
++            obj_id = id(obj) if not isinstance(obj, (str, bytes, int, float, bool, type(None))) else obj
++            if obj_id in memo:
++                return memo[obj_id]
+             if isinstance(obj, ParseResults):
+-                ret._toklist[i] = obj.deepcopy()
+-            elif isinstance(obj, (str, bytes)):
+-                pass
+-            elif isinstance(obj, MutableMapping):
+-                ret._toklist[i] = dest = type(obj)()
++                res = obj.deepcopy()
++                memo[obj_id] = res
++                return res
++            if isinstance(obj, (str, bytes, int, float, bool, type(None))):
++                return obj
++            if isinstance(obj, MutableMapping):
++                res = type(obj)()
++                memo[obj_id] = res
+                 for k, v in obj.items():
+-                    dest[k] = v.deepcopy() if isinstance(v, ParseResults) else v
+-            elif isinstance(obj, Iterable):
+-                ret._toklist[i] = type(obj)(
+-                    v.deepcopy() if isinstance(v, ParseResults) else v for v in obj  # type: ignore[call-arg]
+-                )
++                    res[k] = _deepcopy_obj(v)
++                return res
++            if isinstance(obj, (list, tuple)):
++                if isinstance(obj, _ParseResultsWithOffset):
++                    res = _ParseResultsWithOffset(_deepcopy_obj(obj.result), obj.offset)
++                else:
++                    res = type(obj)(_deepcopy_obj(v) for v in obj)
++                memo[obj_id] = res
++                return res
++            return obj
++
++        # First pass: deepcopy all tokens in the list
++        for i, obj in enumerate(self._toklist):
++            ret._toklist[i] = _deepcopy_obj(obj)
++
++        # Second pass: rebuild _tokdict to point to the new copied objects
++        # We must use the same memo to ensure that if a token is in both
++        # _toklist and _tokdict, they point to the same copy.
++        ret._tokdict = {}
++        for name, obj in self._tokdict.items():
++            ret._tokdict[name] = _deepcopy_obj(obj)
++
+         return ret
+ 
+     def get_name(self) -> str | None:

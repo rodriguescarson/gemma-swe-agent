@@ -1,0 +1,123 @@
+diff --git a/isort/core.py b/isort/core.py
+index 5b10fd1..6d77e81 100644
+--- a/isort/core.py
++++ b/isort/core.py
+@@ -276,7 +276,7 @@ def process(
+                             ignore_whitespace=config.ignore_whitespace,
+                         )
+                         if is_reexport:
+-                            output_stream.seek(output_stream.tell() - reexport_rollback)
++                            output_stream.seek(max(0, output_stream.tell() - reexport_rollback))
+                             reexport_rollback = 0
+                         output_stream.write(sorted_code)
+                         if is_reexport:
+diff --git a/isort/literal.py b/isort/literal.py
+index 16ddcba..f773ac7 100644
+--- a/isort/literal.py
++++ b/isort/literal.py
+@@ -1,6 +1,5 @@
+ import ast
+ from collections.abc import Callable
+-from pprint import PrettyPrinter
+ from typing import Any
+ 
+ from isort.exceptions import (
+@@ -11,14 +10,24 @@ from isort.exceptions import (
+ from isort.settings import DEFAULT_CONFIG, Config
+ 
+ 
+-class ISortPrettyPrinter(PrettyPrinter):
+-    """an isort customized pretty printer for sorted literals"""
++def format_literal(value: Any, config: Config, bracket_open: str, bracket_close: str) -> str:
++    """Formats a sorted literal to be black-compatible."""
++    items = []
++    if isinstance(value, dict):
++        items = [f'"{k}": {repr(v)}' if isinstance(k, str) else f'{repr(k)}: {repr(v)}' for k, v in value.items()]
++    else:
++        items = [f'"{i}"' if isinstance(i, str) else repr(i) for i in value]
+ 
+-    def __init__(self, config: Config):
+-        super().__init__(width=config.line_length, compact=True)
++    line = f"{bracket_open}{', '.join(items)}{bracket_close}"
++    if len(line) <= config.line_length:
++        return line
+ 
++    trailing_comma = "," if config.include_trailing_comma else ""
++    formatted_items = "\n    ".join(items)
++    return f"{bracket_open}\n    {formatted_items}{trailing_comma}\n{bracket_close}"
+ 
+-type_mapping: dict[str, tuple[type, Callable[[Any, ISortPrettyPrinter], str]]] = {}
++
++type_mapping: dict[str, tuple[type, Callable[[Any, Config], str]]] = {}
+ 
+ 
+ def assignments(code: str) -> str:
+@@ -60,8 +69,7 @@ def assignment(code: str, sort_type: str, extension: str, config: Config = DEFAU
+     if type(value) is not expected_type:
+         raise LiteralSortTypeMismatch(type(value), expected_type)
+ 
+-    printer = ISortPrettyPrinter(config)
+-    sorted_value_code = f"{variable_name} = {sort_function(value, printer)}"
++    sorted_value_code = f"{variable_name} = {sort_function(value, config)}"
+     if config.formatting_function:
+         sorted_value_code = config.formatting_function(
+             sorted_value_code, extension, config
+@@ -73,12 +81,12 @@ def assignment(code: str, sort_type: str, extension: str, config: Config = DEFAU
+ 
+ def register_type(
+     name: str, kind: type
+-) -> Callable[[Callable[[Any, ISortPrettyPrinter], str]], Callable[[Any, ISortPrettyPrinter], str]]:
++) -> Callable[[Callable[[Any, Config], str]], Callable[[Any, Config], str]]:
+     """Registers a new literal sort type."""
+ 
+     def wrap(
+-        function: Callable[[Any, ISortPrettyPrinter], str],
+-    ) -> Callable[[Any, ISortPrettyPrinter], str]:
++        function: Callable[[Any, Config], str],
++    ) -> Callable[[Any, Config], str]:
+         type_mapping[name] = (kind, function)
+         return function
+ 
+@@ -86,30 +94,30 @@ def register_type(
+ 
+ 
+ @register_type("dict", dict)
+-def _dict(value: dict[Any, Any], printer: ISortPrettyPrinter) -> str:
+-    return printer.pformat(dict(sorted(value.items(), key=lambda item: item[1])))
++def _dict(value: dict[Any, Any], config: Config) -> str:
++    return format_literal(dict(sorted(value.items(), key=lambda item: item[1])), config, "{", "}")
+ 
+ 
+ @register_type("list", list)
+-def _list(value: list[Any], printer: ISortPrettyPrinter) -> str:
+-    return printer.pformat(sorted(value))
++def _list(value: list[Any], config: Config) -> str:
++    return format_literal(sorted(value), config, "[", "]")
+ 
+ 
+ @register_type("unique-list", list)
+-def _unique_list(value: list[Any], printer: ISortPrettyPrinter) -> str:
+-    return printer.pformat(sorted(set(value)))
++def _unique_list(value: list[Any], config: Config) -> str:
++    return format_literal(sorted(set(value)), config, "[", "]")
+ 
+ 
+ @register_type("set", set)
+-def _set(value: set[Any], printer: ISortPrettyPrinter) -> str:
+-    return "{" + printer.pformat(tuple(sorted(value)))[1:-1] + "}"
++def _set(value: set[Any], config: Config) -> str:
++    return format_literal(sorted(value), config, "{", "}")
+ 
+ 
+ @register_type("tuple", tuple)
+-def _tuple(value: tuple[Any, ...], printer: ISortPrettyPrinter) -> str:
+-    return printer.pformat(tuple(sorted(value)))
++def _tuple(value: tuple[Any, ...], config: Config) -> str:
++    return format_literal(tuple(sorted(value)), config, "(", ")")
+ 
+ 
+ @register_type("unique-tuple", tuple)
+-def _unique_tuple(value: tuple[Any, ...], printer: ISortPrettyPrinter) -> str:
+-    return printer.pformat(tuple(sorted(set(value))))
++def _unique_tuple(value: tuple[Any, ...], config: Config) -> str:
++    return format_literal(tuple(sorted(set(value))), config, "(", ")")

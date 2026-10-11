@@ -1,0 +1,73 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index ef367e1..0501dbb 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -331,6 +331,9 @@ _TRANSACTION_CONTROL_PREFIXES = (
+     "ROLLBACK",
+     "SAVEPOINT",
+     "RELEASE",
++    "VACUUM",
++    "ATTACH",
++    "DETACH",
+ )
+ 
+ 
+@@ -658,15 +661,34 @@ class Database:
+         :param params: Parameters to use in that query - an iterable for ``where id = ?``
+           parameters, or a dictionary for ``where id = :id``
+         :raises ValueError: if the SQL statement does not return rows - use
+-          :meth:`execute` for those statements instead
++          :meth:`execute` for those statements instead. Rejected statements are
++          rolled back and have no effect on the database.
+         """
+-        was_in_transaction = self.conn.in_transaction
+-        cursor = self.execute(sql, params or tuple())
+-        if cursor.description is None:
++        sql_upper = sql.lstrip().upper()
++        if sql_upper.startswith(_TRANSACTION_CONTROL_PREFIXES):
+             raise ValueError(
+-                "query() can only be used with SQL that returns rows - "
+-                "use execute() for other statements"
++                f"query() cannot be used with transaction control or maintenance "
++                f"statements: {sql}"
+             )
++
++        was_in_transaction = self.conn.in_transaction
++        if sql_upper.startswith("PRAGMA"):
++            cursor = self.execute(sql, params or tuple())
++        else:
++            self.conn.execute("SAVEPOINT query_savepoint")
++            try:
++                cursor = self.execute(sql, params or tuple())
++                if cursor.description is None:
++                    raise ValueError(
++                        "query() can only be used with SQL that returns rows - "
++                        "use execute() for other statements"
++                    )
++                # We can't release the savepoint yet because the cursor is still active.
++                # It will be released when the transaction is committed or rolled back.
++            except Exception:
++                self.conn.execute("ROLLBACK TO SAVEPOINT query_savepoint")
++                raise
++
+         keys = [d[0] for d in cursor.description]
+ 
+         def rows() -> Generator[dict, None, None]:
+@@ -678,6 +700,17 @@ class Database:
+                 # been consumed
+                 self.conn.execute("COMMIT")
+ 
++        # If this was a row-returning write (like INSERT ... RETURNING),
++        # it may have opened an implicit transaction. We should commit it
++        # immediately to match execute()'s behavior, unless we are in an
++        # explicit transaction.
++        if (
++            not was_in_transaction
++            and self.conn.in_transaction
++            and not sql_upper.startswith("PRAGMA")
++        ):
++            self.conn.execute("COMMIT")
++
+         return rows()
+ 
+     def execute(

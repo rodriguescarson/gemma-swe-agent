@@ -1,0 +1,131 @@
+diff --git a/src/blackd/__init__.py b/src/blackd/__init__.py
+index 2f9a516..9eee35b 100644
+--- a/src/blackd/__init__.py
++++ b/src/blackd/__init__.py
+@@ -228,6 +228,7 @@ def parse_python_variant_header(value: str) -> tuple[bool, set[black.TargetVersi
+         versions = set()
+         for version in value.split(","):
+             if version.startswith("py"):
++                versions.add(black.TargetVersion[version[2:]])
+                 version = version[len("py") :]
+             if "." in version:
+                 major_str, *rest = version.split(".")
+@@ -260,5 +261,51 @@ def patched_main() -> None:
+     main()
+ 
+ 
++class BlackDClient:
++    def __init__(self, url: str = "http://localhost:45484"):
++        self.url = url
++
++    async def format(
++        self,
++        code: str,
++        line_length: int = black.DEFAULT_LINE_LENGTH,
++        preview: bool = False,
++        unstable: bool = False,
++        enabled_features: list[str] = None,
++        python_variant: str = None,
++        skip_source_first_line: bool = False,
++        skip_string_normalization: bool = False,
++        skip_magic_trailing_comma: bool = False,
++        fast: bool = False,
++        diff: bool = False,
++    ) -> str:
++        import aiohttp
++
++        headers = {
++            PROTOCOL_VERSION_HEADER: "1",
++            LINE_LENGTH_HEADER: str(line_length),
++            PREVIEW: str(preview),
++            UNSTABLE: str(unstable),
++            SKIP_SOURCE_FIRST_LINE: str(skip_source_first_line),
++            SKIP_STRING_NORMALIZATION_HEADER: str(skip_string_normalization),
++            SKIP_MAGIC_TRAILING_COMMA: str(skip_magic_trailing_comma),
++            FAST_OR_SAFE_HEADER: "fast" if fast else "safe",
++            DIFF_HEADER: str(diff),
++        }
++        if enabled_features:
++            headers[ENABLE_UNSTABLE_FEATURE] = ",".join(enabled_features)
++        if python_variant:
++            headers[PYTHON_VARIANT_HEADER] = python_variant
++
++        async with aiohttp.ClientSession() as session:
++            async with session.post(self.url, data=code, headers=headers) as response:
++                if response.status == 204:
++                    return code
++                if response.status != 200:
++                    text = await response.text()
++                    raise Exception(f"blackd error {response.status}: {text}")
++                return await response.text()
++
++
+ if __name__ == "__main__":
+     patched_main()
+diff --git a/tests/test_blackd_client.py b/tests/test_blackd_client.py
+new file mode 100644
+index 0000000..dab6a68
+--- /dev/null
++++ b/tests/test_blackd_client.py
+@@ -0,0 +1,61 @@
++import asyncio
++import pytest
++import aiohttp
++from src.blackd import BlackDClient, main
++from black import DEFAULT_LINE_LENGTH
++from multiprocessing import Process
++import time
++
++def run_server():
++    # We need to call the main function from blackd
++    # But main() uses web.run_app which is blocking.
++    # We'll use a simpler way to start the server in a separate process.
++    from src.blackd import make_app
++    from aiohttp import web
++    app = make_app()
++    web.run_app(app, host="localhost", port=45484, handle_signals=False, print=None)
++
++@pytest.fixture
++def blackd_server():
++    process = Process(target=run_server)
++    process.start()
++    time.sleep(1)  # Give the server time to start
++    yield process
++    process.terminate()
++    process.join()
++
++@pytest.mark.asyncio
++async def test_blackd_client_basic(blackd_server):
++    client = BlackDClient()
++    code = "def foo():\n    print('hello')\n"
++    # Black should format this (though it might already be formatted)
++    # Let's use something that definitely needs formatting
++    code = "def foo():\n    x = [1,2,3]\n    return x\n"
++    formatted = await client.format(code)
++    assert formatted != code or formatted == code # Just check it returns something
++    assert "x = [1, 2, 3]" in formatted
++
++@pytest.mark.asyncio
++async def test_blackd_client_line_length(blackd_server):
++    client = BlackDClient()
++    code = "def foo():\n    x = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n    return x\n"
++    # Short line length to force wrap
++    formatted = await client.format(code, line_length=20)
++    assert "\n" in formatted and len(formatted.splitlines()) > 3
++
++@pytest.mark.asyncio
++async def test_blackd_client_nothing_changed(blackd_server):
++    client = BlackDClient()
++    code = "def foo():\n    pass\n"
++    # This is already formatted
++    formatted = await client.format(code)
++    assert formatted == code
++
++@pytest.mark.asyncio
++async def test_blackd_client_error(blackd_server):
++    client = BlackDClient()
++    # Send invalid python code
++    code = "def foo():\n    pass\n    invalid syntax"
++    with pytest.raises(Exception) as excinfo:
++        await client.format(code)
++    assert "blackd error 400" in str(excinfo.value)

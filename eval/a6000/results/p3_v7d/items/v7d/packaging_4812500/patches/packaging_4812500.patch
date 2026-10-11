@@ -1,0 +1,130 @@
+diff --git a/src/packaging/specifiers.py b/src/packaging/specifiers.py
+index 5671638..84c291a 100644
+--- a/src/packaging/specifiers.py
++++ b/src/packaging/specifiers.py
+@@ -540,25 +540,7 @@ class Specifier(BaseSpecifier):
+         >>> Specifier(">=1.2.3").contains("1.3.0a1", prereleases=True)
+         True
+         """
+-
+-        # Determine if prereleases are to be allowed or not.
+-        if prereleases is None:
+-            prereleases = self.prereleases
+-
+-        # Normalize item to a Version, this allows us to have a shortcut for
+-        # "2.0" in Specifier(">=2")
+-        normalized_item = _coerce_version(item)
+-
+-        # Determine if we should be supporting prereleases in this specifier
+-        # or not, if we do not support prereleases than we can short circuit
+-        # logic if this version is a prereleases.
+-        if normalized_item.is_prerelease and not prereleases:
+-            return False
+-
+-        # Actually do the comparison to determine if this item is contained
+-        # within this Specifier or not.
+-        operator_callable: CallableOperator = self._get_operator(self.operator)
+-        return operator_callable(normalized_item, self.version)
++        return item in list(self.filter([item], prereleases=prereleases))
+ 
+     def filter(
+         self, iterable: Iterable[UnparsedVersionVar], prereleases: bool | None = None
+@@ -600,7 +582,7 @@ class Specifier(BaseSpecifier):
+         for version in iterable:
+             parsed_version = _coerce_version(version)
+ 
+-            if self.contains(parsed_version, **kw):
++            if self._contains(parsed_version, **kw):
+                 # If our version is a prerelease, and we were not set to allow
+                 # prereleases, then we'll store it for later in case nothing
+                 # else matches this specifier.
+@@ -909,33 +891,7 @@ class SpecifierSet(BaseSpecifier):
+         >>> SpecifierSet(">=1.0.0,!=1.0.1").contains("1.3.0a1", prereleases=True)
+         True
+         """
+-        # Ensure that our item is a Version instance.
+-        if not isinstance(item, Version):
+-            item = Version(item)
+-
+-        # Determine if we're forcing a prerelease or not, if we're not forcing
+-        # one for this particular filter call, then we'll use whatever the
+-        # SpecifierSet thinks for whether or not we should support prereleases.
+-        if prereleases is None:
+-            prereleases = self.prereleases
+-
+-        # We can determine if we're going to allow pre-releases by looking to
+-        # see if any of the underlying items supports them. If none of them do
+-        # and this item is a pre-release then we do not allow it and we can
+-        # short circuit that here.
+-        # Note: This means that 1.0.dev1 would not be contained in something
+-        #       like >=1.0.devabc however it would be in >=1.0.debabc,>0.0.dev0
+-        if not prereleases and item.is_prerelease:
+-            return False
+-
+-        if installed and item.is_prerelease:
+-            item = Version(item.base_version)
+-
+-        # We simply dispatch to the underlying specs here to make sure that the
+-        # given version is contained within all of them.
+-        # Note: This use of all() here means that an empty set of specifiers
+-        #       will always return True, this is an explicit design decision.
+-        return all(s.contains(item, prereleases=prereleases) for s in self._specs)
++        return item in list(self.filter([item], prereleases=prereleases))
+ 
+     def filter(
+         self, iterable: Iterable[UnparsedVersionVar], prereleases: bool | None = None
+@@ -978,40 +934,37 @@ class SpecifierSet(BaseSpecifier):
+         >>> list(SpecifierSet("").filter(["1.3", "1.5a1"], prereleases=True))
+         ['1.3', '1.5a1']
+         """
+-        # Determine if we're forcing a prerelease or not, if we're not forcing
+-        # one for this particular filter call, then we'll use whatever the
+-        # SpecifierSet thinks for whether or not we should support prereleases.
+-        if prereleases is None:
+-            prereleases = self.prereleases
+-
+         # If we have any specifiers, then we want to wrap our iterable in the
+         # filter method for each one, this will act as a logical AND amongst
+         # each specifier.
+         if self._specs:
++            # We want to wrap our iterable in the filter method for each specifier,
++            # this will act as a logical AND amongst each specifier.
++            # We start with the original iterable and then filter it through each specifier.
++            # This ensures that we only keep versions that satisfy all specifiers.
++            # The prerelease logic is handled by Specifier.filter.
+             for spec in self._specs:
+-                iterable = spec.filter(iterable, prereleases=bool(prereleases))
++                iterable = spec.filter(iterable, prereleases=prereleases)
+             return iter(iterable)
+         # If we do not have any specifiers, then we need to have a rough filter
+         # which will filter out any pre-releases, unless there are no final
+         # releases.
+         else:
++            # This is the case for an empty SpecifierSet.
++            # We can use a dummy Specifier to reuse the filter logic.
++            # A Specifier with no constraints (e.g., ">=0") would match everything.
++            # But we can just implement the simple logic here or use a dummy.
++            # Let's implement it consistently with Specifier.filter.
+             filtered: list[UnparsedVersionVar] = []
+             found_prereleases: list[UnparsedVersionVar] = []
+-
+             for item in iterable:
+                 parsed_version = _coerce_version(item)
+-
+-                # Store any item which is a pre-release for later unless we've
+-                # already found a final version or we are accepting prereleases
+-                if parsed_version.is_prerelease and not prereleases:
+-                    if not filtered:
+-                        found_prereleases.append(item)
++                if parsed_version.is_prerelease and not (prereleases or self.prereleases):
++                    found_prereleases.append(item)
+                 else:
+                     filtered.append(item)
+ 
+-            # If we've found no items except for pre-releases, then we'll go
+-            # ahead and use the pre-releases
+-            if not filtered and found_prereleases and prereleases is None:
++            if not filtered and found_prereleases:
+                 return iter(found_prereleases)
+ 
+             return iter(filtered)

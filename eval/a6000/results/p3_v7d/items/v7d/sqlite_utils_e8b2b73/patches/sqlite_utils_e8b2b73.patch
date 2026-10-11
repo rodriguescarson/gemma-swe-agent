@@ -1,0 +1,87 @@
+diff --git a/sqlite_utils/cli.py b/sqlite_utils/cli.py
+index ba55e61..6988992 100644
+--- a/sqlite_utils/cli.py
++++ b/sqlite_utils/cli.py
+@@ -335,6 +335,12 @@ def insert_upsert_options(fn):
+                 type=(str, str),
+                 help="Default value that should be set for a column",
+             ),
++            click.option(
++                "--conversions",
++                multiple=True,
++                type=(str, str),
++                help="Column conversions, e.g. column:func",
++            ),
+         )
+     ):
+         fn = decorator(fn)
+@@ -378,6 +384,8 @@ def insert_upsert_implementation(
+         extra_kwargs["not_null"] = set(not_null)
+     if default:
+         extra_kwargs["defaults"] = dict(default)
++    if conversions:
++        extra_kwargs["conversions"] = dict(conversions)
+     if upsert:
+         extra_kwargs["upsert"] = upsert
+     db[table].insert_all(
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index 0a81a60..c2956f0 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -855,7 +855,7 @@ class Table(Queryable):
+         return self.db.conn.execute(sql, (q,)).fetchall()
+ 
+     def value_or_default(self, key, value):
+-        return self._defaults[key] if value is DEFAULT else value
++        return self._defaults.get(key, DEFAULT) if value is DEFAULT else value
+ 
+     def delete(self, pk_values):
+         if not isinstance(pk_values, (list, tuple)):
+@@ -924,6 +924,7 @@ class Table(Queryable):
+         ignore=DEFAULT,
+         replace=DEFAULT,
+         extracts=DEFAULT,
++        conversions=DEFAULT,
+     ):
+         return self.insert_all(
+             [record],
+@@ -937,6 +938,7 @@ class Table(Queryable):
+             ignore=ignore,
+             replace=replace,
+             extracts=extracts,
++            conversions=conversions,
+         )
+ 
+     def insert_all(
+@@ -953,6 +955,7 @@ class Table(Queryable):
+         ignore=DEFAULT,
+         replace=DEFAULT,
+         extracts=DEFAULT,
++        conversions=DEFAULT,
+         upsert=False,
+     ):
+         """
+@@ -973,6 +976,9 @@ class Table(Queryable):
+         ignore = self.value_or_default("ignore", ignore)
+         replace = self.value_or_default("replace", replace)
+         extracts = self.value_or_default("extracts", extracts)
++        conversions = self.value_or_default("conversions", conversions)
++        if conversions is DEFAULT:
++            conversions = {}
+ 
+         assert not (hash_id and pk), "Use either pk= or hash_id="
+         assert not (
+@@ -1024,9 +1030,10 @@ class Table(Queryable):
+             for record in chunk:
+                 record_values = []
+                 for key in all_columns:
+-                    value = jsonify_if_needed(
+-                        record.get(key, None if key != hash_id else _hash(record))
+-                    )
++                    value = record.get(key, None if key != hash_id else _hash(record))
++                    if conversions and key in conversions:
++                        value = conversions[key](value)
++                    value = jsonify_if_needed(value)
+                     if key in extracts:
+                         extract_table = extracts[key]
+                         value = self.db[extract_table].lookup({"value": value})

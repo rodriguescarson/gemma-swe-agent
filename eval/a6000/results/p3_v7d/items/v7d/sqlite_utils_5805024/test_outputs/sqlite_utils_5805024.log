@@ -1,0 +1,361 @@
+STDOUT:
+........................................................................ [ 90%]
+...FFFFF                                                                 [100%]
+=================================== FAILURES ===================================
+____________________________ test_creates_id_column ____________________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d5f30>>
+
+    def test_creates_id_column(fresh_db):
+>       last_pk = fresh_db.table("cats", pk="id").insert({"name": "barry"}).last_pk
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_create.py:740: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:787: in insert
+    return self.insert_all(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Table cats (name)>, records = [{'name': 'barry'}], pk = 'id'
+foreign_keys = None, column_order = None, not_null = None, defaults = None
+upsert = False, batch_size = 100, hash_id = None, alter = False, ignore = False
+
+    def insert_all(
+        self,
+        records,
+        pk=DEFAULT,
+        foreign_keys=DEFAULT,
+        column_order=DEFAULT,
+        not_null=DEFAULT,
+        defaults=DEFAULT,
+        upsert=DEFAULT,
+        batch_size=DEFAULT,
+        hash_id=DEFAULT,
+        alter=DEFAULT,
+        ignore=DEFAULT,
+    ):
+        """
+        Like .insert() but takes a list of records and ensures that the table
+        that it creates (if table does not exist) has columns for ALL of that
+        data
+        """
+        pk = self.value_or_default("pk", pk)
+        foreign_keys = self.value_or_default("foreign_keys", foreign_keys)
+        column_order = self.value_or_default("column_order", column_order)
+        not_null = self.value_or_default("not_null", not_null)
+        defaults = self.value_or_default("defaults", defaults)
+        upsert = self.value_or_default("upsert", upsert)
+        batch_size = self.value_or_default("batch_size", batch_size)
+        hash_id = self.value_or_default("hash_id", hash_id)
+        alter = self.value_or_default("alter", alter)
+        ignore = self.value_or_default("ignore", ignore)
+    
+        assert not (hash_id and pk), "Use either pk= or hash_id="
+        assert not (
+            ignore and upsert
+        ), "Use either ignore=True or upsert=True, not both"
+        all_columns = None
+        first = True
+        for chunk in chunks(records, batch_size):
+            chunk = list(chunk)
+            if first:
+                if not self.exists:
+                    # Use the first batch to derive the table names
+                    self.create(
+                        self.detect_column_types(chunk),
+                        pk,
+                        foreign_keys,
+                        column_order=column_order,
+                        not_null=not_null,
+                        defaults=defaults,
+                        hash_id=hash_id,
+                    )
+                all_columns = set()
+                for record in chunk:
+                    all_columns.update(record.keys())
+                all_columns = list(sorted(all_columns))
+                if hash_id:
+                    all_columns.insert(0, hash_id)
+            first = False
+            or_what = ""
+            if upsert:
+                or_what = "OR REPLACE "
+            elif ignore:
+                or_what = "OR IGNORE "
+            sql = """
+                INSERT {or_what}INTO [{table}] ({columns}) VALUES {rows};
+            """.format(
+                or_what=or_what,
+                table=self.name,
+                columns=", ".join("[{}]".format(c) for c in all_columns),
+                rows=", ".join(
+                    """
+                    ({placeholders})
+                """.format(
+                        placeholders=", ".join(["?"] * len(all_columns))
+                    )
+                    for record in chunk
+                ),
+            )
+            values = []
+            for record in chunk:
+                values.extend(
+                    jsonify_if_needed(
+                        record.get(key, None if key != hash_id else _hash(record))
+                    )
+                    for key in all_columns
+                )
+            with self.db.conn:
+                try:
+                    result = self.db.conn.execute(sql, values)
+                except sqlite3.OperationalError as e:
+                    if alter and (" has no column " in e.args[0]):
+                        # Attempt to add any missing columns, then try again
+                        self.add_missing_columns(chunk)
+                        result = self.db.conn.execute(sql, values)
+                    else:
+                        raise
+                self.last_rowid = result.lastrowid
+                self.last_pk = None
+                # self.last_rowid will be 0 if a "INSERT OR IGNORE" happened
+                if (hash_id or pk) and self.last_rowid:
+                    row = list(self.rows_where("rowid = ?", [self.last_rowid]))[0]
+                    if hash_id:
+                        self.last_pk = row[hash_id]
+                    elif isinstance(pk, str):
+>                       self.last_pk = row[pk]
+                                       ^^^^^^^
+E                       KeyError: 'id'
+
+sqlite_utils/db.py:903: KeyError
+____________________________ test_lookup_new_table _____________________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d4a90>>
+
+    def test_lookup_new_table(fresh_db):
+        species = fresh_db["species"]
+        palm_id = species.lookup({"name": "Palm"})
+        oak_id = species.lookup({"name": "Oak"})
+        cherry_id = species.lookup({"name": "Cherry"})
+        assert palm_id == species.lookup({"name": "Palm"})
+        assert oak_id == species.lookup({"name": "Oak"})
+        assert cherry_id == species.lookup({"name": "Cherry"})
+>       assert palm_id != oak_id != cherry_id
+E       assert None != None
+
+tests/test_lookup.py:13: AssertionError
+______________________ test_lookup_new_table_compound_key ______________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d63e0>>
+
+    def test_lookup_new_table_compound_key(fresh_db):
+        species = fresh_db["species"]
+        palm_id = species.lookup({"name": "Palm", "type": "Tree"})
+        oak_id = species.lookup({"name": "Oak", "type": "Tree"})
+        assert palm_id == species.lookup({"name": "Palm", "type": "Tree"})
+        assert oak_id == species.lookup({"name": "Oak", "type": "Tree"})
+>       assert [
+            Index(
+                seq=0,
+                name="idx_species_name_type",
+                unique=1,
+                origin="c",
+                partial=0,
+                columns=["name", "type"],
+            )
+        ] == species.indexes
+E       AssertionError: assert [Index(seq=0,...me', 'type'])] == []
+E         
+E         Left contains one more item: Index(seq=0, name='idx_species_name_type', unique=1, origin='c', partial=0, columns=['name', 'type'])
+E         Use -v to get more diff
+
+tests/test_lookup.py:33: AssertionError
+_____________ test_lookup_adds_unique_constraint_to_existing_table _____________
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d6890>>
+
+    def test_lookup_adds_unique_constraint_to_existing_table(fresh_db):
+        species = fresh_db.table("species", pk="id")
+>       palm_id = species.insert({"name": "Palm"}).last_pk
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_lookup.py:47: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:787: in insert
+    return self.insert_all(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Table species (name)>, records = [{'name': 'Palm'}], pk = 'id'
+foreign_keys = None, column_order = None, not_null = None, defaults = None
+upsert = False, batch_size = 100, hash_id = None, alter = False, ignore = False
+
+    def insert_all(
+        self,
+        records,
+        pk=DEFAULT,
+        foreign_keys=DEFAULT,
+        column_order=DEFAULT,
+        not_null=DEFAULT,
+        defaults=DEFAULT,
+        upsert=DEFAULT,
+        batch_size=DEFAULT,
+        hash_id=DEFAULT,
+        alter=DEFAULT,
+        ignore=DEFAULT,
+    ):
+        """
+        Like .insert() but takes a list of records and ensures that the table
+        that it creates (if table does not exist) has columns for ALL of that
+        data
+        """
+        pk = self.value_or_default("pk", pk)
+        foreign_keys = self.value_or_default("foreign_keys", foreign_keys)
+        column_order = self.value_or_default("column_order", column_order)
+        not_null = self.value_or_default("not_null", not_null)
+        defaults = self.value_or_default("defaults", defaults)
+        upsert = self.value_or_default("upsert", upsert)
+        batch_size = self.value_or_default("batch_size", batch_size)
+        hash_id = self.value_or_default("hash_id", hash_id)
+        alter = self.value_or_default("alter", alter)
+        ignore = self.value_or_default("ignore", ignore)
+    
+        assert not (hash_id and pk), "Use either pk= or hash_id="
+        assert not (
+            ignore and upsert
+        ), "Use either ignore=True or upsert=True, not both"
+        all_columns = None
+        first = True
+        for chunk in chunks(records, batch_size):
+            chunk = list(chunk)
+            if first:
+                if not self.exists:
+                    # Use the first batch to derive the table names
+                    self.create(
+                        self.detect_column_types(chunk),
+                        pk,
+                        foreign_keys,
+                        column_order=column_order,
+                        not_null=not_null,
+                        defaults=defaults,
+                        hash_id=hash_id,
+                    )
+                all_columns = set()
+                for record in chunk:
+                    all_columns.update(record.keys())
+                all_columns = list(sorted(all_columns))
+                if hash_id:
+                    all_columns.insert(0, hash_id)
+            first = False
+            or_what = ""
+            if upsert:
+                or_what = "OR REPLACE "
+            elif ignore:
+                or_what = "OR IGNORE "
+            sql = """
+                INSERT {or_what}INTO [{table}] ({columns}) VALUES {rows};
+            """.format(
+                or_what=or_what,
+                table=self.name,
+                columns=", ".join("[{}]".format(c) for c in all_columns),
+                rows=", ".join(
+                    """
+                    ({placeholders})
+                """.format(
+                        placeholders=", ".join(["?"] * len(all_columns))
+                    )
+                    for record in chunk
+                ),
+            )
+            values = []
+            for record in chunk:
+                values.extend(
+                    jsonify_if_needed(
+                        record.get(key, None if key != hash_id else _hash(record))
+                    )
+                    for key in all_columns
+                )
+            with self.db.conn:
+                try:
+                    result = self.db.conn.execute(sql, values)
+                except sqlite3.OperationalError as e:
+                    if alter and (" has no column " in e.args[0]):
+                        # Attempt to add any missing columns, then try again
+                        self.add_missing_columns(chunk)
+                        result = self.db.conn.execute(sql, values)
+                    else:
+                        raise
+                self.last_rowid = result.lastrowid
+                self.last_pk = None
+                # self.last_rowid will be 0 if a "INSERT OR IGNORE" happened
+                if (hash_id or pk) and self.last_rowid:
+                    row = list(self.rows_where("rowid = ?", [self.last_rowid]))[0]
+                    if hash_id:
+                        self.last_pk = row[hash_id]
+                    elif isinstance(pk, str):
+>                       self.last_pk = row[pk]
+                                       ^^^^^^^
+E                       KeyError: 'id'
+
+sqlite_utils/db.py:903: KeyError
+_______________ test_lookup_fails_if_constraint_cannot_be_added ________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d6c50>>
+
+    def test_lookup_fails_if_constraint_cannot_be_added(fresh_db):
+        species = fresh_db.table("species", pk="id")
+        species.insert_all([{"id": 1, "name": "Palm"}, {"id": 2, "name": "Palm"}])
+        # This will fail because the name column is not unique
+        with pytest.raises(Exception, match="UNIQUE constraint failed"):
+>           species.lookup({"name": "Palm"})
+
+tests/test_lookup.py:68: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:477: in lookup
+    return self.get(pk_values)
+           ^^^^^^^^^^^^^^^^^^^
+sqlite_utils/db.py:469: in get
+    row = list(rows)[0]
+          ^^^^^^^^^^
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Table species (id, name)>, where = '[id] = ?'
+where_args = [{'name': 'Palm'}]
+
+    def rows_where(self, where=None, where_args=None):
+        if not self.exists:
+            return []
+        sql = "select * from [{}]".format(self.name)
+        if where is not None:
+            sql += " where " + where
+>       cursor = self.db.conn.execute(sql, where_args or [])
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       sqlite3.ProgrammingError: Error binding parameter 1: type 'dict' is not supported
+
+sqlite_utils/db.py:435: ProgrammingError
+
+During handling of the above exception, another exception occurred:
+
+fresh_db = <Database <sqlite3.Connection object at 0x7e84ee6d6c50>>
+
+    def test_lookup_fails_if_constraint_cannot_be_added(fresh_db):
+        species = fresh_db.table("species", pk="id")
+        species.insert_all([{"id": 1, "name": "Palm"}, {"id": 2, "name": "Palm"}])
+        # This will fail because the name column is not unique
+>       with pytest.raises(Exception, match="UNIQUE constraint failed"):
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'UNIQUE constraint failed'
+E        Input: "Error binding parameter 1: type 'dict' is not supported"
+
+tests/test_lookup.py:67: AssertionError
+- generated xml file: /tmp/sbx_v7d_sqlite_utils_5805024/swegemma_sandbox_31b2f4c9-7d4_acuehv5x/tmp/_swegemma_junit_7d5448363bef.xml -
+=========================== short test summary info ============================
+FAILED tests/test_create.py::test_creates_id_column - KeyError: 'id'
+FAILED tests/test_lookup.py::test_lookup_new_table - assert None != None
+FAILED tests/test_lookup.py::test_lookup_new_table_compound_key - AssertionEr...
+FAILED tests/test_lookup.py::test_lookup_adds_unique_constraint_to_existing_table
+FAILED tests/test_lookup.py::test_lookup_fails_if_constraint_cannot_be_added
+5 failed, 75 passed in 0.65s
+
+STDERR:
+[2026-10-11 01:20:55,332] WARNING in core: flasgger is not installed; serving the static landing page at / and skipping the Swagger UI and /spec.json.

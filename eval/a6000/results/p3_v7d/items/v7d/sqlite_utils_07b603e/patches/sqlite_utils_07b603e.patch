@@ -1,0 +1,94 @@
+diff --git a/sqlite_utils/cli.py b/sqlite_utils/cli.py
+index a30f79a..94a9e41 100644
+--- a/sqlite_utils/cli.py
++++ b/sqlite_utils/cli.py
+@@ -3506,7 +3506,7 @@ def output_rows(iterator, headers, nl, arrays, json_cols):
+             # Any value that is a valid JSON string should be treated as JSON
+             data = [maybe_json(value) for value in data]
+         if not arrays:
+-            data = dict(zip(headers, data))
++            data = dict(zip(dedupe_keys(headers), data))
+         line = "{firstchar}{serialized}{maybecomma}{lastchar}".format(
+             firstchar=("[" if first else " ") if not nl else "",
+             serialized=json.dumps(data, default=json_binary),
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index 3f23c7d..61b5376 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -8,6 +8,7 @@ from .utils import (
+     column_affinity,
+     progressbar,
+     find_spatialite,
++    dedupe_keys,
+ )
+ import binascii
+ from collections import namedtuple
+@@ -787,6 +788,7 @@ class Database:
+             if cursor.description is None:
+                 raise ValueError(message)
+             keys = [d[0] for d in cursor.description]
++            keys = dedupe_keys(keys)
+             return (dict(zip(keys, row)) for row in cursor)
+         # Execute inside a savepoint, so a statement that turns out not to
+         # return rows can be rolled back before the ValueError is raised
+@@ -807,9 +809,11 @@ class Database:
+                 # release again - committing the write immediately, unless an
+                 # outer transaction is open
+                 fetched = cursor.fetchall()
+-                self.conn.execute('RELEASE "sqlite_utils_query"')
++                self.conn.execute('RELEASE \"sqlite_utils_query\"')
+                 released = True
++                keys = dedupe_keys(keys)
+                 return (dict(zip(keys, row)) for row in fetched)
++            keys = dedupe_keys(keys)
+             return (dict(zip(keys, row)) for row in cursor)
+         finally:
+             if not released:
+@@ -1866,6 +1870,7 @@ class Queryable:
+             sql += " offset {}".format(offset)
+         cursor = self.db.execute(sql, where_args or [])
+         columns = [c[0] for c in cursor.description]
++        columns = dedupe_keys(columns)
+         for row in cursor:
+             yield dict(zip(columns, row))
+ 
+@@ -3399,6 +3404,7 @@ class Table(Queryable):
+             args,
+         )
+         columns = [c[0] for c in cursor.description]
++        columns = dedupe_keys(columns)
+         for row in cursor:
+             yield dict(zip(columns, row))
+ 
+diff --git a/sqlite_utils/utils.py b/sqlite_utils/utils.py
+index 865ee79..45cb304 100644
+--- a/sqlite_utils/utils.py
++++ b/sqlite_utils/utils.py
+@@ -103,6 +103,27 @@ def maximize_csv_field_size_limit() -> None:
+             field_size_limit = int(field_size_limit / 10)
+ 
+ 
++def dedupe_keys(keys: Iterable[str]) -> List[str]:
++    """
++    Rename duplicate keys by adding a numeric suffix (e.g. id, id_2).
++    """
++    seen = set()
++    deduped = []
++    for key in keys:
++        if key in seen:
++            suffix = 2
++            new_key = f"{key}_{suffix}"
++            while new_key in seen:
++                suffix += 1
++                new_key = f"{key}_{suffix}"
++            deduped.append(new_key)
++            seen.add(new_key)
++        else:
++            deduped.append(key)
++            seen.add(key)
++    return deduped
++
++
+ def find_spatialite() -> Optional[str]:
+     """
+     The ``find_spatialite()`` function searches for the `SpatiaLite <https://www.gaia-gis.it/fossil/libspatialite/index>`__

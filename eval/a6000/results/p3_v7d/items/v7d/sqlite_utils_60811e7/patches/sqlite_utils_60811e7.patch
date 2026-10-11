@@ -1,0 +1,125 @@
+diff --git a/sqlite_utils/db.py b/sqlite_utils/db.py
+index bec68fc..58defeb 100644
+--- a/sqlite_utils/db.py
++++ b/sqlite_utils/db.py
+@@ -4271,6 +4271,8 @@ class Table(Queryable):
+             strict=strict,
+         )
+ 
++    ROWID_ALIASES = {"rowid", "_rowid_", "oid"}
++
+     def insert_all(
+         self,
+         records: Union[
+@@ -4346,7 +4348,10 @@ class Table(Queryable):
+             missing_pk_cols = [
+                 col
+                 for col in pk_cols
+-                if resolve_casing(col, existing_columns) not in existing_columns
++                if (
++                    resolve_casing(col, existing_columns) not in existing_columns
++                    and not (self.use_rowid and col in self.ROWID_ALIASES)
++                )
+             ]
+             if missing_pk_cols:
+                 invalid_pk_error = InvalidColumns(
+@@ -4512,37 +4517,37 @@ class Table(Queryable):
+             if not upsert and result is not None:
+                 ignored_insert = ignore and result.rowcount == 0
+                 if ignored_insert:
++                    # Find the existing row to populate last_rowid and last_pk
+                     if list_mode:
+                         first_record_list = cast(Sequence[Any], first_record)
+-                        if hash_id:
+-                            pass
+-                        elif isinstance(pk, str):
+-                            pk_index = column_names.index(
+-                                resolve_casing(pk, column_names)
+-                            )
+-                            self.last_pk = first_record_list[pk_index]
+-                        elif pk:
+-                            self.last_pk = tuple(
+-                                first_record_list[
+-                                    column_names.index(resolve_casing(p, column_names))
+-                                ]
+-                                for p in pk
+-                            )
++                        where_clause = " AND ".join(
++                            f"{col} = ?" for col in column_names
++                        )
++                        where_values = first_record_list
+                     else:
+                         first_record_dict = cast(Dict[str, Any], first_record)
++                        where_clause = " AND ".join(
++                            f"{col} = ?" for col in first_record_dict.keys()
++                        )
++                        where_values = list(first_record_dict.values())
++
++                    rows = list(self.rows_where(where_clause, where_values))
++                    if rows:
++                        row = rows[0]
++                        self.last_rowid = row["rowid"]
+                         if hash_id:
+                             self.last_pk = hash_record(
+-                                first_record_dict, hash_id_columns
++                                first_record_dict if not list_mode else dict(zip(column_names, first_record_list)),
++                                hash_id_columns
+                             )
+                         elif isinstance(pk, str):
+-                            self.last_pk = first_record_dict[
+-                                resolve_casing(pk, first_record_dict)
+-                            ]
++                            self.last_pk = row[resolve_casing(pk, row)]
+                         elif pk:
+                             self.last_pk = tuple(
+-                                first_record_dict[resolve_casing(p, first_record_dict)]
+-                                for p in pk
++                                row[resolve_casing(p, row)] for p in pk
+                             )
++                        else:
++                            self.last_pk = self.last_rowid
+                 else:
+                     self.last_rowid = result.lastrowid
+                     if (hash_id or pk) and self.last_rowid:
+diff --git a/tests/test_rowid_regressions.py b/tests/test_rowid_regressions.py
+new file mode 100644
+index 0000000..a96865e
+--- /dev/null
++++ b/tests/test_rowid_regressions.py
+@@ -0,0 +1,36 @@
++import pytest
++from sqlite_utils import Database
++
++def test_insert_pk_rowid():
++    db = Database(":memory:")
++    db["test"].insert({"name": "foo"})
++    # This should not raise InvalidColumns or KeyError
++    db["test"].insert({"name": "bar"}, pk="rowid")
++    assert db["test"].last_pk == 2
++
++def test_insert_ignore_last_rowid():
++    db = Database(":memory:")
++    db["test"].insert({"name": "foo"})
++    first_rowid = db["test"].last_rowid
++    
++    # Insert the same record with ignore=True
++    # Since there is no explicit PK, it's a rowid table.
++    # But wait, if there's no PK, how does it conflict?
++    # We need a UNIQUE constraint to trigger IGNORE.
++    db["test"].run("CREATE UNIQUE INDEX idx_name ON test(name)")
++    
++    db["test"].insert({"name": "foo"}, ignore=True)
++    
++    # It should have found the existing row and set last_rowid and last_pk
++    assert db["test"].last_rowid == first_rowid
++    assert db["test"].last_pk == first_rowid
++
++def test_insert_ignore_last_rowid_with_pk():
++    db = Database(":memory:")
++    db["test"].create({"id": "INTEGER PRIMARY KEY", "name": "TEXT"})
++    db["test"].insert({"id": 1, "name": "foo"})
++    
++    db["test"].insert({"id": 1, "name": "bar"}, ignore=True)
++    
++    assert db["test"].last_rowid == 1
++    assert db["test"].last_pk == 1

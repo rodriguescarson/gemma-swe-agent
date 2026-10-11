@@ -1,0 +1,312 @@
+diff --git a/src/marshmallow/base.py b/src/marshmallow/base.py
+deleted file mode 100644
+index fd05fcc..0000000
+--- a/src/marshmallow/base.py
++++ /dev/null
+@@ -1,33 +0,0 @@
+-"""Abstract base classes.
+-
+-These are necessary to avoid circular imports between schema.py and fields.py.
+-
+-.. warning::
+-
+-    This module is treated as private API.
+-    Users should not need to use this module directly.
+-"""
+-
+-from __future__ import annotations
+-
+-from abc import ABC, abstractmethod
+-
+-
+-class FieldABC(ABC):
+-    """Abstract base class from which all Field classes inherit."""
+-
+-    @abstractmethod
+-    def serialize(self, attr, obj, accessor=None):
+-        pass
+-
+-    @abstractmethod
+-    def deserialize(self, value):
+-        pass
+-
+-    @abstractmethod
+-    def _serialize(self, value, attr, obj, **kwargs):
+-        pass
+-
+-    @abstractmethod
+-    def _deserialize(self, value, attr, data, **kwargs):
+-        pass
+diff --git a/src/marshmallow/exceptions.py b/src/marshmallow/exceptions.py
+index 096b6bd..0c68495 100644
+--- a/src/marshmallow/exceptions.py
++++ b/src/marshmallow/exceptions.py
+@@ -67,5 +67,5 @@ class StringNotCollectionError(MarshmallowError, TypeError):
+     """Raised when a string is passed when a list of strings is expected."""
+ 
+ 
+-class FieldInstanceResolutionError(MarshmallowError, TypeError):
++class _FieldInstanceResolutionError(MarshmallowError, TypeError):
+     """Raised when schema to instantiate is neither a Schema class nor an instance."""
+diff --git a/src/marshmallow/fields.py b/src/marshmallow/fields.py
+index 76157f7..03fd4f8 100644
+--- a/src/marshmallow/fields.py
++++ b/src/marshmallow/fields.py
+@@ -26,16 +26,14 @@ else:
+     MonkeyPatch.patch_fromisoformat()
+ 
+ from marshmallow import class_registry, types, utils, validate
+-from marshmallow.base import FieldABC
+ from marshmallow.exceptions import (
+-    FieldInstanceResolutionError,
++    _FieldInstanceResolutionError,
+     StringNotCollectionError,
+     ValidationError,
+ )
+ from marshmallow.utils import (
+     is_aware,
+     is_collection,
+-    resolve_field_instance,
+ )
+ from marshmallow.utils import (
+     missing as missing_,
+@@ -105,7 +103,7 @@ class _BaseFieldKwargs(typing.TypedDict, total=False):
+     metadata: typing.Mapping[str, typing.Any] | None
+ 
+ 
+-class Field(FieldABC):
++class Field:
+     """Basic field from which other fields should extend. It applies no
+     formatting by default, and should only be used in cases where
+     data does not need to be formatted before being serialized or deserialized.
+@@ -361,7 +359,7 @@ class Field(FieldABC):
+         self.parent = self.parent or parent
+         self.name = self.name or field_name
+         self.root = self.root or (
+-            self.parent.root if isinstance(self.parent, FieldABC) else self.parent
++            self.parent.root if isinstance(self.parent, Field) else self.parent
+         )
+ 
+     def _serialize(
+@@ -690,10 +688,10 @@ class List(Field):
+         super().__init__(**kwargs)
+         try:
+             self.inner = resolve_field_instance(cls_or_instance)
+-        except FieldInstanceResolutionError as error:
++        except _FieldInstanceResolutionError as error:
+             raise ValueError(
+                 "The list elements must be a subclass or instance of "
+-                "marshmallow.base.FieldABC."
++                "marshmallow.fields.Field."
+             ) from error
+         if isinstance(self.inner, Nested):
+             self.only = self.inner.only
+@@ -767,10 +765,10 @@ class Tuple(Field):
+                 resolve_field_instance(cls_or_instance)
+                 for cls_or_instance in tuple_fields
+             ]
+-        except FieldInstanceResolutionError as error:
++        except _FieldInstanceResolutionError as error:
+             raise ValueError(
+                 'Elements of "tuple_fields" must be subclasses or '
+-                "instances of marshmallow.base.FieldABC."
++                "instances of marshmallow.fields.Field."
+             ) from error
+ 
+         self.validate_length = Length(equal=len(self.tuple_fields))
+@@ -1511,10 +1509,10 @@ class Mapping(Field):
+         else:
+             try:
+                 self.key_field = resolve_field_instance(keys)
+-            except FieldInstanceResolutionError as error:
++            except _FieldInstanceResolutionError as error:
+                 raise ValueError(
+                     '"keys" must be a subclass or instance of '
+-                    "marshmallow.base.FieldABC."
++                    "marshmallow.fields.Field."
+                 ) from error
+ 
+         if values is None:
+@@ -1522,10 +1520,10 @@ class Mapping(Field):
+         else:
+             try:
+                 self.value_field = resolve_field_instance(values)
+-            except FieldInstanceResolutionError as error:
++            except _FieldInstanceResolutionError as error:
+                 raise ValueError(
+                     '"values" must be a subclass or instance of '
+-                    "marshmallow.base.FieldABC."
++                    "marshmallow.fields.Field."
+                 ) from error
+             if isinstance(self.value_field, Nested):
+                 self.only = self.value_field.only
+@@ -1845,10 +1843,10 @@ class Enum(Field):
+             else:
+                 try:
+                     self.field = resolve_field_instance(by_value)
+-                except FieldInstanceResolutionError as error:
++                except _FieldInstanceResolutionError as error:
+                     raise ValueError(
+                         '"by_value" must be either a bool or a subclass or instance of '
+-                        "marshmallow.base.FieldABC."
++                        "marshmallow.fields.Field."
+                     ) from error
+             self.choices_text = ", ".join(
+                 str(self.field._serialize(m.value, None, None)) for m in enum
+diff --git a/src/marshmallow/schema.py b/src/marshmallow/schema.py
+index 111145e..4098a20 100644
+--- a/src/marshmallow/schema.py
++++ b/src/marshmallow/schema.py
+@@ -13,8 +13,8 @@ from abc import ABCMeta
+ from collections import defaultdict
+ from collections.abc import Mapping
+ 
+-from marshmallow import base, class_registry, types
+-from marshmallow import fields as ma_fields
++from marshmallow import class_registry, types
++from marshmallow import fields
+ from marshmallow.decorators import (
+     POST_DUMP,
+     POST_LOAD,
+@@ -47,7 +47,7 @@ def _get_fields(attrs):
+     return [
+         (field_name, field_value)
+         for field_name, field_value in attrs.items()
+-        if is_instance_or_subclass(field_value, base.FieldABC)
++        if is_instance_or_subclass(field_value, fields.Field)
+     ]
+ 
+ 
+@@ -252,21 +252,21 @@ class Schema(metaclass=SchemaMeta):
+         `prefix` parameter removed.
+     """
+ 
+-    TYPE_MAPPING: dict[type, type[ma_fields.Field]] = {
+-        str: ma_fields.String,
+-        bytes: ma_fields.String,
+-        dt.datetime: ma_fields.DateTime,
+-        float: ma_fields.Float,
+-        bool: ma_fields.Boolean,
+-        tuple: ma_fields.Raw,
+-        list: ma_fields.Raw,
+-        set: ma_fields.Raw,
+-        int: ma_fields.Integer,
+-        uuid.UUID: ma_fields.UUID,
+-        dt.time: ma_fields.Time,
+-        dt.date: ma_fields.Date,
+-        dt.timedelta: ma_fields.TimeDelta,
+-        decimal.Decimal: ma_fields.Decimal,
++    TYPE_MAPPING: dict[type, type[fields.Field]] = {
++        str: fields.String,
++        bytes: fields.String,
++        dt.datetime: fields.DateTime,
++        float: fields.Float,
++        bool: fields.Boolean,
++        tuple: fields.Raw,
++        list: fields.Raw,
++        set: fields.Raw,
++        int: fields.Integer,
++        uuid.UUID: fields.UUID,
++        dt.time: fields.Time,
++        dt.date: fields.Date,
++        dt.timedelta: fields.TimeDelta,
++        decimal.Decimal: fields.Decimal,
+     }
+     #: Overrides for default schema-level error messages
+     error_messages: dict[str, str] = {}
+@@ -283,7 +283,7 @@ class Schema(metaclass=SchemaMeta):
+ 
+     # These get set by SchemaMeta
+     opts: SchemaOpts
+-    _declared_fields: dict[str, ma_fields.Field] = {}
++    _declared_fields: dict[str, fields.Field] = {}
+     _hooks: dict[str, list[tuple[str, bool, dict]]] = {}
+ 
+     class Meta:
+@@ -358,9 +358,9 @@ class Schema(metaclass=SchemaMeta):
+         self.context = context or {}
+         self._normalize_nested_options()
+         #: Dictionary mapping field_names -> :class:`Field` objects
+-        self.fields: dict[str, ma_fields.Field] = {}
+-        self.load_fields: dict[str, ma_fields.Field] = {}
+-        self.dump_fields: dict[str, ma_fields.Field] = {}
++        self.fields: dict[str, fields.Field] = {}
++        self.load_fields: dict[str, fields.Field] = {}
++        self.dump_fields: dict[str, fields.Field] = {}
+         self._init_fields()
+         messages = {}
+         messages.update(self._default_error_messages)
+@@ -375,7 +375,7 @@ class Schema(metaclass=SchemaMeta):
+     @classmethod
+     def from_dict(
+         cls,
+-        fields: dict[str, ma_fields.Field],
++        fields: dict[str, fields.Field],
+         *,
+         name: str = "GeneratedSchema",
+     ) -> type[Schema]:
+@@ -964,14 +964,14 @@ class Schema(metaclass=SchemaMeta):
+         self.dump_fields = dump_fields
+         self.load_fields = load_fields
+ 
+-    def on_bind_field(self, field_name: str, field_obj: ma_fields.Field) -> None:
++    def on_bind_field(self, field_name: str, field_obj: fields.Field) -> None:
+         """Hook to modify a field when it is bound to the `Schema`.
+ 
+         No-op by default.
+         """
+         return None
+ 
+-    def _bind_field(self, field_name: str, field_obj: ma_fields.Field) -> None:
++    def _bind_field(self, field_name: str, field_obj: fields.Field) -> None:
+         """Bind field to the schema, setting any necessary attributes on the
+         field (e.g. parent and name).
+ 
+@@ -988,7 +988,7 @@ class Schema(metaclass=SchemaMeta):
+             # Field declared as a class, not an instance. Ignore type checking because
+             # we handle unsupported arg types, i.e. this is dead code from
+             # the type checker's perspective.
+-            if isinstance(field_obj, type) and issubclass(field_obj, base.FieldABC):
++            if isinstance(field_obj, type) and issubclass(field_obj, fields.Field):
+                 msg = (
+                     f'Field for "{field_name}" must be declared as a '
+                     "Field instance, not a class. "
+diff --git a/src/marshmallow/utils.py b/src/marshmallow/utils.py
+index b50fc02..b792daa 100644
+--- a/src/marshmallow/utils.py
++++ b/src/marshmallow/utils.py
+@@ -9,8 +9,6 @@ import typing
+ from collections.abc import Mapping
+ from email.utils import format_datetime, parsedate_to_datetime
+ 
+-from marshmallow.base import FieldABC
+-from marshmallow.exceptions import FieldInstanceResolutionError
+ 
+ EXCLUDE = "exclude"
+ INCLUDE = "include"
+@@ -257,18 +255,20 @@ def get_func_args(func: typing.Callable) -> list[str]:
+     return _signature(func)
+ 
+ 
+-def resolve_field_instance(cls_or_instance):
++def _resolve_field_instance(cls_or_instance):
+     """Return a Schema instance from a Schema class or instance.
+ 
+     :param type|Schema cls_or_instance: Marshmallow Schema class or instance.
+     """
++    from marshmallow.fields import Field
++    from marshmallow.exceptions import _FieldInstanceResolutionError
+     if isinstance(cls_or_instance, type):
+-        if not issubclass(cls_or_instance, FieldABC):
+-            raise FieldInstanceResolutionError
++        if not issubclass(cls_or_instance, Field):
++            raise _FieldInstanceResolutionError
+         return cls_or_instance()
+     else:
+-        if not isinstance(cls_or_instance, FieldABC):
+-            raise FieldInstanceResolutionError
++        if not isinstance(cls_or_instance, Field):
++            raise _FieldInstanceResolutionError
+         return cls_or_instance
+ 
+ 

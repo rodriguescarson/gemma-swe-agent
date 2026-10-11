@@ -1,0 +1,1879 @@
+STDOUT:
+......................FFFF..F.FFFF..F.FFF............................... [ 53%]
+..............................................................           [100%]
+=================================== FAILURES ===================================
+_ test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification0-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3733d0>>
+foreign_key_specification = (('one_id', 'one', 'id'), ('two_id', 'two', 'id'))
+expected_exception = False, use_table_factory = True
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:258: in do_it
+    fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3733d0>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification1-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb372d40>>
+foreign_key_specification = (('one_id', 'one'), ('two_id', 'two'))
+expected_exception = False, use_table_factory = True
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:258: in do_it
+    fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb372d40>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification2-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3734c0>>
+foreign_key_specification = ('one_id', 'two_id'), expected_exception = False
+use_table_factory = True
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:258: in do_it
+    fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3734c0>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification3-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373970>>
+foreign_key_specification = (ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id'))
+expected_exception = False, use_table_factory = True
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:258: in do_it
+    fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373970>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = (ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id'))
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification6-AlterError] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3736a0>>
+foreign_key_specification = (('one_id', 'one', 'id2'),)
+expected_exception = <class 'sqlite_utils.db.AlterError'>
+use_table_factory = True
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+>               do_it()
+
+tests/test_create.py:264: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:258: in do_it
+    fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3736a0>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id2')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification0-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3723e0>>
+foreign_key_specification = (('one_id', 'one', 'id'), ('two_id', 'two', 'id'))
+expected_exception = False, use_table_factory = False
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:260: in do_it
+    fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3723e0>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification1-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373a60>>
+foreign_key_specification = (('one_id', 'one'), ('two_id', 'two'))
+expected_exception = False, use_table_factory = False
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:260: in do_it
+    fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373a60>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification2-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373c40>>
+foreign_key_specification = ('one_id', 'two_id'), expected_exception = False
+use_table_factory = False
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:260: in do_it
+    fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373c40>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification3-False] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373e20>>
+foreign_key_specification = (ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id'))
+expected_exception = False, use_table_factory = False
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+                do_it()
+            return
+        else:
+>           do_it()
+
+tests/test_create.py:267: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:260: in do_it
+    fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373e20>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = (ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id'), ForeignKey(table='m2m', column='two_id', other_table='two', other_column='id'))
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+_ test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification6-AlterError] _
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373f10>>
+foreign_key_specification = (('one_id', 'one', 'id2'),)
+expected_exception = <class 'sqlite_utils.db.AlterError'>
+use_table_factory = False
+
+    @pytest.mark.parametrize(
+        "foreign_key_specification,expected_exception",
+        (
+            # You can specify triples, pairs, or a list of columns
+            ((("one_id", "one", "id"), ("two_id", "two", "id")), False),
+            ((("one_id", "one"), ("two_id", "two")), False),
+            (("one_id", "two_id"), False),
+            # You can also specify ForeignKey tuples:
+            (
+                (
+                    ForeignKey("m2m", "one_id", "one", "id"),
+                    ForeignKey("m2m", "two_id", "two", "id"),
+                ),
+                False,
+            ),
+            # If you specify a column that doesn't point to a table, you  get an error:
+            (("one_id", "two_id", "three_id"), NoObviousTable),
+            # Tuples of the wrong length get an error:
+            ((("one_id", "one", "id", "five"), ("two_id", "two", "id")), AssertionError),
+            # Likewise a bad column:
+            ((("one_id", "one", "id2"),), AlterError),
+            # Or a list of dicts
+            (({"one_id": "one"},), AssertionError),
+        ),
+    )
+    @pytest.mark.parametrize("use_table_factory", [True, False])
+    def test_create_table_works_for_m2m_with_only_foreign_keys(
+        fresh_db, foreign_key_specification, expected_exception, use_table_factory
+    ):
+        if use_table_factory:
+            fresh_db.table("one", pk="id").insert({"id": 1})
+            fresh_db.table("two", pk="id").insert({"id": 1})
+        else:
+            fresh_db["one"].insert({"id": 1}, pk="id")
+            fresh_db["two"].insert({"id": 1}, pk="id")
+    
+        row = {"one_id": 1, "two_id": 1}
+    
+        def do_it():
+            if use_table_factory:
+                fresh_db.table("m2m", foreign_keys=foreign_key_specification).insert(row)
+            else:
+                fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+    
+        if expected_exception:
+            with pytest.raises(expected_exception):
+>               do_it()
+
+tests/test_create.py:264: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/test_create.py:260: in do_it
+    fresh_db["m2m"].insert(row, foreign_keys=foreign_key_specification)
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373f10>>, name = 'm2m'
+columns = {'one_id': <class 'int'>, 'two_id': <class 'int'>}, pk = None
+foreign_keys = [ForeignKey(table='m2m', column='one_id', other_table='one', other_column='id2')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+______________________ test_self_referential_foreign_key _______________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3734c0>>
+
+    def test_self_referential_foreign_key(fresh_db):
+        assert [] == fresh_db.table_names()
+>       table = fresh_db.create_table(
+            "test_table",
+            columns={
+                "id": int,
+                "ref": int,
+            },
+            pk="id",
+            foreign_keys=(("ref", "test_table", "id"),),
+        )
+
+tests/test_create.py:293: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3734c0>>
+name = 'test_table', columns = {'id': <class 'int'>, 'ref': <class 'int'>}
+pk = 'id'
+foreign_keys = [ForeignKey(table='test_table', column='ref', other_table='test_table', other_column='id')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+__________________ test_create_error_if_invalid_foreign_keys ___________________
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb373a60>>
+
+    def test_create_error_if_invalid_foreign_keys(fresh_db):
+        with pytest.raises(AlterError):
+>           fresh_db["one"].insert(
+                {"id": 1, "ref_id": 3},
+                pk="id",
+                foreign_keys=(("ref_id", "bad_table", "bad_column"),),
+            )
+
+tests/test_create.py:312: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb373a60>>, name = 'one'
+columns = {'id': <class 'int'>, 'ref_id': <class 'int'>}, pk = 'id'
+foreign_keys = [ForeignKey(table='one', column='ref_id', other_table='bad_table', other_column='bad_column')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+__________ test_create_error_if_invalid_self_referential_foreign_keys __________
+
+fresh_db = <Database <sqlite3.Connection object at 0x79cceb3723e0>>
+
+    def test_create_error_if_invalid_self_referential_foreign_keys(fresh_db):
+        with pytest.raises(AlterError):
+>           fresh_db["one"].insert(
+                {"id": 1, "ref_id": 3},
+                pk="id",
+                foreign_keys=(("ref_id", "one", "bad_column"),),
+            )
+
+tests/test_create.py:321: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+sqlite_utils/db.py:2991: in insert
+    return self.insert_all(
+sqlite_utils/db.py:3094: in insert_all
+    self.create(
+sqlite_utils/db.py:1575: in create
+    self.db.create_table(
+sqlite_utils/db.py:962: in create_table
+    sql = self.create_table_sql(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+self = <Database <sqlite3.Connection object at 0x79cceb3723e0>>, name = 'one'
+columns = {'id': <class 'int'>, 'ref_id': <class 'int'>}, pk = 'id'
+foreign_keys = [ForeignKey(table='one', column='ref_id', other_table='one', other_column='bad_column')]
+column_order = None, not_null = set(), defaults = {}, hash_id = None
+hash_id_columns = None, extracts = {}, if_not_exists = False
+
+    def create_table_sql(
+        self,
+        name: str,
+        columns: Dict[str, Any],
+        pk: Optional[Any] = None,
+        foreign_keys: Optional[ForeignKeysType] = None,
+        column_order: Optional[List[str]] = None,
+        not_null: Optional[Iterable[str]] = None,
+        defaults: Optional[Dict[str, Any]] = None,
+        hash_id: Optional[str] = None,
+        hash_id_columns: Optional[Iterable[str]] = None,
+        extracts: Optional[Union[Dict[str, str], List[str]]] = None,
+        if_not_exists: bool = False,
+    ) -> str:
+        """
+        Returns the SQL ``CREATE TABLE`` statement for creating the specified table.
+    
+        :param name: Name of table
+        :param columns: Dictionary mapping column names to their types, for example ``{"name": str, "age": int}``
+        :param pk: String name of column to use as a primary key, or a tuple of strings for a compound primary key covering multiple columns
+        :param foreign_keys: List of foreign key definitions for this table
+        :param column_order: List specifying which columns should come first
+        :param not_null: List of columns that should be created as ``NOT NULL``
+        :param defaults: Dictionary specifying default values for columns
+        :param hash_id: Name of column to be used as a primary key containing a hash of the other columns
+        :param hash_id_columns: List of columns to be used when calculating the hash ID for a row
+        :param extracts: List or dictionary of columns to be extracted during inserts, see :ref:`python_api_extracts`
+        :param if_not_exists: Use ``CREATE TABLE IF NOT EXISTS``
+        """
+        if hash_id_columns and (hash_id is None):
+            hash_id = "id"
+        foreign_keys = self.resolve_foreign_keys(name, foreign_keys or [])
+        foreign_keys_by_column = {fk.column: fk for fk in foreign_keys}
+        # any extracts will be treated as integer columns with a foreign key
+        extracts = resolve_extracts(extracts)
+        for extract_column, extract_table in extracts.items():
+            if isinstance(extract_column, tuple):
+                assert False
+            # Ensure other table exists
+            if not self[extract_table].exists():
+                self.create_table(extract_table, {"id": int, "value": str}, pk="id")
+            columns[extract_column] = int
+            foreign_keys_by_column[extract_column] = ForeignKey(
+                name, extract_column, extract_table, "id"
+            )
+        # Soundness check not_null, and defaults if provided
+        not_null = not_null or set()
+        defaults = defaults or {}
+        assert columns, "Tables must have at least one column"
+        assert all(
+            n in columns for n in not_null
+        ), "not_null set {} includes items not in columns {}".format(
+            repr(not_null), repr(set(columns.keys()))
+        )
+        assert all(
+            n in columns for n in defaults
+        ), "defaults set {} includes items not in columns {}".format(
+            repr(set(defaults)), repr(set(columns.keys()))
+        )
+        validate_column_names(columns.keys())
+        column_items = list(columns.items())
+        if column_order is not None:
+    
+            def sort_key(p):
+                return column_order.index(p[0]) if p[0] in column_order else 999
+    
+            column_items.sort(key=sort_key)
+        if hash_id:
+            column_items.insert(0, (hash_id, str))
+            pk = hash_id
+        # Soundness check foreign_keys point to existing tables
+        for fk in foreign_keys:
+>           if fk.other_table != self.table_name:
+                                 ^^^^^^^^^^^^^^^
+E           AttributeError: 'Database' object has no attribute 'table_name'. Did you mean: 'table_names'?
+
+sqlite_utils/db.py:816: AttributeError
+- generated xml file: /tmp/sbx_v7d_sqlite_utils_39ef137/swegemma_sandbox_5c0c196c-1a7_uaqaq8s3/tmp/_swegemma_junit_0957d0cfdc65.xml -
+=========================== short test summary info ============================
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification0-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification1-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification2-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification3-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[True-foreign_key_specification6-AlterError]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification0-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification1-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification2-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification3-False]
+FAILED tests/test_create.py::test_create_table_works_for_m2m_with_only_foreign_keys[False-foreign_key_specification6-AlterError]
+FAILED tests/test_create.py::test_self_referential_foreign_key - AttributeErr...
+FAILED tests/test_create.py::test_create_error_if_invalid_foreign_keys - Attr...
+FAILED tests/test_create.py::test_create_error_if_invalid_self_referential_foreign_keys
+13 failed, 121 passed in 1.50s
+
+STDERR:
+[2026-10-11 01:11:09,675] WARNING in core: flasgger is not installed; serving the static landing page at / and skipping the Swagger UI and /spec.json.
