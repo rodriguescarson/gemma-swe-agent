@@ -504,14 +504,14 @@ Only P2_LOG.md may be appended (one block), then commit + push.
    `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p2/proxy_pair_s50.jsonl --proxy-log`
    Expected with thinking on: completion tokens per call around 250 or more and 8-9 s latency per call (the sub13 traces); around 50
    tokens and 3 s means thinking is OFF through the harness: say so in the first line of the report.
-3. GATE (a) + RENDER GATE (once ~/g4/runs/p3_think/capture_s1.jsonl exists; re-run at each check, the shares should hold):
+3. GATE (a) + RENDER GATE (once ~/g4/runs/p3_think/capture.jsonl exists (single pass: p3_run names it capture.jsonl; capture_s<k>.jsonl only with --passes > 1); re-run at each check, the shares should hold):
    `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p3_think --min-share 0.8 --render --json ~/g4/think_gate.json`
    Two lines, report both whole. GATE = the captures (PASS/FAIL, the key seen: reasoning or reasoning_content, reasoning chars,
    carried thoughts). RENDER GATE = the training renderer and stitcher on the same captures (GAPS "gate (a) extended"): thinking
    flag on every call with budget 4096, completions with thought >= 0.80, exact chain pairs >= 0.80 (healed = the next prompt did
    NOT carry the thought), breaks <= 0.02, model spans with thought >= 0.80. GATE PASS with RENDER GATE FAIL means the thoughts are
    captured but do not reach the rows or the chain: put the numbers in the first line of the report; P11 must not start on that data.
-   Also, once, when capture_s1.jsonl exists: `mkdir -p data/v12 && head -n 1 ~/g4/runs/p3_think/capture_s1.jsonl > data/v12/capture_sample.jsonl` (one real v12
+   Also, once, when capture.jsonl exists: `mkdir -p data/v12 && head -n 1 ~/g4/runs/p3_think/capture.jsonl > data/v12/capture_sample.jsonl` (one real v12
    request + reply, ~100 KB: the Mac's row converter for the Invent arm takes the tool declarations and the fixed task-message parts
    from it; it is a public heldout task, not training data) and commit it with the P2_LOG block.
 4. PAIR TABLE (after the pair_s50 step): `cat ~/g4/runs/p2/*.md 2>/dev/null | tail -n 40` and `cat ~/g4/runs/autopilot_choice.json`
