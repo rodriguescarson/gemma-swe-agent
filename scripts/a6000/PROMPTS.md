@@ -454,3 +454,29 @@ A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch
 6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]` (~13-18 h). Hourly: status + last `eval` line (nll_text, nll_tool) to P2_LOG.md; alarm_tok_s_halved true on 3 consecutive steps = report, keep going; if the process dies, the same command resumes. At `done`: summary.json (best_nll_text, steps, elapsed_h) to addendum 15.
 7. PACKAGE: ARM = content of ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name think1 --key-style loud --stages <v12: agent | v5h2-think: fixer,verifier>`; `~/g4/venv/bin/python scripts/adapters_dataset.py --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit the bundle without any .safetensors, push.
 8. REPORT, stop: pull hash, rows, stitch numbers, probe verdict + reasons, run summary, dataset slug, bundle path. The Mac runs the Kaggle probe kernel, the L4 pair and the slot.
+
+----------------------------------------------------------------------------------------------------------------------
+P10c. SIDE CHECKS WHILE THE P10 AUTOPILOT RUNS (read-only; any time after the launch; repeatable)
+----------------------------------------------------------------------------------------------------------------------
+A6000 box, WSL2, repo ~/g4/gemma-swe-agent on wip/gemma-agent (never main, never --no-verify). The P10 autopilot is running
+(launched 2026-10-11T06:05:19Z, hard stop 2026-10-12T06:05:19Z). Everything here is read-only: never write under ~/g4/runs,
+never touch autopilot_plan.json / autopilot_state.json / autopilot_choice.json, never start or stop vLLM, Docker or the autopilot.
+Only P2_LOG.md may be appended (one block), then commit + push.
+
+1. ALIVE: `pgrep -afi "autopilot.py|vllm|EngineCore|pace_proxy"` (the autopilot and, during a step, vLLM + a proxy must be alive),
+   `tail -n 5 ~/g4/autopilot.log`, `nvidia-smi --query-gpu=memory.used,utilization.gpu --format=csv,noheader`, `docker ps --format
+   '{{.Names}} {{.Status}}'`, `tail -n 3 docs/a6000/P2_LOG.md`. If the autopilot is NOT alive and P2_LOG.md has no DONE line for
+   today: report it as the first line and STOP (the owner decides on a relaunch; the resumable launch line is at the end of P10,
+   run detached from an interactive WSL shell: `setsid nohup ... & disown`).
+2. THINKING SIGNATURE (as soon as ~/g4/runs/p2/proxy_pair_s50.jsonl exists):
+   `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p2/proxy_pair_s50.jsonl --proxy-log`
+   Expected with thinking on: completion tokens per call around 250 or more and 8-9 s latency per call (the sub13 traces); around 50
+   tokens and 3 s means thinking is OFF through the harness: say so in the first line of the report.
+3. GATE (a) (once ~/g4/runs/p3_think/capture_s1.jsonl exists; re-run at each check, the share should hold above 0.8):
+   `~/g4/venv/bin/python scripts/a6000/think_share.py ~/g4/runs/p3_think --min-share 0.8 --json ~/g4/think_gate.json`
+   Report the whole line: GATE PASS/FAIL, the key seen (reasoning or reasoning_content), reasoning chars, carried thoughts.
+4. PAIR TABLE (after the pair_s50 step): `cat ~/g4/runs/p2/*.md 2>/dev/null | tail -n 40` and `cat ~/g4/runs/autopilot_choice.json`
+   (the P10 rule: v12 unless WORSE). Report the table and the choice as they are.
+5. LOG + REPORT: append one block to docs/a6000/P2_LOG.md ("- <UTC> | P10c check: alive=..., signature=..., gate=..., choice=..."),
+   commit, `git pull --rebase --autostash origin wip/gemma-agent && git push origin wip/gemma-agent`. Then report the five items in
+   order, numbers verbatim, and stop.
