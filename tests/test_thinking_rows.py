@@ -198,3 +198,14 @@ def test_the_thought_tokens_are_supervised_and_the_tool_output_is_not(v019_world
     assert R1 in sup and R2 in sup and "call:read_file" in sup and "Fixed." in sup
     assert "SECRET_TOOL_OUTPUT" not in sup and "Problem Statement" not in sup and "internal name" not in sup
     assert set(w) == {1.0} and len(pos) > 20
+
+
+def test_the_single_agent_stage_name_validates(tmp_path):
+    """v12's LlmAgent is named swe_single_agent (submissions/v12/agent.yaml); its rows carry that stage (2026-10-11)."""
+    from train import validate_rows as V
+    row = {"prompt": "<bos>x", "completion": "<|channel>thought\nI read it.\n<channel|><|tool_call>call:read_file{filepath:<|\"|>a.py<|\"|>}<tool_call|><|tool_response>",
+           "meta": {"task": "t", "stage": "swe_single_agent", "tool": "read_file", "continuation": False, "thinking": True, "reasoning_chars": 9}}
+    f = tmp_path / "rows.jsonl"; f.write_text(json.dumps(row) + "\n")
+    rep = V.validate(str(f), min_rows=0)
+    assert rep["ok"], rep["first_problems"]
+    assert "swe_single_agent" in V.STAGES and "agent" not in V.STAGES

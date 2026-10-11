@@ -20,7 +20,7 @@ from pathlib import Path
 
 KNOWN_TOOLS = {"run_command", "read_file", "write_file", "edit_file", "get_status", "get_code_neighbors", "search_similar_code",
                "get_code_subgraph", "run_skill_script", "load_skill_resource", "submit_patch"}
-STAGES = {"locator", "fixer", "verifier", "setup", "submitter", None}
+STAGES = {"locator", "fixer", "verifier", "setup", "submitter", "swe_single_agent", None}   # swe_single_agent = submissions/v12 (2026-10-11)
 
 
 def tokenizer():
