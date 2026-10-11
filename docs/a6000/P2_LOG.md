@@ -514,3 +514,4 @@ not run (no capture)
 - 2026-10-11T15:49:00Z | P10d restarted pid 9872 (version #3: lines 2325 bytes 91361019 items 448; old loop pid 1286 killed by pid; code 3cab532e versions on known state, tests 12 passed; the old loop's own first iteration had pushed version #2 at 14:49:01Z)
 - 2026-10-11T15:55:35Z | step=p3_think | done=104/844 | solved=27 | empty=29 | errors=0 | median_s=307.8 | cap=56 | gpu=100% | disk_free=887GB | restarts=0
 - 2026-10-11T16:55:41Z | step=p3_think | done=127/844 | solved=34 | empty=34 | errors=0 | median_s=308.1 | cap=69 | gpu=99% | disk_free=887GB | restarts=0
+- 2026-10-11T17:55:47Z | step=p3_think | done=152/844 | solved=43 | empty=37 | errors=0 | median_s=308.2 | cap=84 | gpu=100% | disk_free=888GB | restarts=0
