@@ -507,3 +507,4 @@ not run (no capture)
 - 2026-10-11T11:54:46Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
 - 2026-10-11T11:55:18Z | step=p3_think | EVENT started pid 27936 (restarts so far 0; hard stop in 18.2 h)
 - 2026-10-11T12:55:20Z | step=p3_think | done=25/844 | solved=6 | empty=9 | errors=0 | median_s=308.1 | cap=13 | gpu=100% | disk_free=888GB | restarts=0
+- 2026-10-11T13:55:25Z | step=p3_think | done=50/844 | solved=12 | empty=16 | errors=0 | median_s=308.3 | cap=27 | gpu=100% | disk_free=888GB | restarts=0
