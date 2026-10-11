@@ -511,7 +511,7 @@ Only P2_LOG.md may be appended (one block), then commit + push.
    flag on every call with budget 4096, completions with thought >= 0.80, exact chain pairs >= 0.80 (healed = the next prompt did
    NOT carry the thought), breaks <= 0.02, model spans with thought >= 0.80. GATE PASS with RENDER GATE FAIL means the thoughts are
    captured but do not reach the rows or the chain: put the numbers in the first line of the report; P11 must not start on that data.
-   Also, once, when capture_s1.jsonl exists: `head -n 1 ~/g4/runs/p3_think/capture_s1.jsonl > data/v12/capture_sample.jsonl` (one real v12
+   Also, once, when capture_s1.jsonl exists: `mkdir -p data/v12 && head -n 1 ~/g4/runs/p3_think/capture_s1.jsonl > data/v12/capture_sample.jsonl` (one real v12
    request + reply, ~100 KB: the Mac's row converter for the Invent arm takes the tool declarations and the fixed task-message parts
    from it; it is a public heldout task, not training data) and commit it with the P2_LOG block.
 4. PAIR TABLE (after the pair_s50 step): `cat ~/g4/runs/p2/*.md 2>/dev/null | tail -n 40` and `cat ~/g4/runs/autopilot_choice.json`
