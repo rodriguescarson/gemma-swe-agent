@@ -1285,3 +1285,40 @@ Collector choice, fixed now: v12 unless it is WORSE than v5h2-think (simpler win
 on, until the hard stop (launch + 24 h). Rows are built on the Mac side with the thinking-aware renderer (P11); successes only.
 Expected: thinking roughly doubles per-call latency (8.7 s vs 3.8 s on L4), so 150-250 s per task and 18-30 h for 844 ids;
 whatever finished at the hard stop is the data. Nothing here is a Kaggle result.
+
+### P2 v12 vs v5h2-think on the stage-1a ids (thinking on; vs v4h2, v7c, v7d thinking off) RESULT (2026-10-11 11:54 UTC)
+##### all items
+**v12 vs v5h2-think on the stage-1a ids (thinking on; vs v4h2, v7c, v7d thinking off): 50 ids, arms v4h2, v7c, v7d, v5h2-think, v12; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v7c vs v4h2 | 50 | 6 | 2 | 0.289 | -0.06 | NO EVIDENCE | 47 (6/2) |
+| v7d vs v4h2 | 50 | 5 | 2 | 0.453 | +0.00 | NO EVIDENCE | 44 (4/2) |
+| v5h2-think vs v4h2 | 50 | 5 | 5 | 1.000 | +0.58 | UNRESOLVED | 18 (5/0) |
+| v12 vs v4h2 | 50 | 8 | 5 | 0.581 | +0.36 | UNRESOLVED | 29 (8/1) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**v12 vs v5h2-think on the stage-1a ids (thinking on; vs v4h2, v7c, v7d thinking off) without contended items: 50 ids, arms v4h2, v7c, v7d, v5h2-think, v12; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v7c vs v4h2 | 50 | 6 | 2 | 0.289 | -0.06 | NO EVIDENCE | 47 (6/2) |
+| v7d vs v4h2 | 50 | 5 | 2 | 0.453 | +0.00 | NO EVIDENCE | 44 (4/2) |
+| v5h2-think vs v4h2 | 50 | 5 | 5 | 1.000 | +0.58 | UNRESOLVED | 18 (5/0) |
+| v12 vs v4h2 | 50 | 8 | 5 | 0.581 | +0.36 | UNRESOLVED | 29 (8/1) |

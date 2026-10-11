@@ -499,3 +499,9 @@ not run (no capture)
 - 2026-10-11T10:31:27Z | step=pair_s50 | done=74/100 | solved=22 | empty=22 | errors=0 | median_s=422.3 | cap=44 | gpu=100% | disk_free=899GB | restarts=0
 - 2026-10-11T11:31:32Z | step=pair_s50 | done=92/100 | solved=33 | empty=23 | errors=0 | median_s=420.1 | cap=49 | gpu=100% | disk_free=899GB | restarts=0
 - 2026-10-11T11:54:36Z | step=pair_s50 | END done: done=100/100 solved=35
+- 2026-10-11T11:54:39Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-11T11:54:39Z | P10 collector choice: p3_arm=v12 (v12 vs v5h2-think on 50 valid pairs: wins 6 losses 3 net +3 sign p 0.508 cap gap -0.22 -> NO EVIDENCE; rule: v12 unless WORSE)
+- 2026-10-11T11:54:39Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p10_choose.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-11T11:54:39Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-11T11:54:39Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-11T11:54:46Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
