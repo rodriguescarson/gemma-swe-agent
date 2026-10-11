@@ -228,7 +228,7 @@ events), docs/v4h/GATE.md from "P2 addendum 11" to the end (the v7 runs, pre-reg
 scripts/a6000/PROMPTS.md sections P3 and P6, and the header of scripts/a6000/autopilot.py (the supervisor: plan file,
 steps, self-repair, the 36 h hard stop at 2026-10-08 09:44 UTC).
 
-1. STATE, before touching anything: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi`, `tmux ls`,
+1. STATE, before touching anything: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"`, `nvidia-smi`, `tmux ls`,
    `df -h ~`, `git status -sb`, the plan file the supervisor reads, and the newest result dirs under ~/g4/runs.
    Write one block to P2_LOG.md: what is alive, what step the plan is on, the last health line, and whether the
    interruption killed the supervisor, vLLM, or an in-flight P3 pass.
@@ -256,7 +256,7 @@ the end, docs/GAPS_2026-10-06.md (last section: the v7c pre-registration), scrip
 header of scripts/a6000/autopilot.py. Before any GPU work, confirm with the owner that the Windows session stays
 logged in and sleep is off for the next 24 h; WSL died twice when the session ended. Hard stop = launch + 24 h.
 
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi` (no other compute process), `df -h ~`,
+1. STATE: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"`, `nvidia-smi` (no other compute process), `df -h ~`,
    `git status -sb`, `git pull --rebase --autostash origin wip/gemma-agent`. Confirm submissions/v7c and
    tests/test_v7c_bundle.py exist; run tests/test_v7c_*.py + tests/test_setup_stage.py and scripts/validate.py
    submissions/v7c. If anything fails, log it to P2_LOG.md and stop (the Mac side owns v7c).
@@ -287,7 +287,7 @@ runs the launch command himself. Do not start vLLM, the supervisor or any item.
    (all of it; section 7 is the Mac side), docs/GAPS_2026-10-06.md (last section: the v7d pre-registration with its
    decision rule), docs/v4h/GATE.md from "P2 addendum 12" to the end, docs/a6000/P2_LOG.md (last 40 lines),
    scripts/a6000/PROMPTS.md P8, the header of scripts/a6000/autopilot.py and scripts/a6000/p8_plan.py.
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi`, `df -h ~`, `git status -sb`, the last
+1. STATE: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"`, `nvidia-smi`, `df -h ~`, `git status -sb`, the last
    lines of P2_LOG.md. Write one block to P2_LOG.md: is the P8 supervisor alive, which step it is on (v7c_p4 / v7c_p3),
    the last health line. P8's hard stop is 2026-10-09 16:26:49 UTC. NEVER write a new plan while P8's supervisor is
    alive: autopilot.py re-reads the plan file at every step start, so a new plan would hijack P8's next step.
@@ -325,7 +325,7 @@ P9s. THE SAME, UNDER 4000 CHARACTERS (the goal field's limit; paste this one)
 A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify; `git pull --rebase --autostash origin wip/gemma-agent` before every push; commit small). Prepare the v7d screen and STOP before launching: the owner runs the launch line. Never start vLLM, the supervisor or any item.
 
 0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -3` (head must include "v7d fix 1", 428f3a0 or later). Read in chunks: docs/a6000/V7C_FAILURE_ANALYSIS.md (all; section 7 = Mac side), docs/GAPS_2026-10-06.md last section (v7d pre-registration + decision rule), docs/v4h/GATE.md from "P2 addendum 12" to the end, docs/a6000/P2_LOG.md last 40 lines, scripts/a6000/PROMPTS.md P8 and P9, headers of scripts/a6000/autopilot.py and p8_plan.py.
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"`, `nvidia-smi`, `df -h ~`, `git status -sb`. Log one block to P2_LOG.md: is P8's supervisor alive, its step, last health line. P8 hard stop 2026-10-09 16:26:49 UTC. NEVER write a new plan while that supervisor is alive (autopilot.py re-reads the plan file at each step start).
+1. STATE: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"`, `nvidia-smi`, `df -h ~`, `git status -sb`. Log one block to P2_LOG.md: is P8's supervisor alive, its step, last health line. P8 hard stop 2026-10-09 16:26:49 UTC. NEVER write a new plan while that supervisor is alive (autopilot.py re-reads the plan file at each step start).
 2. VERIFY (read-only; never edit submissions/v7d): `~/g4/venv/bin/python -m pytest -q -p no:cacheprovider tests/test_v7d_bundle.py tests/test_v7d_helpers.py tests/test_v7d_sandbox.py tests/test_v7d_prompts.py tests/test_v7d_counters.py tests/test_a6000_p8_plan.py tests/test_a6000_v7_counters.py` and `~/g4/venv/bin/python scripts/validate.py submissions/v7d`. Baseline on the v7c traces here: `python3 -I docs/a6000/v7c_analysis/cross_stage_refusals.py "v7c=$HOME/g4/runs/p2/items/v7c/*/traces/trace_*.json" "v7=$HOME/g4/runs/p2/items/v7/*/traces/trace_*.json"` and `python3 -I docs/a6000/v7c_analysis/aggregate_failures.py ~/g4/runs/p2/items/v7c`; both outputs into P2_LOG.md. Any failure: log, push, stop.
 3. PRE-REGISTER GATE.md addendum 13 from the GAPS v7d pre-registration: v7d, C=2, pacing rule, scale from a 4-item probe at T=2; (a) 50 stage-1a ids paired vs v4h2, v7 AND v7c with addendum 12's BETTER/WORSE/UNRESOLVED/NO EVIDENCE readings; (b) public 74 with scripts/keep_rule.py vs eval/kaggle/g4-l4-v4h2g-p312/results.jsonl + helper gate; counters with repeat_reads reported; the cross_stage_refusals.py re-measure; the Kaggle-queue decision rule; (c) P3 with v7d only if (a) is not WORSE. Name the bundle commit and the step-2 baseline. Commit, push.
 4. PLAN, only once P2_LOG.md has P8's DONE line and no autopilot process is alive (else skip and say so): `~/g4/venv/bin/python scripts/a6000/p8_plan.py --arm v7d --dry-run` (expect probe_v7d, v7d_s50, v7d_p4, v7d_p3), then without --dry-run. Check nvidia-smi is empty and that the old autopilot state file cannot resume a P8 step (read autopilot.py's --state handling; move it aside the way P8 did). Do NOT launch.
@@ -357,7 +357,7 @@ launch line. Never start vLLM, the supervisor or any item yourself; never edit s
    chunks: docs/GAPS_2026-10-06.md from "CORRECTION (2026-10-10" to the end (why thinking on, the P10 pre-registration),
    docs/a6000/V7C_FAILURE_ANALYSIS.md section 8, docs/a6000/P2_LOG.md (last 40 lines), scripts/a6000/PROMPTS.md P9,
    the headers of scripts/a6000/p10_plan.py, p10_choose.py, p3_run.py and autopilot.py.
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"` (P8's DONE line must be in P2_LOG.md and nothing alive;
+1. STATE: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"` (P8's DONE line must be in P2_LOG.md and nothing alive;
    if a supervisor runs, stop here and say so), `nvidia-smi` (if > 1 GB is used with no compute process, the WSL VM
    kept vLLM's memory: tell the owner to run `wsl --shutdown` in Windows PowerShell and reopen with lab.bat linux, then
    start again at step 0), `df -h ~`, `docker ps -a` (remove leftover g4-* containers with `docker rm -f`), `git status -sb`.
@@ -374,7 +374,7 @@ launch line. Never start vLLM, the supervisor or any item yourself; never edit s
 3. THE THINKING CHECK ON THE SERVER, once, by hand, with vLLM started as the supervisor does (`GPU_UTIL=0.95 scripts/a6000/serve.sh`,
    wait for /v1/models): one chat completion with `{"chat_template_kwargs": {"enable_thinking": true}, "max_tokens": 256}` on a
    short coding question; the reply must carry a non-empty `reasoning_content` (reasoning_parser gemma4). Record the latency.
-   Then stop that vLLM (`pkill -f "vllm"`; confirm nvidia-smi is empty): the supervisor starts its own.
+   Then stop that vLLM (`pkill -fi "vllm|EngineCore"`, twice; confirm nvidia-smi is empty): the supervisor starts its own.
 4. PRE-REGISTER GATE.md addendum 14 = the GAPS "P10 pre-registration" text with today's date, the pulled commit, the test counts
    and the step-3 latency. Commit, push.
 5. PREPARE THE PLAN (the supervisor must be dead): move ~/g4/runs/autopilot_state.json and autopilot_plan.json aside as
@@ -393,9 +393,9 @@ P10s. THE SAME, UNDER 4000 CHARACTERS (the goal field's limit; paste this one)
 A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch wip/gemma-agent (never main, never --no-verify; `git pull --rebase --autostash origin wip/gemma-agent` before every push; commit small). Prepare the P10 run and STOP before launching: the owner runs the launch line. Never start the supervisor or any item; never edit submissions/.
 
 0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -5` (head has "harness/wheels: the 2026-10-09 scorer wheels" and "v12: one LlmAgent"). Read in chunks: docs/GAPS_2026-10-06.md from "CORRECTION (2026-10-10" to the end, docs/a6000/V7C_FAILURE_ANALYSIS.md section 8, P2_LOG.md last 40 lines, PROMPTS.md P9 and P10, headers of scripts/a6000/p10_plan.py, p10_choose.py, p3_run.py, autopilot.py.
-1. STATE: `pgrep -af "autopilot|vllm|or_proxy|race|swegemma"` (P8's DONE line must be in P2_LOG.md and nothing alive; else stop and say so), `nvidia-smi` (>1 GB used with no process = stale WSL memory: tell the owner to run `wsl --shutdown` in Windows PowerShell and reopen with lab.bat linux, then restart at 0), `df -h ~`, `docker ps -a` (rm -f leftover g4-* containers), `git status -sb`. One block to P2_LOG.md.
+1. STATE: `pgrep -afi "autopilot|vllm|EngineCore|or_proxy|race|swegemma"` (P8's DONE line must be in P2_LOG.md and nothing alive; else stop and say so), `nvidia-smi` (>1 GB used with no process = stale WSL memory: tell the owner to run `wsl --shutdown` in Windows PowerShell and reopen with lab.bat linux, then restart at 0), `df -h ~`, `docker ps -a` (rm -f leftover g4-* containers), `git status -sb`. One block to P2_LOG.md.
 2. STACK: `uv pip install --python ~/g4/venv/bin/python --no-deps --reinstall harness/wheels/swegemma-0.2.11-py3-none-any.whl harness/wheels/adk_submission-0.2.13-py3-none-any.whl` (no uv: `~/g4/venv/bin/python -m pip install --no-deps --force-reinstall` the same files). `~/g4/venv/bin/python scripts/swe_compat.py submissions/v12` must print old_helpers False. VERIFY: `~/g4/venv/bin/python -m pytest -q -p no:cacheprovider tests/test_swe_compat.py tests/test_make_t0.py tests/test_v5h2_think_bundle.py tests/test_v12_bundle.py tests/test_a6000_p10.py tests/test_a6000_v7_counters.py`; `~/g4/venv/bin/python scripts/validate.py submissions/v12` and `submissions/v5h2-think` must show `'include_thoughts': True, 'thinking_budget': 4096` on every stage. Any failure: log to P2_LOG.md, push, stop.
-3. SERVER CHECK, once by hand: start vLLM as the supervisor does (`GPU_UTIL=0.95 scripts/a6000/serve.sh`, wait for /v1/models), send one chat completion with `{"chat_template_kwargs": {"enable_thinking": true}, "max_tokens": 256}` on a short coding question: `reasoning_content` must be non-empty; note the latency. Stop that vLLM (`pkill -f vllm`; nvidia-smi empty).
+3. SERVER CHECK, once by hand: start vLLM as the supervisor does (`GPU_UTIL=0.95 scripts/a6000/serve.sh`, wait for /v1/models), send one chat completion with `{"chat_template_kwargs": {"enable_thinking": true}, "max_tokens": 256}` on a short coding question: `reasoning_content` must be non-empty; note the latency. Stop that vLLM (`pkill -fi 'vllm|EngineCore'` twice; nvidia-smi empty).
 4. PRE-REGISTER GATE.md addendum 14 = the GAPS "P10 pre-registration" text + date, pulled commit, test counts, step-3 latency. Commit, push.
 5. PLAN (supervisor dead): move ~/g4/runs/autopilot_state.json and autopilot_plan.json aside as *_v7d_done.json; `~/g4/venv/bin/python scripts/a6000/p10_plan.py --dry-run` (expect probe_pair, pair_s50, p3_think), then without --dry-run (choice file = v5h2-think until the pair's post hook p10_choose.py applies the rule: v12 unless WORSE). Do NOT launch.
 6. REPORT, then stop: pull hash, stack line, test counts, validator lines, step-3 latency, addendum commit, and the launch line: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && AUTOPILOT_HARD_STOP_H=24 setsid nohup "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1 < /dev/null & sleep 20; tail -n 2 "$HOME/g4/autopilot.log"`. After launch the plan runs alone: probe -> 50-id pair (table + choice) -> collection pass until the hard stop; hourly health lines and backups; finalize, stop vLLM, push. Rows are built on the Mac (P11); do not train here yet.

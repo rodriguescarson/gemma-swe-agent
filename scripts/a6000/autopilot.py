@@ -85,16 +85,23 @@ def vllm_ok():
         return False
 
 
+def gpu_mem_used_mib():
+    return lib.gpu_mem_used_mib(sh(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"]).stdout)
+
+
 def kill_vllm():
-    for pat in ("vllm.entrypoints", "a6000/serve.sh"):
-        r = sh(["pgrep", "-f", pat])
-        for pid in r.stdout.split():
-            if int(pid) != os.getpid():
-                try:
-                    os.kill(int(pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-    time.sleep(8)
+    """Kill the API server AND the renamed engine/worker processes (VLLM::EngineCore, VLLM::Worker_*), twice, then check the
+    card: 2026-10-11 the hard stop left an EngineCore holding 48.5 GB that `pgrep -f vllm.entrypoints` never saw."""
+    for _ in range(2):
+        for pid in lib.vllm_pids(sh(["ps", "-eo", "pid=,args="]).stdout, os.getpid()):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(8)
+    used = gpu_mem_used_mib()
+    if used is not None and used > 1024:
+        log_line(f"- {now_iso()} | WARN kill_vllm: the GPU still holds {used} MiB (stale WSL memory or a foreign process)", push=False)
 
 
 def ensure_vllm():
@@ -363,7 +370,10 @@ def finalize(plan_path, why):
     sh(["sudo", "-n", "pkill", "-x", "dockerd"])
     time.sleep(10)
     apps = sh(["nvidia-smi", "--query-compute-apps=pid,name", "--format=csv,noheader"]).stdout.strip()
-    log_line(f"- {now_iso()} | END cleanup ({why}): nvidia-smi compute apps: {apps or 'none'}")
+    used = gpu_mem_used_mib()
+    stray = lib.vllm_pids(sh(["ps", "-eo", "pid=,args="]).stdout, os.getpid())
+    log_line(f"- {now_iso()} | END cleanup ({why}): nvidia-smi compute apps: {apps or 'none'} | memory.used {used if used is not None else 'n/a'} MiB"
+             f" (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: {stray or 'none'}")
     log_line(f"- DONE {now_iso()} ({why})")
 
 

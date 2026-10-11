@@ -17,7 +17,7 @@ unset PYTORCH_CUDA_ALLOC_CONF
 export TOKENIZERS_PARALLELISM=false
 
 gpu_idle() {
-  if pgrep -af "autopilot.py|vllm|or_proxy|pace_proxy|p2_race|qlora_train" | grep -v "$$" | grep -q .; then echo "REFUSED: a serving/supervisor/training process is alive:"; pgrep -af "autopilot.py|vllm|or_proxy|pace_proxy|p2_race|qlora_train" | grep -v "$$"; return 1; fi
+  if pgrep -afi "autopilot.py|vllm|EngineCore|or_proxy|pace_proxy|p2_race|qlora_train" | grep -v "$$" | grep -q .; then echo "REFUSED: a serving/supervisor/training process is alive:"; pgrep -afi "autopilot.py|vllm|EngineCore|or_proxy|pace_proxy|p2_race|qlora_train" | grep -v "$$"; return 1; fi
   used=$(nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits | head -1 | tr -d ' ')
   if [ "${used:-0}" -gt 1024 ]; then echo "REFUSED: nvidia-smi shows ${used} MiB used with no process of ours (stale WSL VRAM: wsl --shutdown from Windows, reopen, retry)"; return 1; fi
   if (echo > /dev/tcp/127.0.0.1/8000) 2>/dev/null; then echo "REFUSED: port 8000 answers (vLLM up)"; return 1; fi

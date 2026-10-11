@@ -101,3 +101,33 @@ def gpu_free(samples):
 def contaminated_since(detect_epoch):
     """Items finishing after this time (or still running) are re-run: the contention began before it was noticed."""
     return detect_epoch - CONT_MARGIN_S
+
+
+VLLM_PATTERNS = ("vllm.entrypoints", "a6000/serve.sh", "vllm::")          # vLLM 0.19 renames its engine/workers to VLLM::EngineCore, VLLM::Worker_*
+
+
+def vllm_pids(ps_text, self_pid):
+    """PIDs of every vLLM process in a `ps -eo pid=,args=` listing, case-insensitive, the caller excluded; a stray
+    multiprocessing.resource_tracker counts only when a vLLM process is present (it is vLLM's own, left behind with the engine).
+    2026-10-11: the hard stop killed the API server and left `VLLM::EngineCore` holding 48.5 GB on the box."""
+    found, trackers = [], []
+    for line in ps_text.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) < 2 or not parts[0].isdigit():
+            continue
+        pid, args = int(parts[0]), parts[1]
+        if pid == self_pid:
+            continue
+        low = args.lower()
+        if any(p in low for p in VLLM_PATTERNS):
+            found.append(pid)
+        elif "multiprocessing.resource_tracker" in low:
+            trackers.append(pid)
+    return sorted(found + trackers) if found else []
+
+
+def gpu_mem_used_mib(text):
+    """`nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits` -> MiB, or None when it did not answer. WSL reports
+    memory but never lists compute apps, so this is the only truthful "is the card empty" check there."""
+    m = re.match(r"\s*(\d+)", text or "")
+    return int(m.group(1)) if m else None

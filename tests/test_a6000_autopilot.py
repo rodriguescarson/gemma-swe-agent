@@ -203,3 +203,29 @@ def test_health_stats_count_every_pass_of_a_task(tmp_path):
     (d / "task_results.jsonl").write_text(json.dumps({"instance_id": "b", "resolved": False, "duration_seconds": 50.0, "error": None, "agent_patch_size": 3}) + "\n")
     s = stats.collect({"type": "p2", "out": str(tmp_path), "arms": ["v7"], "ids": ["a", "b", "c"]})
     assert s["done"] == 4 and s["solved"] == 1 and s["empty"] == 2 and s["median_s"] == 150.0     # 3 passes of a + 1 of b
+
+
+# 2026-10-11: the v7d hard stop left a `VLLM::EngineCore` holding 48.5 GB. kill_vllm matched only `vllm.entrypoints` and
+# `serve.sh`; vLLM 0.19 renames its engine and worker processes, so the SIGKILL of the API server orphaned them. WSL never
+# lists compute apps, so the END line said "none" while the card was full. Written before the fix.
+PS = """  812 /home/u/g4/venv/bin/python -m vllm.entrypoints.openai.api_server --model /home/u/g4/model --port 8000
+  814 VLLM::EngineCore
+  815 VLLM::Worker_TP0
+  813 /home/u/g4/venv/bin/python -c from multiprocessing.resource_tracker import main;main(5)
+  900 bash scripts/a6000/serve.sh
+   77 pgrep -f vllm
+   78 /home/u/g4/venv/bin/python scripts/a6000/autopilot.py
+  950 /home/u/g4/train-venv/bin/python train/qlora_train.py --probe
+"""
+
+
+def test_vllm_pids_find_the_renamed_engine_and_workers_case_insensitively():
+    assert ap.vllm_pids(PS, self_pid=77) == [812, 813, 814, 815, 900]          # the pgrep itself and the autopilot are not vLLM
+    assert ap.vllm_pids(PS, self_pid=812) == [813, 814, 815, 900]
+    assert ap.vllm_pids("  813 python -c from multiprocessing.resource_tracker import main;main(5)\n", self_pid=1) == []   # a tracker alone is not ours
+    assert ap.vllm_pids("", self_pid=1) == []
+
+
+def test_gpu_mem_used_mib_parses_nvidia_smi_and_tolerates_failure():
+    assert ap.gpu_mem_used_mib("48520 MiB\n") == 48520 and ap.gpu_mem_used_mib("48520\n") == 48520
+    assert ap.gpu_mem_used_mib("0 MiB") == 0 and ap.gpu_mem_used_mib("") is None and ap.gpu_mem_used_mib("NVIDIA-SMI has failed") is None
