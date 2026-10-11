@@ -493,3 +493,4 @@ not run (no capture)
 - 2026-10-11T06:30:35Z | step=probe_pair | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-11T06:31:10Z | step=pair_s50 | EVENT started pid 6165 (restarts so far 0; hard stop in 23.6 h)
 - 2026-10-11T06:59:00Z | P10c check: alive=autopilot pid 10 + vLLM + pace_proxy (step pair_s50 since 06:31:10Z; GPU 48492 MiB, 100 %; docker g4-probe Up 51 minutes), signature=proxy log: calls 307 errors 0 | completion tok/call mean 234.0 median 106 p90 526 | latency/call mean 10.0 s median 4.751 s | thinking signature: ON-like, gate=not yet (no p3_think/capture_s1.jsonl), choice=no table yet; autopilot_choice.json {"p4_arm": "v5h2-think", "p3_arm": "v5h2-think"}; note: probe_pair END done: done=0/8 solved=0
+- 2026-10-11T07:31:12Z | step=pair_s50 | done=16/100 | solved=3 | empty=4 | errors=0 | median_s=424.5 | cap=12 | gpu=100% | disk_free=899GB | restarts=0
