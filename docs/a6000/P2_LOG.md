@@ -497,3 +497,4 @@ not run (no capture)
 - 2026-10-11T08:31:17Z | step=pair_s50 | done=35/100 | solved=5 | empty=10 | errors=0 | median_s=424.0 | cap=24 | gpu=100% | disk_free=899GB | restarts=0
 - 2026-10-11T09:31:22Z | step=pair_s50 | done=54/100 | solved=10 | empty=19 | errors=0 | median_s=422.5 | cap=37 | gpu=100% | disk_free=898GB | restarts=0
 - 2026-10-11T10:31:27Z | step=pair_s50 | done=74/100 | solved=22 | empty=22 | errors=0 | median_s=422.3 | cap=44 | gpu=100% | disk_free=899GB | restarts=0
+- 2026-10-11T11:31:32Z | step=pair_s50 | done=92/100 | solved=33 | empty=23 | errors=0 | median_s=420.1 | cap=49 | gpu=100% | disk_free=899GB | restarts=0
