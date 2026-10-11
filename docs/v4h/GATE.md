@@ -1261,3 +1261,27 @@ DROP: solved 27 < 37; net -7 < +3`
 
 #### P3
 not run (no capture)
+
+### P2 addendum 14 (P10, the thinking-on collector pair + collection pass; written 2026-10-11 UTC, before any P10 run; branch head 8b2e6b90 at pull time; stack swegemma 0.2.11 / adk_submission 0.2.13; tests 44 passed, 6 skipped (test_swe_compat, test_make_t0, test_v5h2_think_bundle, test_v12_bundle, test_a6000_p10, test_a6000_v7_counters; the v11b adapter case skips: no adapter weights on the box); scripts/validate.py submissions/v12 and submissions/v5h2-think show include_thoughts True, thinking_budget 4096 on every stage)
+
+Server check (by hand, GPU_UTIL=0.95 scripts/a6000/serve.sh, vLLM up in 74 s): one chat completion with chat_template_kwargs enable_thinking true, max_tokens 256: 8.49 s, 256 completion tokens (finish=length), non-empty reasoning (622 chars). Note: this vLLM returns it under the message key `reasoning`, not `reasoning_content`.
+
+The pre-registration, verbatim from docs/GAPS_2026-10-06.md (Mac, 2026-10-11 01:30 IST):
+
+Why: the forum ablation (746250) puts thinking on at 48-51/129 vs 23/129 off; the leaderboard wall at 0.18 is the thinking-on
+baseline; past it only LoRA on good trajectories has worked (748051). Our adapters failed on thinking-off, loop-heavy rows. The
+box moves to the scorer's wheels first (harness/wheels + ~/g4/venv: swegemma 0.2.11, adk_submission 0.2.13), so its screens
+honour `thinking_budget` and capture `reasoning_content`.
+Arms: `v5h2-think` (v5h2 + include_thoughts true, budget 4096, max_output 8192; temperature 0.2) and `v12` (ONE LlmAgent, tools
+run_command/read_file/edit_file/write_file/get_status/submit_patch, no skills, no graph tools, temperature 1.0, same thinking
+block, 5 min / 40 calls / 150 turns / 180 s; prompt sized for ~12 calls, never more than 25).
+(a) Probe: each arm on the last 4 ids of s200_valid_ids.txt at T = 2 (counters only; the gate: every capture row of a thinking
+arm carries non-empty `reasoning_content` on >= 80% of model calls, else the stack is wrong and the run stops).
+(b) The 50 stage-1a ids, both arms, 1 sample, C = 2, pacing on, the bundles' own budgets, paired v12 vs v5h2-think and each vs
+the thinking-off rows of v5h2/v7c/v7d on the same ids: readings as addendum 12 (BETTER net >= +5 and sign p < 0.10; WORSE net
+<= -5 and p < 0.10; UNRESOLVED on a cap gap >= 10 points; else NO EVIDENCE). Counters as before plus repeat_reads; reported.
+Collector choice, fixed now: v12 unless it is WORSE than v5h2-think (simpler wins ties and NO EVIDENCE); else v5h2-think.
+(c) Collection pass = the P3 mechanism with the collector over data/heldout1k/p3_ids.txt (844 ids), ONE pass, C = 2, captures
+on, until the hard stop (launch + 24 h). Rows are built on the Mac side with the thinking-aware renderer (P11); successes only.
+Expected: thinking roughly doubles per-call latency (8.7 s vs 3.8 s on L4), so 150-250 s per task and 18-30 h for 844 ids;
+whatever finished at the hard stop is the data. Nothing here is a Kaggle result.
