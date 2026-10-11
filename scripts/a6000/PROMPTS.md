@@ -519,3 +519,31 @@ Only P2_LOG.md may be appended (one block), then commit + push.
 5. LOG + REPORT: append one block to docs/a6000/P2_LOG.md ("- <UTC> | P10c check: alive=..., signature=..., gate=..., render=..., choice=..."),
    commit, `git pull --rebase --autostash origin wip/gemma-agent && git push origin wip/gemma-agent`. Then report the five items in
    order, numbers verbatim, and stop.
+
+----------------------------------------------------------------------------------------------------------------------
+P10d. INTERVAL BACKUP OF THE COLLECTION RUN (start once while the P10 autopilot runs; read-only on the run; CPU only)
+----------------------------------------------------------------------------------------------------------------------
+A6000 box, WSL2, repo ~/g4/gemma-swe-agent on wip/gemma-agent (never main, never --no-verify). The P10 autopilot is running
+(hard stop 2026-10-12T06:05:19Z) and until now only P2_LOG left the box: the captures under ~/g4/runs/p3_think are P11's
+training data and the per-item results are the run's evidence; a crash or a reimage before the END hooks loses both. This
+section starts a loop that pushes them to a private Kaggle dataset every hour. Nothing under ~/g4/runs is written; the
+autopilot, vLLM and Docker are not touched; the GPU is not used. Skip the whole section if `pgrep -af backup_captures.py`
+already shows the loop.
+
+0. PULL: `cd ~/g4/gemma-swe-agent && git pull --rebase --autostash origin wip/gemma-agent && git log --oneline -3` (the head
+   must include "backup_captures" or be later), then `~/g4/venv/bin/python -m pytest -q tests/test_backup_captures.py` (9 passed).
+1. KAGGLE CLI: `K=$(command -v kaggle || ls ~/g4/venv/bin/kaggle ~/.local/bin/kaggle 2>/dev/null | head -1); echo "$K"; "$K" --version`
+   and `"$K" datasets list -m 2>&1 | head -3` (the token in ~/.kaggle/kaggle.json works). No CLI anywhere: `~/g4/venv/bin/pip
+   install kaggle` and `K=~/g4/venv/bin/kaggle`.
+2. FIRST ROUND, foreground: `mkdir -p ~/g4/backup && nice -n 19 ~/g4/venv/bin/python scripts/a6000/backup_captures.py --run
+   ~/g4/runs/p3_think --out ~/g4/backup/p3_think --slug g4-p3-think-captures --kaggle "$K" --once` (rc 0; its log line reads
+   "pushed create #1 lines N bytes B items K"). Then `"$K" datasets status carsonrodrigues/g4-p3-think-captures` (ready, or still
+   being created) and `python3 -c "import json;m=json.load(open('$HOME/g4/backup/p3_think/dataset/MANIFEST.json'));print(m['capture_lines'],m['items'],{k:v['bytes'] for k,v in m['files'].items()})"`.
+   Fail = rc != 0 or FAILED in ~/g4/backup/p3_think/backup.log: paste the log line, do not start the loop, stop here.
+3. THE LOOP: `setsid nohup nice -n 19 ~/g4/venv/bin/python scripts/a6000/backup_captures.py --run ~/g4/runs/p3_think --out
+   ~/g4/backup/p3_think --slug g4-p3-think-captures --kaggle "$K" --every 60 > ~/g4/backup/p3_think.out 2>&1 & disown`, then
+   `sleep 5; pgrep -af backup_captures.py` (one process). It pushes a new dataset version every 60 minutes when the capture
+   line count or the item count changed, and exits by itself after one last round once the autopilot is gone (the DONE line).
+4. LOG: append one block to docs/a6000/P2_LOG.md: `- <UTC> | P10d backup loop pid <pid> every 60 min -> carsonrodrigues/
+   g4-p3-think-captures (create #1: lines N, bytes B, items K)`; commit "P10d backup loop started" and push (pull --rebase
+   --autostash first). Report the first-round log line, the pgrep line and the dataset status, then stop (P10c may follow).
