@@ -443,7 +443,7 @@ and stop when it needs the owner.
    --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit
    the bundle WITHOUT adapters/*.safetensors (git status must show no .safetensors), push.
 8. REPORT, then stop: pull hash, rows count, stitch numbers, probe verdict + reasons, run summary, the dataset slug, the
-   bundle path. The Mac side runs the Kaggle probe kernel, the L4 pair and the slot (TRAIN_LOCAL.md "After training").
+   bundle path. Then execute section P11b (the think2 arm) in the same session. The Mac side runs the Kaggle probe kernel, the L4 pair and the slot (TRAIN_LOCAL.md "After training").
 
 P11s. THE SAME, UNDER 4000 CHARACTERS (the goal field's limit; paste this one)
 ----------------------------------------------------------------------------------------------------------------------
@@ -457,7 +457,32 @@ A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch
 5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (~1 h). Add probe_report.json verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k, repeat losses to addendum 15; commit, push. FULL -> 6. REDUCED -> re-stitch with `... stitch ~/g4/runs/p3_think think1 --max-seqs-per-task-stage 6`, then 6 with `--max-tokens 12288`. FALLBACK -> `gzip -k ~/g4/runs/p3_think/rows.jsonl`, note the path, stop.
 6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]` (~13-18 h). Hourly: status + last `eval` line (nll_text, nll_tool) to P2_LOG.md; alarm_tok_s_halved true on 3 consecutive steps = report, keep going; if the process dies, the same command resumes. At `done`: summary.json (best_nll_text, steps, elapsed_h) to addendum 15.
 7. PACKAGE: ARM = content of ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name think1 --key-style loud --stages <v12: agent | v5h2-think: fixer,verifier>`; `~/g4/venv/bin/python scripts/adapters_dataset.py --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit the bundle without any .safetensors, push.
-8. REPORT, stop: pull hash, rows, stitch numbers, probe verdict + reasons, run summary, dataset slug, bundle path. The Mac runs the Kaggle probe kernel, the L4 pair and the slot.
+8. REPORT: pull hash, rows, stitch numbers, probe verdict + reasons, run summary, dataset slug, bundle path. Then execute section P11b (think2) from this file. The Mac runs the Kaggle probe kernel, the L4 pair and the slot.
+
+----------------------------------------------------------------------------------------------------------------------
+P11b. THE think2 ARM: think1's trajectories + the Invent rows (after P11's think1 run; same session; GPU idle)
+----------------------------------------------------------------------------------------------------------------------
+Pre-registered in docs/GAPS_2026-10-06.md "Invent rows as an auxiliary arm" (2026-10-11): ONE variable, the Invent rows added to
+think1's data; same recipe, same held-out tasks; think2 ships only if it beats think1 on the Kaggle 74 pair AND the generator is
+confirmed open-weight (the Mac side decides that; here you train and package). Never start vLLM or the supervisor.
+
+1. ROWS: `mkdir -p ~/g4/invent && ~/g4/venv/bin/kaggle datasets download -d carsonrodrigues/g4-invent-rows -p ~/g4/invent --unzip`
+   (two files, bugs*.jsonl and behaviour*.jsonl). Convert with the REAL v12 request as template:
+   `~/g4/venv/bin/python train/invent_rows.py ~/g4/invent/*.jsonl --template-capture data/v12/capture_sample.jsonl
+    --out ~/g4/runs/p3_think/rows_invent.jsonl --report ~/g4/runs/p3_think/invent_report.json`
+   Paste the report (rows_in, kept, rejected by reason, verdicts, repos) into GATE.md addendum 15 under "think2 data". Gate: kept >= 100
+   items; below it, log to P2_LOG.md and stop (think2 is not worth a run).
+2. COMBINE + STITCH: `mkdir -p ~/g4/runs/p3_think2 && cat ~/g4/runs/p3_think/rows.jsonl ~/g4/runs/p3_think/rows_invent.jsonl >
+   ~/g4/runs/p3_think2/rows.jsonl`, then `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think2 think2 --holdout-tasks
+   ~/g4/runs/train_think1/seqs.jsonl.holdout_tasks.txt` (think1's held-out tasks, so the two arms are read on the same 5 tasks; if
+   that file does not exist, think1 used data/v11/v11b_holdout_tasks.txt: pass that). Gate as P11 step 4 (ok true incl. thought_share
+   >= 0.8, sequences_with_thought == sequences, >= 40 sequences); stitch_report.json numbers to addendum 15.
+3. RUN: no second probe (same model, same caps as think1's verdict). `bash scripts/a6000/train.sh full think2 [--max-tokens 12288 if
+   think1 was REDUCED]`; the recipe scales by the sequence count (train.sh recipe N). Poll hourly as in P11 step 6; at `done`,
+   summary.json (best_nll_text, steps, elapsed_h) to addendum 15 NEXT TO think1's numbers (same held-out tasks: the first comparison).
+4. PACKAGE: as P11 step 7 with `--name think2 --out submissions/${ARM}_think2` and the dataset slug `g4-adapters-think2`. Commit the
+   bundle without .safetensors, push.
+5. REPORT, stop: invent report numbers, stitch numbers, run summary, held-out NLL think1 vs think2, dataset slug, bundle path.
 
 ----------------------------------------------------------------------------------------------------------------------
 P10c. SIDE CHECKS WHILE THE P10 AUTOPILOT RUNS (read-only; any time after the launch; repeatable)
