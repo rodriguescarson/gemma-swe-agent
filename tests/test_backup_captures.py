@@ -116,8 +116,8 @@ def test_cli_once_creates_then_versions_then_skips_unchanged(tmp_path):
         f.write('": 1}}\n{"t": 100, "body": {}, "response": {}}\n')
     assert B.main(args) == 0
     calls = (tmp_path / "calls.log").read_text().splitlines()
-    assert calls[2:] == ["datasets status owner/g4-x", f"datasets version -p {ds} -m " + " ".join(calls[3].split()[5:])]
-    assert calls[3].startswith("datasets version -p") and "update" in calls[3]
+    assert calls[2:] == [f"datasets version -p {ds} -m " + " ".join(calls[2].split()[5:])]   # known state: no status call, straight to version
+    assert calls[2].startswith("datasets version -p") and "update" in calls[2]
     assert json.load(open(out / "state.json"))["capture_lines"] == 5
     assert gzip.open(ds / "capture.jsonl.gz", "rt").read().count("\n") == 5
 
@@ -139,3 +139,44 @@ def test_force_pushes_even_when_unchanged(tmp_path):
 def test_script_mentions_no_owner_name_but_the_kaggle_handle():
     src = (ROOT / "scripts" / "a6000" / "backup_captures.py").read_text()
     assert "Carson" not in src           # the box is a shared lab machine
+
+
+def _fake_kaggle_403(tmp_path, create_conflict=False):
+    """status always 403 (the box's token, 2026-10-11); create optionally answers 'already exists'."""
+    k = tmp_path / "kaggle"
+    k.write_text("#!/bin/sh\n"
+                 f"echo \"$@\" >> {tmp_path}/calls.log\n"
+                 "if [ \"$1 $2\" = \"datasets status\" ]; then echo '403 - Forbidden'; exit 1; fi\n"
+                 + (f"if [ \"$2\" = create ]; then echo 'Dataset owner/g4-x already exists'; exit 1; fi\n" if create_conflict
+                    else "if [ \"$2\" = create ]; then echo 'Your private Dataset is being created.'; exit 0; fi\n")
+                 + "if [ \"$2\" = version ]; then echo 'Dataset version is being created.'; exit 0; fi\n"
+                 "exit 2\n")
+    k.chmod(k.stat().st_mode | stat.S_IEXEC)
+    return k
+
+
+def test_status_403_then_known_state_versions_without_asking(tmp_path):
+    B = _mod(); run, _ = _run(tmp_path); k = _fake_kaggle_403(tmp_path); out = tmp_path / "ds"; ds = out / "dataset"
+    args = ["--run", str(run), "--out", str(out), "--slug", "g4-x", "--owner", "owner", "--kaggle", str(k), "--once"]
+    assert B.main(args) == 0                                   # unknown existence -> create (it did not exist)
+    with open(run / "capture.jsonl", "a") as f:
+        f.write('": 1}}\n{"t": 100, "body": {}, "response": {}}\n')
+    assert B.main(args) == 0                                   # state says pushed once -> version, no status call
+    calls = (tmp_path / "calls.log").read_text().splitlines()
+    assert calls == ["datasets status owner/g4-x", f"datasets create -p {ds}", f"datasets version -p {ds} -m " + " ".join(calls[2].split()[5:])]
+    assert json.load(open(out / "state.json"))["pushes"] == 2 and "pushed version #2" in (out / "backup.log").read_text()
+
+
+def test_create_conflict_falls_back_to_version(tmp_path):
+    B = _mod(); run, _ = _run(tmp_path); k = _fake_kaggle_403(tmp_path, create_conflict=True); out = tmp_path / "ds"; ds = out / "dataset"
+    args = ["--run", str(run), "--out", str(out), "--slug", "g4-x", "--owner", "owner", "--kaggle", str(k), "--once"]
+    assert B.main(args) == 0                                   # a fresh --out but the dataset exists (a restart): create -> exists -> version
+    calls = (tmp_path / "calls.log").read_text().splitlines()
+    assert [c.split()[1] for c in calls] == ["status", "create", "version"]
+    assert json.load(open(out / "state.json"))["pushes"] == 1 and "pushed version #1" in (out / "backup.log").read_text()
+
+
+def test_pid_file_is_written(tmp_path):
+    B = _mod(); run, _ = _run(tmp_path); k = _fake_kaggle(tmp_path); out = tmp_path / "ds"
+    assert B.main(["--run", str(run), "--out", str(out), "--slug", "g4-x", "--owner", "owner", "--kaggle", str(k), "--once"]) == 0
+    assert int((out / "pid").read_text()) == os.getpid()

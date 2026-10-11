@@ -12,7 +12,7 @@ the per-item result files (task_results.jsonl, patches, summaries, ledgers: neve
 backup_results.py rules) go into items.tar.gz; MANIFEST.json records lines, bytes and sha256 per file; then the directory
 --out/dataset is pushed as a new dataset version (`kaggle datasets create` on the first round, `version` after). A round is
 skipped when neither the capture line count nor the item count changed since the last successful push (--out/state.json);
---force pushes anyway. The loop ends by itself after one last round once no autopilot.py process is alive (the collection has
+--force pushes anyway; --out/pid holds the loop's pid (kill it by that, never pkill -f). The loop ends by itself after one last round once no autopilot.py process is alive (the collection has
 ended), so it needs no stop command. Read-only on --run; CPU only (gzip); log at --out/backup.log. tests/test_backup_captures.py.
 Restore: `kaggle datasets download -d <owner>/<slug> --unzip -p DIR`, gunzip the captures, untar items.tar.gz."""
 import argparse, gzip, hashlib, json, os, shutil, subprocess, sys, tarfile, time
@@ -126,14 +126,29 @@ def autopilot_alive(run=subprocess.run):
     return r.returncode == 0 and bool((r.stdout or "").strip())
 
 
-def push(kaggle, ds, owner, slug):
-    """-> (rc, kind, tail): create or version the dataset from `ds`."""
+def dataset_exists(kaggle, owner, slug):
+    """True / False / None (unknown: the status endpoint answered 403 on the box's token, 2026-10-11)."""
     r = subprocess.run([kaggle, "datasets", "status", f"{owner}/{slug}"], capture_output=True, text=True)
-    text = (r.stdout or "") + (r.stderr or "")
-    exists = r.returncode == 0 and "not found" not in text.lower() and "404" not in text
-    cmd = cli_command(kaggle, str(ds), exists)
+    text = ((r.stdout or "") + (r.stderr or "")).strip()
+    if r.returncode == 0 and text and "404" not in text and "not found" not in text.lower():
+        return True
+    if "404" in text or "not found" in text.lower():
+        return False
+    return None
+
+
+def push(kaggle, ds, owner, slug, known_exists=False):
+    """-> (rc, kind, tail): version the dataset from `ds` when it is known or reported to exist, else create it; a create that
+    answers 'already exists' (a restart with a fresh --out, or an unknown status) falls back to version."""
+    exists = True if known_exists else dataset_exists(kaggle, owner, slug)
+    cmd = cli_command(kaggle, str(ds), bool(exists))
     out = subprocess.run(cmd, capture_output=True, text=True)
-    tail = ((out.stdout or "") + (out.stderr or "")).strip().replace("\n", " | ")[-300:]
+    text = (out.stdout or "") + (out.stderr or "")
+    if out.returncode != 0 and cmd[2] == "create" and ("exist" in text.lower() or "409" in text):
+        cmd = cli_command(kaggle, str(ds), True)
+        out = subprocess.run(cmd, capture_output=True, text=True)
+        text = (out.stdout or "") + (out.stderr or "")
+    tail = text.strip().replace("\n", " | ")[-300:]
     return out.returncode, cmd[2], tail
 
 
@@ -157,7 +172,7 @@ def one_round(a):
     if not a.force and not changed(state, man):
         _log(log, f"skip (unchanged: lines {man['capture_lines']} items {man['items']})")
         return 0
-    rc, kind, tail = push(a.kaggle, ds, a.owner, a.slug)
+    rc, kind, tail = push(a.kaggle, ds, a.owner, a.slug, known_exists=bool((state or {}).get("pushes")))
     if rc != 0:
         _log(log, f"FAILED {kind} rc={rc} lines {man['capture_lines']} items {man['items']} | {tail}")
         return 1
@@ -178,6 +193,8 @@ def main(argv=None):
     ap.add_argument("--once", action="store_true"); ap.add_argument("--force", action="store_true", help="push even when unchanged")
     a = ap.parse_args(argv)
     a.run = os.path.expanduser(a.run); a.out = os.path.expanduser(a.out); a.kaggle = os.path.expanduser(a.kaggle)
+    Path(a.out).mkdir(parents=True, exist_ok=True)
+    (Path(a.out) / "pid").write_text(str(os.getpid()))          # kill by this pid, never pkill -f (it matches the caller's shell)
     while True:
         alive = autopilot_alive()
         rc = one_round(a)

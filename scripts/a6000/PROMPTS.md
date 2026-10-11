@@ -537,13 +537,19 @@ already shows the loop.
    install kaggle` and `K=~/g4/venv/bin/kaggle`.
 2. FIRST ROUND, foreground: `mkdir -p ~/g4/backup && nice -n 19 ~/g4/venv/bin/python scripts/a6000/backup_captures.py --run
    ~/g4/runs/p3_think --out ~/g4/backup/p3_think --slug g4-p3-think-captures --kaggle "$K" --once` (rc 0; its log line reads
-   "pushed create #1 lines N bytes B items K"). Then `"$K" datasets status carsonrodrigues/g4-p3-think-captures` (ready, or still
-   being created) and `python3 -c "import json;m=json.load(open('$HOME/g4/backup/p3_think/dataset/MANIFEST.json'));print(m['capture_lines'],m['items'],{k:v['bytes'] for k,v in m['files'].items()})"`.
+   "pushed create #1 lines N bytes B items K"). Then `"$K" datasets files carsonrodrigues/g4-p3-think-captures` (the file list is
+   the confirmation; `datasets status` answers 403 on this token and the script no longer depends on it) and `python3 -c "import json;m=json.load(open('$HOME/g4/backup/p3_think/dataset/MANIFEST.json'));print(m['capture_lines'],m['items'],{k:v['bytes'] for k,v in m['files'].items()})"`.
    Fail = rc != 0 or FAILED in ~/g4/backup/p3_think/backup.log: paste the log line, do not start the loop, stop here.
 3. THE LOOP: `setsid nohup nice -n 19 ~/g4/venv/bin/python scripts/a6000/backup_captures.py --run ~/g4/runs/p3_think --out
    ~/g4/backup/p3_think --slug g4-p3-think-captures --kaggle "$K" --every 60 > ~/g4/backup/p3_think.out 2>&1 & disown`, then
-   `sleep 5; pgrep -af backup_captures.py` (one process). It pushes a new dataset version every 60 minutes when the capture
-   line count or the item count changed, and exits by itself after one last round once the autopilot is gone (the DONE line).
+   `sleep 5; pgrep -af backup_captures.py; cat ~/g4/backup/p3_think/pid` (one process, its pid in the file). It pushes a new
+   dataset version every 60 minutes when the capture line count or the item count changed (state.json remembers the dataset
+   exists, so no status call), and exits by itself after one last round once the autopilot is gone (the DONE line).
 4. LOG: append one block to docs/a6000/P2_LOG.md: `- <UTC> | P10d backup loop pid <pid> every 60 min -> carsonrodrigues/
    g4-p3-think-captures (create #1: lines N, bytes B, items K)`; commit "P10d backup loop started" and push (pull --rebase
-   --autostash first). Report the first-round log line, the pgrep line and the dataset status, then stop (P10c may follow).
+   --autostash first). Report the first-round log line, the pgrep line and the file list, then stop (P10c may follow).
+5. RESTART (only when told, after the code changed): `cat ~/g4/backup/p3_think/pid 2>/dev/null; pgrep -af backup_captures.py`
+   -> `kill <that pid>` (by pid only: pkill -f matches the shell that runs it), `sleep 2; pgrep -af backup_captures.py` (nothing);
+   step 0 again (pull; the tests must pass); one foreground round as step 2 but with `--once --force` (its log line must read
+   "pushed version #<n>", neither "create" nor FAILED); then step 3 again; P2_LOG block "P10d restarted pid <pid> (version
+   #<n>)", commit, push. Report the two log lines and the pgrep line.
