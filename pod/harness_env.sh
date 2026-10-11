@@ -7,7 +7,7 @@ export UV_LINK_MODE=copy
 source /root/hvenv/bin/activate
 cd /root/g4
 uv pip install -q "google-adk==1.36.1" litellm pyyaml "transformers==5.13.1" \
-  harness/wheels/adk_submission-0.2.11-py3-none-any.whl harness/wheels/adk_eval_core-0.1.0-py3-none-any.whl harness/wheels/swegemma-0.2.7-py3-none-any.whl
+  harness/wheels/adk_submission-0.2.13-py3-none-any.whl harness/wheels/adk_eval_core-0.1.0-py3-none-any.whl harness/wheels/swegemma-0.2.11-py3-none-any.whl
 python - <<'PY' > /tmp/newest_wheels.txt
 import os, re
 from packaging.version import Version
