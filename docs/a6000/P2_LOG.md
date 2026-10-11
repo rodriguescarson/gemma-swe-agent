@@ -368,3 +368,4 @@ not run (no capture)
 - 2026-10-11T02:05:07Z | step=v7d_p3 | done=699/844 | solved=279 | empty=41 | errors=1 | median_s=145.8 | cap=95 | gpu=100% | disk_free=888GB | restarts=0
 - 2026-10-11T03:05:13Z | step=v7d_p3 | done=739/844 | solved=295 | empty=43 | errors=1 | median_s=145.4 | cap=103 | gpu=100% | disk_free=888GB | restarts=0
 - 2026-10-11T04:05:18Z | step=v7d_p3 | done=777/844 | solved=314 | empty=47 | errors=1 | median_s=145.5 | cap=110 | gpu=100% | disk_free=888GB | restarts=0
+- 2026-10-11T04:22:52Z | step=v7d_p3 | END hardstop: done=789/844 solved=317
