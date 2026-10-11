@@ -365,3 +365,4 @@ not run (no capture)
 - 2026-10-10T23:04:51Z | step=v7d_p3 | done=579/844 | solved=232 | empty=35 | errors=1 | median_s=144.4 | cap=78 | gpu=100% | disk_free=889GB | restarts=0
 - 2026-10-11T00:04:57Z | step=v7d_p3 | done=624/844 | solved=251 | empty=37 | errors=1 | median_s=143.5 | cap=81 | gpu=100% | disk_free=889GB | restarts=0
 - 2026-10-11T01:05:02Z | step=v7d_p3 | done=658/844 | solved=265 | empty=37 | errors=1 | median_s=145.4 | cap=88 | gpu=100% | disk_free=888GB | restarts=0
+- 2026-10-11T02:05:07Z | step=v7d_p3 | done=699/844 | solved=279 | empty=41 | errors=1 | median_s=145.8 | cap=95 | gpu=100% | disk_free=888GB | restarts=0
