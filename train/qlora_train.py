@@ -250,7 +250,7 @@ def train(a, pm, info, items, held, log, out):
         load_ckpt(pm, opt, out)
         start, best, evals = cursor["step"], cursor["best"], cursor.state.get("evals", [])
         log(event="resumed", step=start, best=best)
-    log(event="train_start", sequences=n, steps=total, steps_per_epoch=spe, start_step=start, **data_stats(items), lora=info)
+    log(event="train_start", steps=total, steps_per_epoch=spe, start_step=start, **data_stats(items), lora=info)   # data_stats carries "sequences"
     oom_skipped, tps_hist, t_begin = 0, [], time.time()
     step = start
     while step < total:

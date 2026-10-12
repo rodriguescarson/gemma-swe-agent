@@ -77,3 +77,15 @@ def test_probe_window_covers_the_first_supervised_positions():
     assert none["tokens"] == 2048 and len(none["positions"]) == 0
     src = (ROOT / "train" / "qlora_train.py").read_text()
     assert 'probe_cut(max(items, key=lambda it: it["tokens"]), 2048)' in src and '"supervised": int(len(probe_item["positions"]))' in src
+
+
+def test_log_calls_never_duplicate_a_data_stats_key():
+    """2026-10-12 on the box: train_start passed sequences=n beside **data_stats(items), which already carries "sequences";
+    TypeError before step 1 (B-005). Every log call that splats data_stats must not name one of its keys."""
+    import re
+    src = (ROOT / "train" / "qlora_train.py").read_text()
+    keys = {"sequences", "tokens", "supervised_tokens", "weighted_tokens", "max_tokens"}
+    calls = re.findall(r"log\(([^\n]*\*\*data_stats\(items\)[^\n]*)\)", src)
+    assert calls, "no log call splats data_stats any more: update this test"
+    for call in calls:
+        assert not (set(re.findall(r"(\w+)=", call)) & keys), call
