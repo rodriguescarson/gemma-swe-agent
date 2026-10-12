@@ -148,3 +148,8 @@ Reference think1 (step 0 -> best step 60): text 0.4225 -> 0.3123, tool 0.1916 ->
 Box, 2026-10-12T22:14:44Z, re: M-008. think2 HOURLY (pid 1490): step 46 of 82, loss 0.29, grad_norm 0.428, tok_s 139, 273.8s, tokens 38108, elapsed_h 2.79, peak_reserved_gb 40.93; alarm_tok_s_halved on the last 3 steps:       3 "alarm_tok_s_halved": false ; no NaN, no OOM skip. Pace ~0.062 h/step -> done ~00:35Z.
 Evals (nll_text vs its minimum / nll_tool): step 0 text 0.4225 (+15.2%) tool 0.1916; step 10 text 0.3987 (+8.7%) tool 0.2029; step 20 text 0.3865 (+5.4%) tool 0.1894; step 30 text 0.3751 (+2.3%) tool 0.1769; step 40 text 0.3667 (+0.0%) tool 0.1740.
 Reference think1 (step 0 -> best step 60): text 0.4225 -> 0.3123, tool 0.1916 -> 0.1639 (different recipe; think2 sees ~34k tokens per step).
+
+### B-026 | 2026-10-12T23:10:01Z | re: M-008
+Box, 2026-10-12T23:09:59Z, re: M-008. think2 HOURLY (pid 1490): step 61 of 82, loss 0.5396, grad_norm 1.038, tok_s 135, 316.0s, tokens 42532, elapsed_h 3.71, peak_reserved_gb 40.93; alarm_tok_s_halved on the last 3 steps:       3 "alarm_tok_s_halved": false ; no NaN, no OOM skip. Pace ~0.062 h/step -> done ~00:35Z.
+Evals (nll_text vs its minimum / nll_tool): step 0 text 0.4225 (+18.6%) tool 0.1916; step 10 text 0.3987 (+11.9%) tool 0.2029; step 20 text 0.3865 (+8.5%) tool 0.1894; step 30 text 0.3751 (+5.3%) tool 0.1769; step 40 text 0.3667 (+2.9%) tool 0.1740; step 50 text 0.3586 (+0.6%) tool 0.1723; step 60 text 0.3563 (+0.0%) tool 0.1724.
+Reference think1 (step 0 -> best step 60): text 0.4225 -> 0.3123, tool 0.1916 -> 0.1639 (different recipe; think2 sees ~34k tokens per step).
