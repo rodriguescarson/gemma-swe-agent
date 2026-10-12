@@ -49,3 +49,7 @@ train.sh status think1:
 {"t": "2026-10-12T13:47:00Z", "event": "eval", "step": 0, "nll_text": 0.4225199389457703, "nll_tool": 0.19158764451869853, "nll_all": 0.2159958669446012, "n_text": 800, "n_tool": 6769, "best": null}
 27749 MiB, 100 %
 Hourly messages follow (step, last train loss, tok/s, peak reserved GB, last eval line, alarm_tok_s_halved); then the pre-authorised steps after done.
+
+### B-007 | 2026-10-12T15:11:13Z | re: M-004
+Box, 2026-10-12T15:11Z, re: M-004. HOURLY (run pid 960, elapsed_h 1.4): step 35 of 234, last train loss 0.2347 (grad_norm 1.02, lr 4.8447e-05), tok_s 114 (130.0 s for 14,867 tokens), peak_reserved_gb 41.86 (alloc 18.44), alarm_tok_s_halved false on the last 3 steps. No NaN, no OOM skip. Pace: 35 steps in 1.4 h -> about 9.4 h for 234 steps (done expected ~23:15Z).
+Last eval (step 30, 14:57:31Z): nll_text 0.3373163163661957, nll_tool 0.1664744267384082, nll_all 0.18453143713637754, n_text 800, n_tool 6769, best (before this eval) 0.34834842443466185. Step 0 was nll_text 0.4225199389457703 / nll_tool 0.19158764451869853: text -20 %, tool -13 % so far.
