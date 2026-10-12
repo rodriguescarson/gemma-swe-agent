@@ -26,3 +26,13 @@ Next (per M-001/M-002): re-stitch with --max-seqs-per-task-stage 6, then train.s
 ### B-004 | 2026-10-12T13:40:49Z | re: M-002
 Box, re: M-002. RE-STITCH (step 6, REDUCED path) `train.sh stitch ~/g4/runs/p3_think think1 --max-seqs-per-task-stage 6`: exit 0, validate_stitched.json ok true, sequences_with_thought 156 == sequences 156, problems 0, dropped_no_thought 3 (arrow_f77aa1d, cattrs_b55fbe0, isort_61071d7) = 1.9 % of 159 (bound 5 %), >= 40 sequences: pass. Numbers identical to the first stitch because no task-stage had more than 6 sequences (capped_per_task_stage 0): sequences 156, tasks 149, tokens 1323176, breaks 10, healed 42, compactions 0, over_max_tokens 53 (stitched at 14336), thought_share 0.9537 (validator 0.9539, model_spans 1454, thought_spans 1387), span_thought 1422, span_thought_masked 454, span_tool 1330, span_text 161, span_error 160, span_repeat 122, span_read_over_share 182; holdout 5 tasks (arrow_cc1cbeb attrs_e048efc black_650983f boltons_ec1ff9f more_itertools_40cee34), holdout.jsonl 5 sequences. tokens_p50/p90/max 7976 / 13452 / 14244.
 Launching now: `train.sh full think1 --max-tokens 12288` (session held open). Next message: the run's start event, first eval line and `train.sh status think1`; then hourly.
+
+### B-005 | 2026-10-12T13:41:50Z | re: M-002
+Box, re: M-002. BLOCKED: `train.sh full think1 --max-tokens 12288` crashed at 13:41:26Z, right after the data event, before step 1 (no GPU time lost; GPU back to 532 MiB, no trainer alive).
+Last lines of ~/g4/runs/train_think1/run/train.out:
+  {"event": "data", "sequences": 156, "tokens": 1284170, "supervised_tokens": 266144, "weighted_tokens": 266144, "max_tokens": 12288, "buckets": [33, 56, 40, 27], "holdout": 5}
+  File ".../train/qlora_train.py", line 253, in train
+    log(event="train_start", sequences=n, steps=total, steps_per_epoch=spe, start_step=start, **data_stats(items), lora=info)
+  TypeError: <__main__.Log object at 0x7d6ce4e1cd40> got multiple values for keyword argument 'sequences'
+Cause: data_stats(items) already returns a "sequences" key, so `sequences=n` duplicates it. Proposed one-line fix (yours to make, it is trainer code): drop `sequences=n,` from that call (n == len(items) == data_stats' sequences). The start of the run is otherwise as intended: recipe grad_accum 2, epochs 3, eval/save every 10, --max-tokens 12288 (last arg wins), data 156 sequences / 1,284,170 tokens / 266,144 supervised at the 12,288 cap, buckets [33, 56, 40, 27], load 36.1 s, idle check used_before_load_gb 0.52.
+Doing meanwhile: nothing on the GPU; `channel.sh wait`. After your fix I pull and re-run the same `train.sh full think1 --max-tokens 12288` (resumes from the cursor; none exists yet).
