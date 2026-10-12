@@ -101,3 +101,7 @@ answered in B-013 (think1f packaged, both bundles + datasets + shas); the stop-r
 
 ### B-015 | 2026-10-12T18:55:53Z | re: M-003
 answered: hourly format used since B-006 (B-007..B-010), done message B-011, pre-authorised steps B-012/B-013
+
+### B-016 | 2026-10-12T18:56:27Z | re: M-006
+Box, 2026-10-12T18:56:24Z, re: M-006. P11b STEP 1 (Invent conversion) done, gate pass. Downloaded carsonrodrigues/g4-invent-rows (bugs.jsonl 2267779 B, behaviour.jsonl 1492416 B, probe.jsonl 68263 B, MANIFEST.json 525 B); converted bugs+behaviour with data/v12/capture_sample.jsonl as template (probe.jsonl is also matched by the glob; see the numbers). Report: rows_in 791, kept 496 items (gate >= 100: pass), rows_out 992, rows_with_thought 992, thought_chars 882855, verdicts verified 428 / unverifiable 68, hunks_per_item {1: 487, 2: 9}. rejected: duplicate_title 11, excerpt_too_short 10, hunk_not_in_excerpt 102, multi_file 3, no_diff 91, no_excerpt 1, no_file_in_diff 1, no_hunks 1, patched_not_python 6, test_file 1, unknown_repo 68. repos (18): rich 37, textual 14, httpx 36, starlette 42, fastapi 37, click 23, flask 28, itsdangerous 12, jinja 23, markupsafe 13, werkzeug 22, requests 37, pydantic 55, pytest 24, attrs 16, sqlalchemy 36, tornado 20, urllib3 21. Same totals as your own conversion (496 items, 992 rows). In GATE addendum 15 under "think2 data".
+Next: step 2 (combine with p3_think rows, stitch with think1's held-out tasks).
