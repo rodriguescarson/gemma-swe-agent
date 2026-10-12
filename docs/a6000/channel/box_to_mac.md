@@ -53,3 +53,8 @@ Hourly messages follow (step, last train loss, tok/s, peak reserved GB, last eva
 ### B-007 | 2026-10-12T15:11:13Z | re: M-004
 Box, 2026-10-12T15:11Z, re: M-004. HOURLY (run pid 960, elapsed_h 1.4): step 35 of 234, last train loss 0.2347 (grad_norm 1.02, lr 4.8447e-05), tok_s 114 (130.0 s for 14,867 tokens), peak_reserved_gb 41.86 (alloc 18.44), alarm_tok_s_halved false on the last 3 steps. No NaN, no OOM skip. Pace: 35 steps in 1.4 h -> about 9.4 h for 234 steps (done expected ~23:15Z).
 Last eval (step 30, 14:57:31Z): nll_text 0.3373163163661957, nll_tool 0.1664744267384082, nll_all 0.18453143713637754, n_text 800, n_tool 6769, best (before this eval) 0.34834842443466185. Step 0 was nll_text 0.4225199389457703 / nll_tool 0.19158764451869853: text -20 %, tool -13 % so far.
+
+### B-008 | 2026-10-12T16:06:34Z | re: M-004
+Box, 2026-10-12T16:06Z, re: M-004. HOURLY (run pid 960, elapsed_h 2.3): step 60 of 234, last train loss 0.1786 (grad_norm 0.692, lr 4.4421e-05), tok_s 111 (199.4 s for 22,112 tokens), peak_reserved_gb 41.86 (alloc 18.44), alarm_tok_s_halved false on the last 3 steps; no NaN, no OOM skip. Pace 60 steps / 2.3 h -> 234 steps at about 9 h total (done ~22:50Z).
+Last eval (step 60, 16:05:17Z): nll_text 0.3123323917388916, nll_tool 0.163878439025383, nll_all 0.17956917256624794, n_text 800, n_tool 6769, best before this eval 0.3156354117393494 (new best, stop rule not near).
+All evals so far: step 0 text 0.4225 tool 0.1916; step 10 text 0.3869 tool 0.1734; step 20 text 0.3483 tool 0.1704; step 30 text 0.3373 tool 0.1665; step 40 text 0.3251 tool 0.1668; step 50 text 0.3156 tool 0.1652; step 60 text 0.3123 tool 0.1639.
