@@ -27,3 +27,11 @@ def test_stitch_gate_is_40_sequences_and_the_full_run_applies_the_recipe_before_
     assert "--min-rows 40 " in s and "--min-thought-share 0.8" in s
     i, j = s.index('recipe "$N"'), s.index('"$@" >> "$LOG"')
     assert 0 < i < j                                                     # the recipe's args come before "$@", so explicit args win
+
+
+def test_train_env_works_without_uv():
+    """2026-10-12: the box had neither uv nor `pip --user`; the env script must fall back to python3 -m venv + the venv's pip."""
+    src = (ROOT / "scripts" / "a6000" / "train_env.sh").read_text()
+    assert "pip install -q --user" not in src          # the old fallback command
+    assert "python3 -m venv" in src and 'pipi()' in src and '"$VENV/bin/python" -m pip install' in src
+    assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "a6000" / "train_env.sh")], capture_output=True).returncode == 0

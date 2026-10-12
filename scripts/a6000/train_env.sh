@@ -7,12 +7,18 @@ set -euo pipefail
 VENV=${1:-$HOME/g4/train-venv}
 PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '^/mnt/' | paste -sd: -); export PATH
 unset PYTORCH_CUDA_ALLOC_CONF
-command -v uv >/dev/null 2>&1 || python3 -m pip install -q --user uv
-if [ ! -x "$VENV/bin/python" ]; then uv venv --python 3.12 "$VENV"; fi
+# uv when present (the Mac; on the box ~/g4/bin/uv or ~/g4/venv/bin/uv), else python3 -m venv + the venv's own pip
+# (2026-10-12: the box had no uv and no `pip --user`; the old fallback could not work there).
+UV=$(command -v uv 2>/dev/null || true)
+for c in "$HOME/g4/bin/uv" "$HOME/g4/venv/bin/uv"; do [ -z "$UV" ] && [ -x "$c" ] && UV=$c; done
+if [ ! -x "$VENV/bin/python" ]; then
+  if [ -n "$UV" ]; then "$UV" venv --python 3.12 "$VENV"; else python3 -m venv "$VENV" && "$VENV/bin/python" -m pip install -q --upgrade pip; fi
+fi
+pipi() { if [ -n "$UV" ]; then "$UV" pip install --python "$VENV/bin/python" "$@"; else "$VENV/bin/python" -m pip install -q "$@"; fi; }
 # the same torch build the serving venv runs on this box (proven on the GPU), then the training stack on top
 TORCH_SPEC="torch==2.10.0+cu128 torchvision==0.25.0+cu128"
-uv pip install --python "$VENV/bin/python" --index-url https://download.pytorch.org/whl/cu128 $TORCH_SPEC
-uv pip install --python "$VENV/bin/python" "transformers==5.17.0" "peft==0.21.0" "accelerate==1.15.0" "bitsandbytes>=0.47" \
+pipi --index-url https://download.pytorch.org/whl/cu128 $TORCH_SPEC
+pipi "transformers==5.17.0" "peft==0.21.0" "accelerate==1.15.0" "bitsandbytes>=0.47" \
   "compressed-tensors" "safetensors>=0.5" "tokenizers>=0.21" "numpy" "sentencepiece" "huggingface_hub"
 "$VENV/bin/python" - <<'PY'
 import torch, transformers, peft, accelerate, bitsandbytes as bnb
