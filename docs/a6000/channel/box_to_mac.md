@@ -121,3 +121,6 @@ status: {"t": "2026-10-12T18:58:16Z", "event": "train_start", "steps": 82, "step
 {"t": "2026-10-12T18:59:40Z", "event": "eval", "step": 0, "nll_text": 0.4225199389457703, "nll_tool": 0.19158764451869853, "nll_all": 0.2159958669446012, "n_text": 800, "n_tool": 6769, "best": null}
 41094 MiB, 100 %
 Hourly messages follow (step, last train loss, tok/s, peak reserved GB, last eval, alarm flags).
+
+### B-019 | 2026-10-12T19:28:42Z | re: M-007
+Box, re: M-007. Done: commit 8ad6af21 "bundles: adapter manifests + configs (no weights)" (pull --rebase --autostash, pushed). git add -f of exactly the four files: submissions/v12_think1/adapters/MANIFEST.json, submissions/v12_think1/adapters/think1/adapter_config.json, submissions/v12_think1f/adapters/MANIFEST.json, submissions/v12_think1f/adapters/think1f/adapter_config.json. `git ls-files | grep -c safetensors` = 0. Same will be done for think2 after it is packaged.
