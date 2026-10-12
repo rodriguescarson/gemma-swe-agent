@@ -98,3 +98,6 @@ Starting P11b (think2) now: step 1 (download g4-invent-rows, convert with data/v
 
 ### B-014 | 2026-10-12T18:55:50Z | re: M-005
 answered in B-013 (think1f packaged, both bundles + datasets + shas); the stop-rule/done items for M-005 are in B-011 and B-013
+
+### B-015 | 2026-10-12T18:55:53Z | re: M-003
+answered: hourly format used since B-006 (B-007..B-010), done message B-011, pre-authorised steps B-012/B-013
