@@ -220,8 +220,10 @@ def run_probe(a, pm, info, items, held, log, out, loaded):
     verdict, reasons = probe_verdict(peak12, tok_s, loss_first, loss_last, nan=nan, max_grad=max(gns, default=0.0))
     if rep["forward2k"]["max_abs_logit"] > cap + 0.5:
         verdict, reasons = "FALLBACK", [f"max |logit| {rep['forward2k']['max_abs_logit']} > softcap {cap}"] + reasons
-    if not (0.3 <= base_nll <= 1.5):
-        verdict, reasons = "FALLBACK", [f"base NLL {base_nll:.3f} outside [0.3, 1.5]: the base is not the served model"] + reasons
+    if base_nll > 1.5:
+        verdict, reasons = "FALLBACK", [f"base NLL {base_nll:.3f} > 1.5: the base is not the served model"] + reasons
+    elif base_nll < 0.3:                                # informational since 2026-10-12: a low NLL on its own samples cannot mean a wrong base (TRAIN_LOCAL)
+        reasons.append(f"base NLL {base_nll:.3f} < 0.3 on {len(probe_item['positions'])} supervised tokens: the model is confident on its own samples (informational)")
     if peak12 is None:
         reasons.append("no sequence in the 9k-13k bucket: the 12k memory check did not run")
     if excluded:

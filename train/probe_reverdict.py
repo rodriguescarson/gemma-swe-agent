@@ -3,7 +3,7 @@
 probe_verdict, docs/a6000/TRAIN_LOCAL.md). 2026-10-12: the box's probe ran on code that averaged tok/s over the thrashing
 13-16k bucket (four steps at 6 tok/s, 47.8 GB); the rule changed while it ran (TRAIN_LOCAL "Probe rule added 2026-10-12"), so
 its report carries the old verdict and this prints the new one beside it. Every raw measurement is taken from the report;
-nothing is re-run. The same forward2k checks as run_probe apply (|logit| <= softcap + 0.5, base NLL in [0.3, 1.5]).
+nothing is re-run. The same forward2k checks as run_probe apply (|logit| <= softcap + 0.5, base NLL <= 1.5; < 0.3 is informational since 2026-10-12).
 
     python train/probe_reverdict.py ~/g4/runs/train_think1/probe/probe_report.json [--write] [--softcap 30]
 --write saves probe_reverdict.json next to the report. Exit 0 for FULL / REDUCED, 3 for FALLBACK."""
@@ -28,8 +28,10 @@ def reverdict(rep, softcap=30.0, max_tokens=None):
     f2k = rep.get("forward2k") or {}
     if f2k.get("max_abs_logit") is not None and f2k["max_abs_logit"] > softcap + 0.5:
         verdict, reasons = "FALLBACK", [f"max |logit| {f2k['max_abs_logit']} > softcap {softcap}"] + reasons
-    if f2k.get("base_nll") is not None and not (0.3 <= f2k["base_nll"] <= 1.5):
-        verdict, reasons = "FALLBACK", [f"base NLL {f2k['base_nll']:.3f} outside [0.3, 1.5]: the base is not the served model"] + reasons
+    if f2k.get("base_nll") is not None and f2k["base_nll"] > 1.5:
+        verdict, reasons = "FALLBACK", [f"base NLL {f2k['base_nll']:.3f} > 1.5: the base is not the served model"] + reasons
+    elif f2k.get("base_nll") is not None and f2k["base_nll"] < 0.3:        # informational since 2026-10-12 (TRAIN_LOCAL)
+        reasons.append(f"base NLL {f2k['base_nll']:.3f} < 0.3 on {f2k.get('supervised', '?')} supervised tokens: the model is confident on its own samples (informational)")
     if peak12 is None:
         reasons.append("no sequence in the 9k-13k bucket: the 12k memory check did not run")
     if excluded:

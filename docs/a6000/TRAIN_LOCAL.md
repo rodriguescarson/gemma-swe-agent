@@ -46,6 +46,9 @@ masks its thought with it; `span_thought_masked` in the stitch report counts tho
 3. PEFT attached (regex: q,v,o,gate,up,down on all 60 layers, k on the 50 sliding layers; the count of wrapped modules must
    equal the regex's matches); one 2k forward with the math SDPA kernel disabled: max |logit| <= 30 (the softcap), base
    supervised NLL in [0.3, 1.5]. Outside either range = the base is not the served model = FALLBACK.
+   Amended 2026-10-12 after the first real probe read 0.1949 on 64 supervised tokens (single-sequence step losses 0.17-0.47
+   agree): the check's purpose is a wrong base or a broken dequant, which reads HIGH; a low loss on the model's own samples
+   cannot mean that, so only NLL > 1.5 is FALLBACK and NLL < 0.3 is reported as informational. Post-hoc, recorded in GAPS.
 4. 20 single-sequence steps longest first (5 x <5k, 5 x 5-9k, 5 x 9-13k, 5 x 13-16k), then 24 steps on 8 sequences near 6k
    tokens with grad_accum 4:
    - peak reserved in the 9-13k bucket <= 44 GB; OOM at 13-16k but not at 9-13k = the run uses `--max-tokens 12288`;

@@ -46,3 +46,14 @@ def test_cli_writes_next_to_the_report_and_exits_by_verdict(tmp_path):
     out = json.loads((tmp_path / "probe_reverdict.json").read_text()); assert out["verdict"] == "REDUCED" and out["old_verdict"] == "FALLBACK"
     r.write_text(json.dumps(box_report(losses=[0.4] * 24)))
     assert subprocess.run([sys.executable, str(ROOT / "train" / "probe_reverdict.py"), str(r)], capture_output=True, text=True).returncode == 3
+
+
+def test_a_low_base_nll_is_informational_not_fallback():
+    """2026-10-12 on the box: forward2k base_nll 0.1949 on 64 supervised tokens while the single-sequence step losses ran 0.17-0.47.
+    The bound's stated purpose is "the base is not the served model"; a LOW loss on the model's own samples cannot mean that
+    (a wrong base or a broken dequant reads high), so the lower bound became informational. The upper bound stands."""
+    rep = box_report(); rep["forward2k"]["base_nll"] = 0.1949
+    out = reverdict(rep)
+    assert out["verdict"] == "REDUCED" and any("0.195 < 0.3" in r and "informational" in r for r in out["reasons"])
+    rep["forward2k"]["base_nll"] = 1.51
+    assert reverdict(rep)["verdict"] == "FALLBACK"
