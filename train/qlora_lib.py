@@ -117,6 +117,24 @@ class Cursor:
         return self.state[k]
 
 
+THRASH_TOK_S = 30.0
+
+
+def bucket_unusable(b, thrash_tok_s=THRASH_TOK_S):
+    """A bucket the run must never use: it OOM'd, or a step crawled under thrash_tok_s (the allocator paging at the card's
+    limit; 2026-10-12 on the A6000: a 15,844-token step at 6 tok/s and 47.8 GB after one at 83 tok/s and 46.5 GB)."""
+    return bool(b.get("oom")) or any(s.get("tok_s", 10 ** 9) < thrash_tok_s for s in b.get("steps", []) if "s" in s)
+
+
+def probe_throughput(buckets, thrash_tok_s=THRASH_TOK_S):
+    """tok/s over the successful steps of the usable buckets -> (tok_s, [ranges of the excluded buckets]). An unusable bucket
+    is excluded because the run caps its sequences below it, so its steps say nothing about the run's pace."""
+    excluded = [b["range"] for b in buckets if bucket_unusable(b, thrash_tok_s)]
+    ok = [s for b in buckets if not bucket_unusable(b, thrash_tok_s) for s in b["steps"] if "s" in s]
+    toks, secs = sum(s["tokens"] for s in ok), sum(s["s"] for s in ok)
+    return (toks / secs if secs else 0.0), excluded
+
+
 def probe_verdict(peak_gb_at_12k, tok_s, loss_first, loss_last, nan=False, max_grad=0.0):
     """The pre-registered thresholds of docs/a6000/TRAIN_LOCAL.md -> ('FULL'|'REDUCED'|'FALLBACK', reasons)."""
     reasons = []

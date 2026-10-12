@@ -85,3 +85,13 @@ More than 5 OOM steps abort (exit 4): lower `--max-tokens`.
 Never `PYTORCH_CUDA_ALLOC_CONF=expandable_segments` (CUDA init fails here); `/mnt/*` off PATH; everything under `~/g4`;
 `train.sh` refuses to start when a serving/supervisor process is alive, nvidia-smi shows > 1 GB used (stale VRAM after a
 hard stop: `wsl --shutdown` from Windows) or port 8000 answers; runs are `setsid nohup` with their own `train.out`.
+
+
+**Probe rule added 2026-10-12 (before the rerun; the box's first probe is in GAPS "Probe: the 13-16k bucket thrashes").**
+A bucket whose step crawls under 30 tok/s is "unusable" exactly like one that OOMs: the allocator is paging at the card's
+limit (15,844 tokens: 83 tok/s and 46.5 GB on one step, 6 tok/s and 47.8 GB on the next). The run never trains at that
+length (cap 12,288), so the probe's tok/s is computed over the usable buckets only and the excluded buckets are listed in
+the report (`excluded_buckets`, `thrash_at_16k`); `cap_tokens` is 12,288 when the top bucket is unusable, when the verdict
+is REDUCED, or when the probe itself ran with `--max-tokens 12288`. The FULL / REDUCED / FALLBACK thresholds (150 / 100
+tok/s) and every other check are unchanged. The rerun on the box passes `--max-tokens 12288` so the top bucket's five steps
+measure the longest contexts at the run's own cap instead of crawling for two hours.

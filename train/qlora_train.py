@@ -21,7 +21,7 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from train.qlora_lib import Cursor, epoch_order, lr_at, per_token_nll, probe_plan, probe_verdict  # noqa: E402
+from train.qlora_lib import THRASH_TOK_S, Cursor, bucket_unusable, epoch_order, lr_at, per_token_nll, probe_plan, probe_throughput, probe_verdict  # noqa: E402
 from train.qlora_model import (SERVED_BASE, attach_lora, base_of, configure_training, evaluate, export_adapter, forward_hidden,  # noqa: E402
                                head_weight, load_base_nf4, prepare_item, sequence_loss, softcap_of, to_device)
 
@@ -209,9 +209,8 @@ def run_probe(a, pm, info, items, held, log, out, loaded):
         gn = float(torch.nn.utils.clip_grad_norm_(lora_params(pm), a.clip)); opt.step(); opt.zero_grad(set_to_none=True); torch.cuda.synchronize()
         losses.append(lsum); gns.append(gn)
         log(event="probe_repeat", step=step, loss=round(lsum, 4), grad_norm=round(gn, 3), tokens=sum(it["tokens"] for it in batch), seconds=round(time.time() - t, 1))
-    ok_steps = [s for b in buckets for s in b["steps"] if "s" in s]
-    toks, secs = sum(s["tokens"] for s in ok_steps), sum(s["s"] for s in ok_steps)
-    tok_s = toks / secs if secs else 0.0
+    tok_s, excluded = probe_throughput(buckets)        # buckets that OOM'd or thrashed say nothing about the run's pace (TRAIN_LOCAL)
+    top_unusable = bucket_unusable(buckets[3])
     b12 = buckets[2]
     peak12 = 99.0 if b12["oom"] else (max((s["peak_reserved_gb"] for s in b12["steps"]), default=None))
     nan = any(not math.isfinite(x) for x in losses)
@@ -225,11 +224,14 @@ def run_probe(a, pm, info, items, held, log, out, loaded):
         verdict, reasons = "FALLBACK", [f"base NLL {base_nll:.3f} outside [0.3, 1.5]: the base is not the served model"] + reasons
     if peak12 is None:
         reasons.append("no sequence in the 9k-13k bucket: the 12k memory check did not run")
+    if excluded:
+        reasons.append(f"buckets {excluded} OOM'd or thrashed (< {THRASH_TOK_S:.0f} tok/s): excluded from tok/s; the run caps at 12,288")
+    cap_tokens = 12288 if (top_unusable or verdict == "REDUCED" or a.max_tokens <= 12288) else 14336
     rep.update({"buckets": buckets, "repeat_losses": [round(x, 4) for x in losses], "grad_norms": [round(x, 3) for x in gns], "tok_s": round(tok_s, 1),
-                "peak_gb_at_12k": peak12, "oom_at_16k": buckets[3]["oom"], "cap_tokens": 12288 if (buckets[3]["oom"] or verdict == "REDUCED") else 14336,
-                "export": erep, "heldout_eval": evaluate(pm, held, a.chunk, dev) if held else None, "verdict": verdict, "reasons": reasons})
+                "excluded_buckets": excluded, "max_tokens": a.max_tokens, "peak_gb_at_12k": peak12, "oom_at_16k": buckets[3]["oom"], "thrash_at_16k": top_unusable and not buckets[3]["oom"],
+                "cap_tokens": cap_tokens, "export": erep, "heldout_eval": evaluate(pm, held, a.chunk, dev) if held else None, "verdict": verdict, "reasons": reasons})
     (Path(out) / "probe_report.json").write_text(json.dumps(rep, indent=1, default=str))
-    log(event="probe_verdict", verdict=verdict, reasons=reasons, tok_s=rep["tok_s"], peak_gb_at_12k=peak12, oom_at_16k=buckets[3]["oom"])
+    log(event="probe_verdict", verdict=verdict, reasons=reasons, tok_s=rep["tok_s"], peak_gb_at_12k=peak12, oom_at_16k=buckets[3]["oom"], thrash_at_16k=rep["thrash_at_16k"], cap_tokens=cap_tokens)
     return 0 if verdict != "FALLBACK" else 3
 
 

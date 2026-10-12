@@ -85,3 +85,20 @@ def test_cursor_round_trips(tmp_path):
     c.save(step=12, seq=40, epoch=0, best=0.31)
     assert Q.Cursor(tmp_path / "cursor.json")["seq"] == 40 and json.loads((tmp_path / "cursor.json").read_text())["best"] == 0.31
     assert Q.epoch_order(5, seed=1) != Q.epoch_order(5, seed=2) and sorted(Q.epoch_order(5)) == [0, 1, 2, 3, 4]
+
+
+def test_probe_throughput_excludes_buckets_that_oom_or_thrash():
+    """2026-10-12 on the box: the 13-16k bucket ran one step at 83 tok/s (46.5 GB) and one at 6 tok/s (47.8 GB, 2,460 s). The
+    old average over every step would have called the whole card FALLBACK although everything up to 13k ran at 100-130 tok/s;
+    the run never uses that length (cap 12,288), so such a bucket is excluded and reported."""
+    from train.qlora_lib import bucket_unusable, probe_throughput
+    good = {"range": [9000, 13000], "oom": False, "steps": [{"tokens": 12000, "s": 120.0, "tok_s": 100}, {"tokens": 12000, "s": 115.0, "tok_s": 104}]}
+    mid = {"range": [5000, 9000], "oom": False, "steps": [{"tokens": 8000, "s": 61.5, "tok_s": 130}]}
+    thrash = {"range": [13000, 10 ** 9], "oom": False, "steps": [{"tokens": 15844, "s": 195.0, "tok_s": 83}, {"tokens": 15844, "s": 2459.65, "tok_s": 6}]}
+    oom = {"range": [13000, 10 ** 9], "oom": True, "steps": [{"tokens": 15844, "oom": True}]}
+    assert not bucket_unusable(good) and not bucket_unusable(mid) and bucket_unusable(thrash) and bucket_unusable(oom)
+    tok_s, excluded = probe_throughput([mid, good, thrash])
+    assert excluded == [[13000, 10 ** 9]] and abs(tok_s - (32000 / 296.5)) < 1e-6
+    all_in = sum(s["tokens"] for b in (mid, good, thrash) for s in b["steps"]) / sum(s["s"] for b in (mid, good, thrash) for s in b["steps"])
+    assert all_in < 30 < tok_s                                 # the old average would have read ~20 tok/s
+    assert probe_throughput([oom]) == (0.0, [[13000, 10 ** 9]])
