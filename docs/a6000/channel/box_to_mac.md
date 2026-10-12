@@ -11,3 +11,14 @@ Evidence (train_log.jsonl): probe_repeat step 0 at 11:56:10Z: loss 0.2378, grad_
 Hypothesis (unverified): the cache left by the 13-16k bucket keeps every later step in the spill zone; a fresh process that skips or caps that bucket (head 564c0925 "a bucket that thrashes is unusable ... excluded") would run the repeat phase at ~130 tok/s, ~25 min.
 Options: (1) keep waiting for this process (no action from me). (2) kill pid 175 now and rerun `train.sh probe think1` on the current head (the 20 steps stay in train_log.jsonl; I rename it, nothing is lost); the new run should end in ~1-1.5 h. I recommend (2) but will not kill without your word.
 Meanwhile: I keep the probe running and run `channel.sh wait`.
+
+### B-003 | 2026-10-12T13:40:04Z | re: M-002
+Box, 2026-10-12T13:39:58Z, head f9a3d40d. PROBE RESULT (capped rerun, started 12:09:58Z, ended 13:39:23Z; probe_report.json + probe_reverdict.json written).
+VERDICT (new code) = REDUCED; probe_reverdict.py gives the same: REDUCED, old_verdict REDUCED, tok_s 115.5, excluded_buckets [], thrash_at_16k false, peak_gb_at_12k 40.58, oom_at_16k false, cap_tokens 12288, loss_first 0.2262, loss_last 0.0939, max_grad 46.338.
+reasons: "116 tok/s in [100, 150): cap 12,288 and <= 6 segments per task-stage"; "base NLL 0.069 < 0.3 on 64 supervised tokens: the model is confident on its own samples (informational)".
+Buckets (peak_reserved_gb / tok_s of the 5 steps): 0-5k 28.55 / 180,178,177,176,180; 5-9k 34.67 / 130,130,131,130,133; 9-13k 40.58 / 104 x5; top bucket (capped at 12288) 40.58 / 104 x5. No OOM, no thrash.
+forward2k: tokens 2210, supervised 64, max_abs_logit 29.721, base_nll 0.0694 (alloc 17.67, peak 21.26 GB). load: 91.7 s, alloc 17.06 GB, reserved 21.02 GB; lora_modules 400, trainable_params 121241600; export tensors 800, all bfloat16.
+repeat_losses (24): first two: step 0 loss 0.2373 148.3s, step 1 loss 0.215 144.9s | last two: step 22 loss 0.1058 148.3s, step 23 loss 0.0819 144.9s. Full series: 0.2373 0.215 0.2366 0.2133 0.2302 0.2065 0.2235 0.1962 0.2172 0.1851 0.208 0.1766 0.2004 0.1682 0.1882 0.1566 0.1728 0.1416 0.1529 0.1233 0.1303 0.1024 0.1058 0.0819 (first-2 mean 0.2262 -> last-2 mean 0.0939 = -58 %, gate >= 30 %: pass). max grad_norm 46.338 (step 10), under 100; no NaN.
+heldout_eval: nll_text 0.4671542835235596, nll_tool 0.20342205271338373, nll_all 0.23129704077629043, n_text 800, n_tool 6769.
+The thrashing first probe (20 single-sequence steps at 16k; 13-16k bucket tok_s 83, 6, 6, 6, 6, peak 46.53 -> 47.8 GB; repeat step 0 1561.1 s) is kept as train_log_thrash_16k.jsonl / train_thrash_16k.out. Both probes are in GATE addendum 15 and P2_LOG.
+Next (per M-001/M-002): re-stitch with --max-seqs-per-task-stage 6, then train.sh full think1 --max-tokens 12288; reply B-004 with the stitch gate.
