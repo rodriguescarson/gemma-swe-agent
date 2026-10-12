@@ -1431,3 +1431,24 @@ DROP: solved 27 < 37; net -7 < +3`
 
 #### P3
 not run (no capture)
+
+### P3 data report (2026-10-12 06:23 UTC; ONE pass, bundle v12, stopped at the hard stop; weights and data stay out of git)
+- tasks finished 468 (solved in at least one pass 159); attempts 468; captured model calls 10312
+- SFT rows (test-verified successes only, sample-200 ids refused): 3006; after rebalance (drop repeats, read_file share 0.15, 200 per task, unknown tools dropped): 2677
+- rebalance profile: `{"before": {"rows": 3006, "tasks": 159, "tools": {"run_command": 1324, "read_file": 728, "edit_file": 561, "null": 156, "submit_patch": 117, "write_file": 101, "get_status": 19}, "stages": {"swe_single_agent": 2958, "null": 48}, "replies": 156}, "after": {"rows": 2677, "tasks": 159, "tools": {"run_command": 1322, "edit_file": 561, "read_file": 401, "null": 156, "submit_patch": 117, "write_file": 1`
+- validation rc: 0 (build rc 0, rebalance rc 0); `s_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "completion_tokens_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "problems": 0,
+ "first_problems": [],
+ "ok": true
+}`
+- thoughts: 2633 of 2677 rebalanced rows carry a non-empty thought channel (share 0.98; the P11 rows gate is >= 0.80)
+- preference pairs (a solved and a failed attempt of the same task): **0** (raw material in pairs_raw.jsonl: task, solved passes, failed passes; the Adaption SDK's alignment schema is applied on the Mac, the package is not installed here)

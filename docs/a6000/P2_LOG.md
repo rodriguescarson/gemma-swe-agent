@@ -644,3 +644,25 @@ not run (no capture)
 - 2026-10-12T06:06:11Z | END cleanup (hard stop): nvidia-smi compute apps: none | memory.used 493 MiB (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: none
 - DONE 2026-10-12T06:06:14Z (hard stop)
 - 2026-10-12T06:23:16Z | P11 STATE: DONE line 2026-10-12T06:06:14Z present; nothing alive (autopilot/vllm/pace_proxy/qlora; only the backup loop pid 9872, CPU, by owner OK); memory.used 533 MiB; 845G free; ARM v12; head 5f3a1f06
+
+### P3 data report (2026-10-12 06:23 UTC; ONE pass, bundle v12, stopped at the hard stop; weights and data stay out of git)
+- tasks finished 468 (solved in at least one pass 159); attempts 468; captured model calls 10312
+- SFT rows (test-verified successes only, sample-200 ids refused): 3006; after rebalance (drop repeats, read_file share 0.15, 200 per task, unknown tools dropped): 2677
+- rebalance profile: `{"before": {"rows": 3006, "tasks": 159, "tools": {"run_command": 1324, "read_file": 728, "edit_file": 561, "null": 156, "submit_patch": 117, "write_file": 101, "get_status": 19}, "stages": {"swe_single_agent": 2958, "null": 48}, "replies": 156}, "after": {"rows": 2677, "tasks": 159, "tools": {"run_command": 1322, "edit_file": 561, "read_file": 401, "null": 156, "submit_patch": 117, "write_file": 1`
+- validation rc: 0 (build rc 0, rebalance rc 0); `s_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "completion_tokens_p50_p90_max": [
+  null,
+  null,
+  null
+ ],
+ "problems": 0,
+ "first_problems": [],
+ "ok": true
+}`
+- thoughts: 2633 of 2677 rebalanced rows carry a non-empty thought channel (share 0.98; the P11 rows gate is >= 0.80)
+- preference pairs (a solved and a failed attempt of the same task): **0** (raw material in pairs_raw.jsonl: task, solved passes, failed passes; the Adaption SDK's alignment schema is applied on the Mac, the package is not installed here)
+- 2026-10-12T06:55:08Z | P11 STOP at step 4 (stitch gate FAIL): rows built (3006 rows, 2677 rebalanced, thoughts 2633/2677 share 0.98, rc 0); train-venv ok (cuda ok, torch 2.10.0+cu128, transformers 5.17.0, peft 0.21.0, bitsandbytes 0.50.2; needed uv linked into ~/g4/bin because neither uv nor pip exists for system python); dequant ok (tensors 1189, dequantised 410, checked_against_library 3, 13 shards, 61G); stitch (head 2dd16f08; data/v11/v11b_holdout_tasks.txt copied from docs/v11, 5 holdout tasks drawn/held: holdout_sequences 5): sequences 159, tasks 149, tokens 1353772, breaks 10, healed 42, compactions 0, span_thought 1422, span_thought_masked 454, span_tool 1378, span_text 167, span_error 167, span_repeat 127, span_read_over_share 187, thought_share 0.9204 (validator 0.9198, model_spans 1508, thought_spans 1387). validate_stitched.json ok=false: sequences_with_thought 156 != sequences 159; problems 3 = sequences 17, 76, 88 'no non-empty thought channel'. thought_share and >=40 sequences pass; only the strict 'every sequence has a thought' rule fails. Owner decides (accept 156 by dropping those 3, or stop). Probe not started.
