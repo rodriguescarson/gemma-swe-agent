@@ -15,8 +15,8 @@ def test_steps_probe_then_pair_against_the_p10_reference_with_the_serve_bundle(t
     P = _mod("p12_plan")
     arms = ["v12_think1", "v12_think1f", "v12_think2"]
     steps = P.p12_steps("/home/u/g4/runs", "/py", arms)
-    assert [s["name"] for s in steps] == ["probe_pair", "pair_s50"]
-    probe, s50 = steps
+    assert [s["name"] for s in steps] == ["probe_pair", "pair_s50", "p4_adapter"]
+    probe, s50, p4 = steps
     assert probe["cmd"][probe["cmd"].index("--arms") + 1:probe["cmd"].index("--levels")] == arms and probe["total"] == 12
     cmd = s50["cmd"]
     assert cmd[1].endswith("p2_race.py") and cmd[2] == "/home/u/g4/runs/p2"          # the P10 dir: v12's 50 rows are reused, not re-run
@@ -26,9 +26,15 @@ def test_steps_probe_then_pair_against_the_p10_reference_with_the_serve_bundle(t
     md = [h for h in s50["post"] if h[1].endswith("p2_results_md.py")][0]
     assert md[md.index("--arms") + 1:] == ["v12", *arms, "v4h2", "v7c", "v7d", "v5h2-think"] and md[md.index("--base") + 1] == "v12"   # contrasts vs v12
     assert sum(1 for h in s50["post"] if h[1].endswith("v7_counters.py")) == 3 and s50["post"][-1][1].endswith("backup_results.py")
+    names = [h[1].rsplit("/", 1)[-1] for h in s50["post"]]
+    assert names.index("p2_results_md.py") < names.index("p12_choose.py") < names.index("v7_counters.py")     # the table first, then the choice
+    ch = [h for h in s50["post"] if h[1].endswith("p12_choose.py")][0]
+    assert ch[ch.index("--arms") + 1:ch.index("--ref")] == arms and ch[ch.index("--ref") + 1] == "v12" and "--log" in ch
+    assert p4["cmd"][1].endswith("p4_run.py") and p4["docker"] is False and p4["total"] == 74 and p4["proxy"]["listen"] == 8002
+    assert p4["stats"] == {"type": "results_jsonl", "file": "/home/u/g4/runs/p4_adapter/results.jsonl"} and p4["post"][0][1].endswith("p4_judge.py")
     plan = P.write_plan(tmp_path / "plan.json", "/home/u/g4/runs", "/py", arms, "/home/u/g4/serve_bundle")
     saved = json.loads((tmp_path / "plan.json").read_text())
-    assert saved["serve_bundle"] == "/home/u/g4/serve_bundle" and saved["open"] is False and [s["name"] for s in saved["steps"]] == ["probe_pair", "pair_s50"]
+    assert saved["serve_bundle"] == "/home/u/g4/serve_bundle" and saved["open"] is False and [s["name"] for s in saved["steps"]] == ["probe_pair", "pair_s50", "p4_adapter"]
     assert saved["finalize"][0][1].endswith("final_summary.py") and plan == saved
 
 
@@ -36,7 +42,7 @@ def test_cli_dry_run_lists_adapters_and_refuses_unknown_arms(tmp_path):
     sb = tmp_path / "serve_bundle"; (sb / "adapters" / "think1").mkdir(parents=True)
     r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--serve-bundle", str(sb), "--arms", "v12_think1", "--dry-run"], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-500:]
-    out = json.loads(r.stdout); assert out["steps"] == ["probe_pair", "pair_s50"] and out["adapters"] == ["think1"]
+    out = json.loads(r.stdout); assert out["steps"] == ["probe_pair", "pair_s50", "p4_adapter"] and out["adapters"] == ["think1"]
     r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--serve-bundle", str(sb), "--arms", "v12_nope", "--dry-run"], capture_output=True, text=True)
     assert r.returncode != 0 and "v12_nope" in r.stderr
 
@@ -78,3 +84,20 @@ def test_union_bundle_merges_adapters_and_checks_shas(tmp_path):
         assert "appears in both" in str(e)
     r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/union_bundle.py"), str(tmp_path / "serve4"), str(a), str(b)], capture_output=True, text=True)
     assert r.returncode == 0 and "2 adapters" in r.stdout, r.stderr[-400:]
+
+
+def test_choose_picks_the_best_net_that_is_not_worse_and_falls_back_to_the_reference(tmp_path):
+    C = _mod("p12_choose")
+    arms = ["v12_think1", "v12_think1f", "v12_think2"]
+    cs = {"v12_think1": {"n": 50, "wins": 6, "losses": 4, "p": 0.75, "cap_gap": 0.0, "verdict": "NO EVIDENCE"},
+          "v12_think1f": {"n": 50, "wins": 9, "losses": 3, "p": 0.15, "cap_gap": -0.1, "verdict": "NO EVIDENCE"},
+          "v12_think2": {"n": 50, "wins": 2, "losses": 11, "p": 0.02, "cap_gap": 0.3, "verdict": "WORSE"}}
+    arm, got = C.choose("/x", ["a"], arms, "v12", contrast=lambda a: cs[a])
+    assert arm == "v12_think1f" and got == cs
+    tie = dict(cs); tie["v12_think1f"] = dict(cs["v12_think1f"], wins=6, losses=4)
+    assert C.choose("/x", ["a"], arms, "v12", contrast=lambda a: tie[a])[0] == "v12_think1"          # ties: listed order
+    worse = {a: dict(c, verdict="WORSE") for a, c in cs.items()}
+    assert C.choose("/x", ["a"], arms, "v12", contrast=lambda a: worse[a])[0] == "v12"                # all WORSE: the control is screened
+    f = tmp_path / "choice.json"; f.write_text(json.dumps({"p3_arm": "v12"}))
+    C.write_choice(f, "v12_think1f")
+    assert json.loads(f.read_text()) == {"p3_arm": "v12", "p4_arm": "v12_think1f"}

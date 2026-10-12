@@ -37,9 +37,22 @@ def p12_steps(runs, py, arms, ref=REF, scale_fallback=1.0):
            "purge": [py, "scripts/a6000/p2_purge.py", out, "items"], "purge_since": [py, "scripts/a6000/p2_purge_since.py", out, "items"],
            "post": [[py, "scripts/a6000/p2_results_md.py", out, "--label", f"think adapters vs {ref} on the stage-1a ids (A6000 screen; {ref} rows from the P10 pair; vs {', '.join(COMPARATORS)})",
                      "--from", "0", "--to", "50", "--base", ref, "--arms", ref, *arms, *COMPARATORS],
+                    [py, "scripts/a6000/p12_choose.py", out, "--ids", "data/heldout1k/s200_valid_ids.txt", "--n", "50", "--arms", *arms, "--ref", ref,
+                     "--json", f"{runs}/p12_choice.json", "--log", "docs/a6000/P2_LOG.md"],
                     *[[py, "scripts/a6000/v7_counters.py", out, "--arm", arm, "--json", f"{runs}/{arm}_s50_counters.json"] for arm in arms],
                     [py, "scripts/a6000/backup_results.py"]]}
-    return [probe, s50]
+    # the chosen adapter (p12_choose -> autopilot_choice.json p4_arm) on the 74 public tasks: the day's submission needs the full
+    # population run clean (0 crash rows) before any slot (the standing rule); sequential, the bundle's own budgets, as P4
+    p4dir = f"{runs}/p4_adapter"
+    p4 = {"name": "p4_adapter", "total": 74, "docker": False,
+          "cmd": [py, "scripts/a6000/p4_run.py", "--out", p4dir, "--port", "8002"],
+          "proxy": {"listen": 8002, "host": "127.0.0.1", "log": f"{runs}/p4_adapter_proxy.jsonl"}, "speed_log": f"{runs}/p4_adapter_proxy.jsonl",
+          "stats": {"type": "results_jsonl", "file": f"{p4dir}/results.jsonl"},
+          "purge": [py, "scripts/a6000/p4_purge.py", f"{p4dir}/results.jsonl"], "purge_since": [py, "scripts/a6000/p4_purge_since.py", f"{p4dir}/results.jsonl"],
+          "post": [[py, "scripts/a6000/p4_judge.py", "--out", p4dir, "--proxy-log", f"{runs}/p4_adapter_proxy.jsonl"],
+                   [py, "scripts/a6000/v7_counters.py", p4dir, "--json", f"{runs}/p4_adapter_counters.json"],
+                   [py, "scripts/a6000/backup_results.py"]]}
+    return [probe, s50, p4]
 
 
 def finalize_hooks(runs, py):

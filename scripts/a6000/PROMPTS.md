@@ -578,8 +578,10 @@ so v12 is not re-run). The reading rule is pre-registered in docs/GAPS_2026-10-0
    the same body and "model": "think1") must answer 200 with content; then stop vLLM (kill its pid), GPU back < 1 GB. A missing
    adapter in /v1/models = stop and report (serve.log tail).
 2. PLAN: move ~/g4/runs/autopilot_state.json to ~/g4/runs/autopilot_state_p10_done.json (the P10 supervisor is gone);
-   `~/g4/venv/bin/python scripts/a6000/p12_plan.py --serve-bundle ~/g4/serve_bundle` (steps probe_pair -> pair_s50; the plan carries
-   serve_bundle; the autopilot passes it to serve.sh as BUNDLE).
+   `~/g4/venv/bin/python scripts/a6000/p12_plan.py --serve-bundle ~/g4/serve_bundle` (steps probe_pair -> pair_s50 -> p4_adapter; the
+   plan carries serve_bundle; the autopilot passes it to serve.sh as BUNDLE; pair_s50's post hook p12_choose.py writes p4_arm = the
+   adapter with the best net vs v12 among those not WORSE (v12 itself when all are WORSE), and p4_adapter then runs that arm on
+   the 74 public tasks sequentially with the bundle's own budgets, as P4: the day's submission needs the full population clean).
 3. LAUNCH, the same line as P10 but a 14 h hard stop, run the way you ran the training (the session held open):
    `cd ~/g4/gemma-swe-agent && AUTOPILOT_HARD_STOP_H=14 "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1`.
    After 10 minutes: the proxy's first log line in ~/g4/autopilot.log or its stdout shows `served=[...]` with the three adapters, and
@@ -588,4 +590,7 @@ so v12 is not re-run). The reading rule is pre-registered in docs/GAPS_2026-10-0
    is NOT being served: stop the autopilot (kill by pid), report, do not continue.
 4. REPORT by the channel at: launch (pids, served list); probe_pair END (per arm: 4 items, solved, errored, counters); the hourly
    health lines; pair_s50 END (the GATE.md table whole: the arm rows for v12, the three adapters and the comparators, the
-   contrasts vs v12 with wins/losses/sign p/cap gap/verdict, the counters); then stop. Expected ~8 h for 150 items.
+   contrasts vs v12 with wins/losses/sign p/cap gap/verdict, the counters, the "P12 adapter choice" line and ~/g4/runs/p12_choice.json);
+   p4_adapter END (p4_judge's lines whole: solved/74, crash rows, errored rows, summed seconds, cap hits; the arm it ran; counters);
+   then stop. Expected ~8 h for the 150 pair items + 3-6 h for the 74 (v12-like arms hit the 5-minute cap on about half the tasks).
+   The Mac packs and submits from these numbers under the rule in GAPS "sub15 pre-registration"; the box does not submit.
