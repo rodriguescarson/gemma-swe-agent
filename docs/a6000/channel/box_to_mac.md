@@ -112,3 +112,12 @@ validate_stitched: ok true, problems 0, sequences 652 == sequences_with_thought 
 FLAG (your call, I proceed unless told otherwise): the 791 Invent input rows include probe.jsonl (20 rows) because `~/g4/invent/*.jsonl` matched it; P11b names only bugs*.jsonl and behaviour*.jsonl (475 + 296 = 771). Your own conversion gave the same 496 items / 992 rows, so I assume the same input. If probe.jsonl must stay out, tell me and I re-convert and re-stitch (about 5 minutes) before the run starts; the run is not started yet.
 Recipe for 652 sequences: --grad-accum 8 --epochs 1 --eval-every 40 --save-every 40 
 Next: launching `train.sh full think2 --max-tokens 12288` (think1 was REDUCED), no second probe; first start event + eval + status in the next message, then hourly.
+
+### B-018 | 2026-10-12T19:00:21Z | re: M-006
+Box, 2026-10-12T19:00:19Z, re: M-006. think2 RUN STARTED (P11b step 3): pid 498, 2026-10-12T18:58:13Z, `train.sh full think2 --max-tokens 12288` (think1 was REDUCED), no second probe, session held. No reply to the probe.jsonl flag in B-017, so I proceeded (re-convert + re-stitch is still possible; it would cost this run).
+Start: used_before_load_gb 0.54, no refuse; loaded 36.7 s, alloc 17.06 GB, reserved 21.02 GB. data: sequences 652, tokens 2780255, supervised_tokens 515611, weighted 515611, max_tokens 12288, buckets [512, 70, 43, 27], holdout 5. train_start: steps 82, steps_per_epoch 82 (recipe for 652 sequences: grad_accum 8, epochs 1, eval/save every 40 - NOT think1's grad_accum 2 / epochs 3 / eval every 10: the recipe scales with the sequence count, so the two arms differ in step count and eval cadence, same lr 5e-5 schedule shape).
+FIRST EVAL (step 0, 18:59:40Z): nll_text 0.4225199389457703, nll_tool 0.19158764451869853, nll_all 0.2159958669446012, n_text 800, n_tool 6769 - identical to think1's step 0 (same base, same 5 held-out tasks).
+status: {"t": "2026-10-12T18:58:16Z", "event": "train_start", "steps": 82, "steps_per_epoch": 82, "start_step": 0, "sequences": 652, "tokens": 2780255, "supervised_tokens": 515611, "weighted_tokens": 515611, "max_tokens": 12288, "buckets": [512, 70, 43, 27], "lora": {"regex": "^(?!.*(?:vision|audio|embed_vi
+{"t": "2026-10-12T18:59:40Z", "event": "eval", "step": 0, "nll_text": 0.4225199389457703, "nll_tool": 0.19158764451869853, "nll_all": 0.2159958669446012, "n_text": 800, "n_tool": 6769, "best": null}
+41094 MiB, 100 %
+Hourly messages follow (step, last train loss, tok/s, peak reserved GB, last eval, alarm flags).
