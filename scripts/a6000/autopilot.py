@@ -104,11 +104,18 @@ def kill_vllm():
         log_line(f"- {now_iso()} | WARN kill_vllm: the GPU still holds {used} MiB (stale WSL memory or a foreign process)", push=False)
 
 
+SERVE_BUNDLE = ""          # plan["serve_bundle"]: a bundle dir whose adapters/ vLLM registers as LoRA modules (serve.sh BUNDLE; P12)
+
+
+def serve_env(bundle=""):
+    return dict(ENV, GPU_UTIL="0.95", BUNDLE=bundle or "")
+
+
 def ensure_vllm():
     if vllm_ok():
         return True
     kill_vllm()
-    subprocess.Popen(["bash", str(HERE / "serve.sh")], env=dict(ENV, GPU_UTIL="0.95"), stdout=open(G4 / "serve.log", "w"), stderr=subprocess.STDOUT,
+    subprocess.Popen(["bash", str(HERE / "serve.sh")], env=serve_env(SERVE_BUNDLE), stdout=open(G4 / "serve.log", "w"), stderr=subprocess.STDOUT,
                      start_new_session=True)
     for _ in range(150):
         time.sleep(5)
@@ -383,8 +390,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
     st = json.loads(Path(a.state).read_text()) if Path(a.state).exists() else {"done": [], "restarts": {}, "launch_epoch": None, "results": {}}
     idle_since, t_idle_health = None, 0.0
+    global SERVE_BUNDLE
     while True:
         plan = json.loads(Path(a.plan).read_text())
+        SERVE_BUNDLE = plan.get("serve_bundle") or ""
         todo = [s for s in plan["steps"] if s["name"] not in st["done"]]
         if not todo:
             if plan.get("open") and lib.time_left_s(st["launch_epoch"] or time.time(), time.time()) > 0:

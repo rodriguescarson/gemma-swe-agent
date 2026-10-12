@@ -72,18 +72,19 @@ def main(argv=None):
     ap.add_argument("--pooled-from", type=int); ap.add_argument("--choose", choices=["p4", "p3"]); ap.add_argument("--no-append", action="store_true")
     ap.add_argument("--ids", default=str(ROOT / "data" / "heldout1k" / "s200_valid_ids.txt"))
     ap.add_argument("--contended", default=str(ROOT / "docs" / "a6000" / "contended_items.json"))
+    ap.add_argument("--base", default="v4h2", help="the arm every contrast is paired against (P12: v12 for the think adapters)")
     a = ap.parse_args(argv)
     all_ids = [l.strip() for l in open(a.ids) if l.strip()]
     ids = all_ids[a.lo:a.to]
-    text, contrasts = section(a.label, a.out, ids, a.arms, "v4h2")
-    body = f"\n### P2 {a.label} RESULT ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n{both_tables(a.label, a.out, ids, a.arms, 'v4h2', a.contended)}"
+    text, contrasts = section(a.label, a.out, ids, a.arms, a.base)
+    body = f"\n### P2 {a.label} RESULT ({time.strftime('%Y-%m-%d %H:%M UTC', time.gmtime())})\n{both_tables(a.label, a.out, ids, a.arms, a.base, a.contended)}"
     if a.pooled_from is not None:
         pooled_arms = [x for x in a.arms if x in POOLABLE]          # an arm that did not run in both stages is never pooled (addendum 6)
         pids = all_ids[a.pooled_from:a.to]
-        _, pc = section(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, pooled_arms, "v4h2")
+        _, pc = section(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, pooled_arms, a.base)
         ptext = both_tables(f"pooled ids {a.pooled_from + 1}-{a.to}", a.out, pids, pooled_arms, "v4h2", a.contended)
         prev_ids = all_ids[a.pooled_from:a.lo]
-        _, prev = section("previous stage", a.out, prev_ids, pooled_arms, "v4h2")
+        _, prev = section("previous stage", a.out, prev_ids, pooled_arms, a.base)
         het = {arm: lib.pool(prev[arm], contrasts[arm])["heterogeneous"] for arm in pc}
         body += f"\n#### Pooled stage 1a + 1b for the arms that ran in both (combination rule of addendum 4: sum of paired counts; verdict rule on the pooled counts)\n{ptext}\nHeterogeneity (stage nets differ by >= 5): {het}\n"
     if a.choose == "p4":

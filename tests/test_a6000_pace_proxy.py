@@ -124,3 +124,26 @@ def test_seed_override_replaces_the_requests_seed_upstream_only():
     clock = iter([0.0, 99.0])
     pp.handle(up, dict(BODY), pp.Pacer(), sleep=lambda s: None, now=lambda: next(clock), seed_override=None)
     assert "seed" not in seen or seen["seed"] == 45                                           # no override: untouched (seen still holds the old value)
+
+
+def test_a_served_adapter_name_is_kept_and_only_the_base_alias_is_rewritten():
+    """2026-10-13: adapter arms on the box. swegemma's agent_runner requests `openai/<adapter>` (the model field is the adapter name);
+    --rewrite-model used to send every call to the base id, so an adapter arm would have raced as the base model."""
+    served = {"/home/jc/g4/model", "think1", "think1f", "think2"}
+    assert pp.route_model("gemma-4-31b-alias", "/home/jc/g4/model", served) == "/home/jc/g4/model"
+    assert pp.route_model("think1", "/home/jc/g4/model", served) == "think1"
+    assert pp.route_model("openai/gemma:think2", "/home/jc/g4/model", served) == "think2"      # the resolver's fallback form
+    assert pp.route_model("think9", "/home/jc/g4/model", served) == "/home/jc/g4/model"        # unknown adapter: the base (vLLM would 404)
+    assert pp.route_model("anything", "/home/jc/g4/model", None) == "/home/jc/g4/model"        # no served list: the old behaviour
+    assert pp.route_model("anything", None, served) == "anything"
+    seen = []
+
+    def up(body):
+        seen.append(body["model"]); return 200, {"model": body["model"], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+    clock = iter([0.0, 0.1, 0.0, 0.1])
+    st, resp, row = pp.handle(up, {"model": "think1", "messages": []}, pp.Pacer(), sleep=lambda s: None, now=lambda: next(clock),
+                              upstream_model="/home/jc/g4/model", served=served)
+    assert seen == ["think1"] and resp["model"] == "think1" and row["lora"] == "think1"
+    st, resp, row = pp.handle(up, {"model": "alias", "messages": []}, pp.Pacer(), sleep=lambda s: None, now=lambda: next(clock),
+                              upstream_model="/home/jc/g4/model", served=served)
+    assert seen[-1] == "/home/jc/g4/model" and resp["model"] == "alias" and "lora" not in row

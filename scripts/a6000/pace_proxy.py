@@ -33,15 +33,32 @@ def post_upstream(base):
     return go
 
 
-def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream_model=None, seed_override=None):
+def route_model(requested, upstream_model, served=None):
+    """The model id to forward. The harness's base alias becomes upstream_model (vLLM's own id). A name vLLM serves itself (a LoRA
+    adapter registered from the BUNDLE: swegemma's agent_runner requests `openai/<adapter>` for an adapter arm) is kept, and the
+    resolver's fallback form `<base>:<adapter>` maps to the adapter. 2026-10-13: before this, --rewrite-model sent every call to
+    the base and an adapter arm would have been scored as the base model."""
+    if not upstream_model:
+        return requested
+    if served:
+        if requested in served:
+            return requested
+        tail = str(requested or "").rsplit(":", 1)[-1]
+        if tail in served:
+            return tail
+    return upstream_model
+
+
+def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream_model=None, seed_override=None, served=None):
     """(status, response, log row). upstream(body) -> (status, dict). upstream_model: the name vLLM serves (its path); the harness's
-    own alias is replaced on the way in and echoed back on the way out, as scripts/or_proxy.py does."""
+    own alias is replaced on the way in and echoed back on the way out, as scripts/or_proxy.py does; served: the ids vLLM lists
+    (base + LoRA adapters), kept as requested (route_model)."""
     if body.get("stream"):
         return 400, {"error": {"message": "pace_proxy: streaming not supported"}}, {"status": 400, "err": "stream"}
     t0 = now()
     fwd = dict(body)
     if upstream_model:
-        fwd["model"] = upstream_model
+        fwd["model"] = route_model(body.get("model"), upstream_model, served)
     if seed_override is not None:
         fwd["seed"] = seed_override                     # P3 passes: one proxy per pass, each with its own seed; the bundle's sampling is otherwise untouched
     status, resp = upstream(fwd)
@@ -50,6 +67,8 @@ def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream
     usage = (resp or {}).get("usage") or {}
     elapsed = now() - t0
     row = {"status": status, "latency_s": round(elapsed, 3), "prompt": usage.get("prompt_tokens"), "completion": usage.get("completion_tokens")}
+    if upstream_model and fwd.get("model") != upstream_model:
+        row["lora"] = fwd.get("model")                  # the adapter this call was served by (audit: an adapter arm must show it)
     if status == 200:
         target = pacer.target_s(body, int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0))
         row["l4_target_s"], row["late_s"] = round(target, 3), round(max(0.0, elapsed - target), 3)
@@ -58,7 +77,7 @@ def handle(upstream, body, pacer, sleep=time.sleep, now=time.monotonic, upstream
     return status, resp, row
 
 
-def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None, capture_path=None, seed_override=None):
+def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, upstream_model=None, capture_path=None, seed_override=None, served=None):
     pacer, lock, up = Pacer(), threading.Lock(), post_upstream(upstream_base)
     Path(log_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +102,7 @@ def serve(port, upstream_base, log_path, host="127.0.0.1", sleep=time.sleep, ups
             body_in = {}
             try:
                 body_in = json.loads(self.rfile.read(n) or b"{}")
-                status, resp, row = handle(up, body_in, pacer, sleep, upstream_model=upstream_model, seed_override=seed_override)
+                status, resp, row = handle(up, body_in, pacer, sleep, upstream_model=upstream_model, seed_override=seed_override, served=served)
             except Exception as e:
                 status, resp, row = 500, {"error": {"message": f"pace_proxy: {e}"}}, {"status": 500, "err": repr(e)}
             row["t"] = round(time.time(), 3)
@@ -109,12 +128,13 @@ def main():
     ap.add_argument("--seed", type=int, default=None, help="override the sampling seed of every forwarded request (P3 passes)")
     ap.add_argument("--rewrite-model", action="store_true", help="send the upstream's own model id, echo the caller's name back")
     a = ap.parse_args()
-    um = None
+    um, served = None, None
     if a.rewrite_model:
         with urllib.request.urlopen(a.upstream.rstrip("/") + "/v1/models", timeout=60) as r:
-            um = json.load(r)["data"][0]["id"]
-    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um, capture_path=a.capture, seed_override=a.seed)
-    print(f"pace_proxy {a.host}:{a.listen} -> {a.upstream} model={um} log={a.log}", flush=True)
+            ids = [d["id"] for d in json.load(r)["data"]]
+        um, served = ids[0], set(ids)                   # the base first; the rest are the BUNDLE's LoRA adapters (serve.sh)
+    srv = serve(a.listen, a.upstream, a.log, host=a.host, upstream_model=um, capture_path=a.capture, seed_override=a.seed, served=served)
+    print(f"pace_proxy {a.host}:{a.listen} -> {a.upstream} model={um} served={sorted(served) if served else None} log={a.log}", flush=True)
     srv.serve_forever()
 
 

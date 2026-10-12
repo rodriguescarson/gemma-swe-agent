@@ -229,3 +229,16 @@ def test_vllm_pids_find_the_renamed_engine_and_workers_case_insensitively():
 def test_gpu_mem_used_mib_parses_nvidia_smi_and_tolerates_failure():
     assert ap.gpu_mem_used_mib("48520 MiB\n") == 48520 and ap.gpu_mem_used_mib("48520\n") == 48520
     assert ap.gpu_mem_used_mib("0 MiB") == 0 and ap.gpu_mem_used_mib("") is None and ap.gpu_mem_used_mib("NVIDIA-SMI has failed") is None
+
+
+def test_serve_env_passes_the_plan_bundle_to_serve_sh():
+    """P12 (2026-10-13): adapter arms need vLLM to register the union bundle's LoRA modules; plan["serve_bundle"] -> BUNDLE."""
+    A = _mod("autopilot") if "_mod" in globals() else None
+    if A is None:
+        import importlib.util, pathlib
+        spec = importlib.util.spec_from_file_location("autopilot", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "a6000" / "autopilot.py")
+        A = importlib.util.module_from_spec(spec); spec.loader.exec_module(A)
+    assert A.serve_env("")["BUNDLE"] == "" and A.serve_env("/home/u/g4/serve_bundle")["BUNDLE"] == "/home/u/g4/serve_bundle"
+    assert A.serve_env("/x")["GPU_UTIL"] == "0.95" and not any(p.startswith("/mnt/") for p in A.serve_env("/x")["PATH"].split(":"))
+    src = (pathlib.Path(A.__file__)).read_text()
+    assert 'SERVE_BUNDLE = plan.get("serve_bundle") or ""' in src and "env=serve_env(SERVE_BUNDLE)" in src

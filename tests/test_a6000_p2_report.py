@@ -153,3 +153,10 @@ def test_loops_are_counted_only_for_the_selected_ids_and_not_excluded_items(tmp_
     assert rep.summarize(str(tmp_path), ["v6p"], ids=["a", "c"])["v6p"]["loops"] == 1
     assert rep.summarize(str(tmp_path), ["v6p"], ids=["c"])["v6p"]["loops"] == 0
     assert rep.summarize(str(tmp_path), ["v6p"], exclude={("v6p", "a")})["v6p"]["loops"] == 1
+
+
+def test_results_md_takes_a_base_arm_for_the_contrasts():
+    """P12 (2026-10-13): the think adapters are contrasted against v12, not the v4h2 default."""
+    src = (ROOT / "scripts" / "a6000" / "p2_results_md.py").read_text()
+    assert 'ap.add_argument("--base", default="v4h2"' in src and "section(a.label, a.out, ids, a.arms, a.base)" in src
+    assert "both_tables(a.label, a.out, ids, a.arms, a.base, a.contended)" in src and '"v4h2")' not in src.split("def main(")[1]

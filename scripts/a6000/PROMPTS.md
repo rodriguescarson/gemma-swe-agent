@@ -556,3 +556,36 @@ already shows the loop.
    step 0 again (pull; the tests must pass); one foreground round as step 2 but with `--once --force` (its log line must read
    "pushed version #<n>", neither "create" nor FAILED); then step 3 again; P2_LOG block "P10d restarted pid <pid> (version
    #<n>)", commit, push. Report the two log lines and the pgrep line.
+
+----------------------------------------------------------------------------------------------------------------------
+P12. THE A6000 SCREEN OF THE THINK ADAPTERS (after P11b has packaged think2; GPU idle; while Kaggle's weekly GPU quota is out)
+----------------------------------------------------------------------------------------------------------------------
+Repo ~/g4/gemma-swe-agent on wip/gemma-agent (never main, never --no-verify, pull --rebase --autostash before every push, commit
+small; weights never in git). Kaggle refused the think1 probe kernel on 2026-10-12 19:30Z ("Maximum weekly GPU quota of 30.00 hours
+reached"; the quota returns Saturday 00:00 UTC), so the box screens the adapters first: the three adapter arms against v12 on the
+same 50 stage-1a ids as the P10 pair, with v12's P10 rows as the control (p2_race skips items that already have a task_results.jsonl,
+so v12 is not re-run). The reading rule is pre-registered in docs/GAPS_2026-10-06.md "P12 pre-registration". Report by the channel.
+
+0. STATE: pull (the head must include "P12" or be later); `pgrep -af "autopilot|vllm|EngineCore|pace_proxy|qlora_train"` empty;
+   nvidia-smi < 1 GB used; submissions/v12_think2 packaged (adapters/think2/adapter_config.json + adapters/MANIFEST.json committed,
+   dataset g4-adapters-think2 pushed); `~/g4/venv/bin/python -m pytest -q tests/test_a6000_p12.py tests/test_a6000_pace_proxy.py`.
+1. UNION BUNDLE: `~/g4/venv/bin/python scripts/a6000/union_bundle.py ~/g4/serve_bundle submissions/v12_think1 submissions/v12_think1f
+   submissions/v12_think2` (3 adapters; every sha checked against its manifest). SERVE CHECK, the GPU being idle: start
+   `BUNDLE=~/g4/serve_bundle bash scripts/a6000/serve.sh` in the background (session held, log ~/g4/serve_check.log), wait for
+   /health; `curl -s localhost:8000/v1/models | python3 -c "import json,sys; print(sorted(m['id'] for m in json.load(sys.stdin)['data']))"`
+   must list the base path AND think1, think1f, think2; one request with `"model": "think1"` through
+   `~/g4/venv/bin/python scripts/a6000/smoke_chat.py` (edit nothing: pass the model name if the script takes one, else a curl with
+   the same body and "model": "think1") must answer 200 with content; then stop vLLM (kill its pid), GPU back < 1 GB. A missing
+   adapter in /v1/models = stop and report (serve.log tail).
+2. PLAN: move ~/g4/runs/autopilot_state.json to ~/g4/runs/autopilot_state_p10_done.json (the P10 supervisor is gone);
+   `~/g4/venv/bin/python scripts/a6000/p12_plan.py --serve-bundle ~/g4/serve_bundle` (steps probe_pair -> pair_s50; the plan carries
+   serve_bundle; the autopilot passes it to serve.sh as BUNDLE).
+3. LAUNCH, the same line as P10 but a 14 h hard stop, run the way you ran the training (the session held open):
+   `cd ~/g4/gemma-swe-agent && AUTOPILOT_HARD_STOP_H=14 "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1`.
+   After 10 minutes: the proxy's first log line in ~/g4/autopilot.log or its stdout shows `served=[...]` with the three adapters, and
+   ~/g4/runs/p2/proxy_pair_s50_think.jsonl (once pair_s50 runs) has rows with `"lora": "think1"` / "think1f" / "think2" for the
+   adapter arms and no "lora" key for v12's rows (none run: v12 is reused). An adapter arm whose rows carry no "lora" = the adapter
+   is NOT being served: stop the autopilot (kill by pid), report, do not continue.
+4. REPORT by the channel at: launch (pids, served list); probe_pair END (per arm: 4 items, solved, errored, counters); the hourly
+   health lines; pair_s50 END (the GATE.md table whole: the arm rows for v12, the three adapters and the comparators, the
+   contrasts vs v12 with wins/losses/sign p/cap gap/verdict, the counters); then stop. Expected ~8 h for 150 items.
