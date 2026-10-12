@@ -52,3 +52,28 @@ def test_idle_check_reads_nvidia_smi_before_any_cuda_context(tmp_path, monkeypat
     gpu_path = main_src[main_src.index("smi_gb = nvidia_smi_used_gb()"):]        # the dry-run branch above only asks is_available()
     assert gpu_path.index("needs a CUDA GPU") < gpu_path.index("mem_get_info()")       # nvidia-smi first, then the refusals, then torch's reading
     assert "if used_before > 1.0:" in main_src
+
+
+def test_probe_window_covers_the_first_supervised_positions():
+    """2026-10-12: the probe's 2k forward crashed on the box because a v12 sequence's first 2,048 tokens hold no supervised
+    position (system prompt + tool declarations + task). The window now extends past 2,048 only as far as needed to cover
+    the first 64 supervised positions; a sequence supervised early keeps the plain 2k prefix."""
+    import importlib.util, torch
+    spec = importlib.util.spec_from_file_location("qlora_train", ROOT / "train" / "qlora_train.py")
+    Q = importlib.util.module_from_spec(spec); spec.loader.exec_module(Q)
+
+    def item(n_tokens, first_pos, n_pos):
+        pos = torch.arange(first_pos, first_pos + n_pos)
+        return {"ids": torch.arange(n_tokens), "positions": pos, "targets": torch.arange(first_pos + 1, first_pos + 1 + n_pos), "weights": torch.ones(n_pos),
+                "kinds": torch.zeros(n_pos, dtype=torch.int8), "wsum": float(n_pos), "tokens": n_tokens, "meta": {}}
+
+    late = Q.probe_cut(item(3000, 2500, 100), 2048, 64)            # v12-like: supervision starts after the 2k prefix
+    assert late["tokens"] == 2565 and len(late["positions"]) == 64 and int(late["positions"][0]) == 2500 and len(late["ids"]) == 2565
+    early = Q.probe_cut(item(3000, 10, 100), 2048, 64)             # supervised early: the plain 2k prefix
+    assert early["tokens"] == 2048 and len(early["positions"]) == 100
+    few = Q.probe_cut(item(3000, 2900, 5), 2048, 64)               # fewer than 64 positions: cover them all
+    assert few["tokens"] == 2906 and len(few["positions"]) == 5
+    none = Q.probe_cut(item(3000, 0, 0), 2048, 64)
+    assert none["tokens"] == 2048 and len(none["positions"]) == 0
+    src = (ROOT / "train" / "qlora_train.py").read_text()
+    assert 'probe_cut(max(items, key=lambda it: it["tokens"]), 2048)' in src and '"supervised": int(len(probe_item["positions"]))' in src

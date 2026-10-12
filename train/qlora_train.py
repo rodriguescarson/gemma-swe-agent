@@ -135,6 +135,18 @@ def truncate(item, n):
             "kinds": item["kinds"][keep], "wsum": float(item["weights"][keep].sum()), "tokens": min(n, item["tokens"])}
 
 
+def probe_cut(item, n=2048, min_supervised=64):
+    """The forward2k window: the item's first max(n, enough to cover min_supervised supervised positions) tokens. 2026-10-12 on
+    the box: a v12 sequence's first 2,048 tokens are the system prompt, the tool declarations and the task, so the plain 2k
+    prefix held no supervised position and the check crashed on an empty logits tensor (probe log, box b4fa2359)."""
+    pos = item["positions"]
+    if len(pos) == 0:
+        return truncate(item, n)
+    k = min(min_supervised, len(pos)) - 1
+    need = int(pos.sort().values[k]) + 2            # a position indexes the hidden state whose NEXT token is supervised
+    return truncate(item, max(n, need))
+
+
 def run_probe(a, pm, info, items, held, log, out, loaded):
     """docs/a6000/TRAIN_LOCAL.md, "The 1-hour feasibility probe": every number it needs, then the verdict."""
     dev = torch.device("cuda")
@@ -144,7 +156,9 @@ def run_probe(a, pm, info, items, held, log, out, loaded):
     rep["bitsandbytes"] = bnb.__version__
     # stage 3: a 2k forward on the base LoRA (B = 0): logits bounded by the softcap, base NLL in range
     pm.eval()
-    probe_item = truncate(max(items, key=lambda it: it["tokens"]), 2048)
+    probe_item = probe_cut(max(items, key=lambda it: it["tokens"]), 2048)
+    if len(probe_item["positions"]) == 0:
+        raise RuntimeError("forward2k: the longest sequence has no supervised position at all")
     with torch.no_grad():
         it = to_device(probe_item, dev)
         hs = forward_hidden(pm, it["ids"])
@@ -155,7 +169,8 @@ def run_probe(a, pm, info, items, held, log, out, loaded):
         nll = per_token_nll(g, head_weight(base), it["targets"], softcap=cap, chunk=a.chunk)
         base_nll = float((nll * it["weights"]).sum() / it["weights"].sum().clamp_min(1e-6))
     pm.train()
-    rep["forward2k"] = {"tokens": probe_item["tokens"], "max_abs_logit": round(float(capped.abs().max()), 3), "base_nll": round(base_nll, 4), **mem()}
+    rep["forward2k"] = {"tokens": probe_item["tokens"], "supervised": int(len(probe_item["positions"])), "max_abs_logit": round(float(capped.abs().max()), 3),
+                        "base_nll": round(base_nll, 4), **mem()}
     log(event="probe_forward2k", **rep["forward2k"])
     opt = torch.optim.AdamW(lora_params(pm), lr=a.lr, betas=(0.9, 0.999), eps=1e-8, weight_decay=0.0)
     # stage 4a: single-sequence steps per token bucket, longest first
