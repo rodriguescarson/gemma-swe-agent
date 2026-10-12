@@ -643,3 +643,4 @@ not run (no capture)
 - 2026-10-12T06:05:40Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
 - 2026-10-12T06:06:11Z | END cleanup (hard stop): nvidia-smi compute apps: none | memory.used 493 MiB (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: none
 - DONE 2026-10-12T06:06:14Z (hard stop)
+- 2026-10-12T06:23:16Z | P11 STATE: DONE line 2026-10-12T06:06:14Z present; nothing alive (autopilot/vllm/pace_proxy/qlora; only the backup loop pid 9872, CPU, by owner OK); memory.used 533 MiB; 845G free; ARM v12; head 5f3a1f06
