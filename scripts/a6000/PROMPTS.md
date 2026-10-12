@@ -582,8 +582,8 @@ so v12 is not re-run). The reading rule is pre-registered in docs/GAPS_2026-10-0
    plan carries serve_bundle; the autopilot passes it to serve.sh as BUNDLE; pair_s50's post hook p12_choose.py writes p4_arm = the
    adapter with the best net vs v12 among those not WORSE (v12 itself when all are WORSE), and p4_adapter then runs that arm on
    the 74 public tasks sequentially with the bundle's own budgets, as P4: the day's submission needs the full population clean).
-3. LAUNCH, the same line as P10 but a 14 h hard stop, run the way you ran the training (the session held open):
-   `cd ~/g4/gemma-swe-agent && AUTOPILOT_HARD_STOP_H=14 "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1`.
+3. LAUNCH, the same line as P10 but a 16 h hard stop (150 pair items at C=2 ~6-7 h, then the 74 sequential ~3-6 h), run the way you ran the training (the session held open):
+   `cd ~/g4/gemma-swe-agent && AUTOPILOT_HARD_STOP_H=16 "$HOME/g4/venv/bin/python" scripts/a6000/autopilot.py >> "$HOME/g4/autopilot.log" 2>&1`.
    After 10 minutes: the proxy's first log line in ~/g4/autopilot.log or its stdout shows `served=[...]` with the three adapters, and
    ~/g4/runs/p2/proxy_pair_s50_think.jsonl (once pair_s50 runs) has rows with `"lora": "think1"` / "think1f" / "think2" for the
    adapter arms and no "lora" key for v12's rows (none run: v12 is reused). An adapter arm whose rows carry no "lora" = the adapter
