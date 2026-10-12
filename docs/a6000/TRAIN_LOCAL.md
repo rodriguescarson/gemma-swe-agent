@@ -41,7 +41,7 @@ masks its thought with it; `span_thought_masked` in the stitch report counts tho
 
 `train/qlora_train.py --probe` (vLLM down; `seqs_probe.jsonl` keeps sequences up to 16,384 tokens so the top bucket exists):
 
-1. imports; `torch.zeros(1).cuda()` with `PYTORCH_CUDA_ALLOC_CONF` unset; bitsandbytes importable; GPU idle (< 1 GB used).
+1. imports; `torch.zeros(1).cuda()` with `PYTORCH_CUDA_ALLOC_CONF` unset; bitsandbytes importable; GPU idle (< 1 GB used per nvidia-smi, read before the trainer's own CUDA context exists; torch's mem_get_info counts that context, ~1 GB, and is only the fallback).
 2. NF4 base loaded: allocated <= 21 GB (`loaded.alloc_gb`).
 3. PEFT attached (regex: q,v,o,gate,up,down on all 60 layers, k on the 50 sliding layers; the count of wrapped modules must
    equal the regex's matches); one 2k forward with the math SDPA kernel disabled: max |logit| <= 30 (the softcap), base

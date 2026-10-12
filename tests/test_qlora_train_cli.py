@@ -32,3 +32,23 @@ def test_dry_run_prints_the_plan_and_gpu_modes_refuse_on_cpu(tmp_path):
         assert r2.returncode == 2 and "needs a CUDA GPU" in r2.stdout
     r3 = subprocess.run(base + ["--help"], capture_output=True, text=True)
     assert r3.returncode == 0 and "--probe" in r3.stdout and "--resume" in r3.stdout
+
+
+def test_idle_check_reads_nvidia_smi_before_any_cuda_context(tmp_path, monkeypatch):
+    """2026-10-12 on the box: torch.cuda.mem_get_info() counted the process's own ~1 GB context on top of the 533 MiB display,
+    so the probe refused an idle GPU. The check now reads nvidia-smi (device-level) before torch touches CUDA; torch's figure is
+    only the fallback and is logged beside it. Threshold unchanged (1.0 GB)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("qlora_train", ROOT / "train" / "qlora_train.py")
+    Q = importlib.util.module_from_spec(spec); spec.loader.exec_module(Q)
+    fake = tmp_path / "nvidia-smi"; fake.write_text("#!/bin/sh\necho ' 533 '\n"); fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert Q.nvidia_smi_used_gb() == 0.52
+    monkeypatch.setenv("PATH", str(tmp_path / "nothing-here"))
+    assert Q.nvidia_smi_used_gb() is None
+    assert Q.used_before_load_gb(0.52, 1.56) == 0.52 and Q.used_before_load_gb(None, 1.56) == 1.56
+    src = (ROOT / "train" / "qlora_train.py").read_text()
+    main_src = src[src.index("def main("):]
+    gpu_path = main_src[main_src.index("smi_gb = nvidia_smi_used_gb()"):]        # the dry-run branch above only asks is_available()
+    assert gpu_path.index("needs a CUDA GPU") < gpu_path.index("mem_get_info()")       # nvidia-smi first, then the refusals, then torch's reading
+    assert "if used_before > 1.0:" in main_src

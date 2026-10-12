@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -51,6 +52,24 @@ def mem():
     if not torch.cuda.is_available():
         return {}
     return {"alloc_gb": gb(torch.cuda.memory_allocated()), "reserved_gb": gb(torch.cuda.memory_reserved()), "peak_reserved_gb": gb(torch.cuda.max_memory_reserved())}
+
+
+def nvidia_smi_used_gb():
+    """Device-level memory in use per nvidia-smi (GB; GPU 0), None when nvidia-smi is unavailable. Read BEFORE this process
+    creates its CUDA context: torch.cuda.mem_get_info() counts the context itself (~1 GB), so on 2026-10-12 a bare torch
+    process on the idle A6000 (533 MiB for the Windows display) read 1.56 GB and the 1.0 GB idle check could never pass."""
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=20)
+        if out.returncode == 0 and out.stdout.strip():
+            return round(float(out.stdout.strip().splitlines()[0].strip()) / 1024, 2)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+def used_before_load_gb(smi_gb, torch_gb):
+    """The idle check's reading: nvidia-smi when available (device-level, without our own context), else torch's."""
+    return smi_gb if smi_gb is not None else torch_gb
 
 
 class Log:
@@ -292,6 +311,7 @@ def main(argv=None):
                 "probe_buckets": [[it["tokens"] for it in b] for b in probe_plan(items, per_bucket=5, buckets=BUCKETS)], "cuda": torch.cuda.is_available()}
         print(json.dumps(plan, indent=1))
         return 0
+    smi_gb = nvidia_smi_used_gb()                      # before any CUDA context of ours exists (see the docstring)
     if not torch.cuda.is_available():
         print("needs a CUDA GPU (use --dry-run on a CPU box)")
         return 2
@@ -302,10 +322,12 @@ def main(argv=None):
         torch.backends.cuda.enable_math_sdp(False)       # an O(T^2) materialised attention would silently eat the memory budget
     torch.manual_seed(a.seed)
     free, total_mem = torch.cuda.mem_get_info()
-    used_before = total_mem - free
-    log(event="start", args=vars(a), gpu=torch.cuda.get_device_name(0), total_gb=gb(total_mem), used_before_load_gb=gb(used_before), torch=torch.__version__)
-    if gb(used_before) > 1.0:
-        log(event="refuse", reason=f"GPU not idle: {gb(used_before)} GB used before loading")
+    torch_gb = gb(total_mem - free)                     # includes this process's own CUDA context
+    used_before = used_before_load_gb(smi_gb, torch_gb)
+    log(event="start", args=vars(a), gpu=torch.cuda.get_device_name(0), total_gb=gb(total_mem), used_before_load_gb=used_before,
+        used_nvidia_smi_gb=smi_gb, used_torch_incl_context_gb=torch_gb, torch=torch.__version__)
+    if used_before > 1.0:
+        log(event="refuse", reason=f"GPU not idle: {used_before} GB used before loading (nvidia-smi {smi_gb}; torch incl. own context {torch_gb})")
         return 3
     t0 = time.time()
     model = load_base_nf4(a.base, a.attn)
