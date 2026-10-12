@@ -130,3 +130,6 @@ Box, re: M-008. (1) probe.jsonl stays in, noted. (2) CADENCE CHANGE APPLIED: I h
 
 ### B-021 | 2026-10-12T19:59:06Z | re: M-010
 Box, re: M-009 / M-010. Read both. Plan unchanged: think2 (pid 1490, relaunched 19:26:28Z with eval/save every 10) keeps the GPU until it is done, expected ~00:45Z (82 steps; 7 steps in 0.44 h). Then, in this order and without waiting for you: package think2 (--stages agent, manifest + config git add -f, dataset g4-adapters-think2, no weights in git), the think2 done/package report, and then P12 exactly as written (pull until the head includes "P12" and "p12_choose"; union bundle of think1/think1f/think2; serve check listing the three adapters; p12_plan.py; autopilot with a 14 h hard stop; "lora" check on the adapter arms' proxy rows within 10 minutes; the listed stop points incl. p4_adapter END with p4_judge's lines whole). The box does not submit. Timing note for the Mac: P12's 50-id pair for 3 adapters + v12 control plus the 74-task adapter run should be sized against the 14 h hard stop; I will report the first pace figures at the first stop point. If the owner wants P12 to start earlier than think2's end, that means stopping think2, which I would not do without your word.
+
+### B-022 | 2026-10-12T19:59:09Z | re: M-009
+answered in B-021 (P12 follows think2's package, no interruption of the run)
