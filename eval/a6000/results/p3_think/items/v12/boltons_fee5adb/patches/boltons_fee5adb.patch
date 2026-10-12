@@ -1,0 +1,102 @@
+diff --git a/boltons/socketutils.py b/boltons/socketutils.py
+index 86e7187..77c8f42 100644
+--- a/boltons/socketutils.py
++++ b/boltons/socketutils.py
+@@ -641,19 +641,27 @@ class NetstringSocket(object):
+         if timeout is _UNSET:
+             timeout = self.timeout
+ 
++        if maxsize is _UNSET:
++            maxsize = self.maxsize
++            msgsize_maxsize = self._msgsize_maxsize
++        elif maxsize is None:
++            msgsize_maxsize = 1024  # Plenty for a size prefix
++        else:
++            msgsize_maxsize = len(str(maxsize)) + 1
++
+         size_prefix = self.bsock.recv_until(b':',
+-                                            timeout=self.timeout,
+-                                            maxsize=self._msgsize_maxsize)
++                                            timeout=timeout,
++                                            maxsize=msgsize_maxsize)
+         try:
+             size = int(size_prefix)
+         except ValueError:
+             raise NetstringInvalidSize('netstring message size must be valid'
+                                        ' integer, not %r' % size_prefix)
+ 
+-        if size > self.maxsize:
+-            raise NetstringMessageTooLong(size, self.maxsize)
+-        payload = self.bsock.recv_size(size)
+-        if self.bsock.recv(1) != b',':
++        if maxsize is not None and size > maxsize:
++            raise NetstringMessageTooLong(size, maxsize)
++        payload = self.bsock.recv_size(size, timeout=timeout)
++        if self.bsock.recv(1, timeout=timeout) != b',':
+             raise NetstringProtocolError("expected trailing ',' after message")
+ 
+         return payload
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000..f4876c0
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,58 @@
++import socket
++import time
++from boltons.socketutils import NetstringSocket, Timeout, NetstringMessageTooLong
++
++def test_read_ns_timeout():
++    print("Testing read_ns timeout...")
++    x, y = socket.socketpair()
++    client = NetstringSocket(x)
++    server = y
++
++    # This should timeout quickly if the timeout argument is respected
++    start = time.time()
++    try:
++        client.read_ns(timeout=0.1)
++    except Timeout:
++        dur = time.time() - start
++        print(f"Timed out after {dur:.2f}s")
++        assert dur >= 0.1
++        return
++    except Exception as e:
++        print(f"Unexpected exception: {type(e).__name__}: {e}")
++        raise
++    else:
++        print("Failed to timeout")
++        raise Exception("read_ns did not respect timeout argument")
++
++def test_read_ns_maxsize():
++    print("Testing read_ns maxsize...")
++    x, y = socket.socketpair()
++    client = NetstringSocket(x)
++    server = y
++
++    # Send a message that is larger than the maxsize argument
++    payload = b'a' * 100
++    server.sendall(f"{len(payload)}:".encode('ascii') + payload + b',')
++
++    try:
++        client.read_ns(maxsize=50)
++    except NetstringMessageTooLong as e:
++        print("Raised NetstringMessageTooLong as expected")
++        return
++    except Exception as e:
++        print(f"Unexpected exception: {type(e).__name__}: {e}")
++        raise
++    else:
++        print("Failed to raise NetstringMessageTooLong")
++        raise Exception("read_ns did not respect maxsize argument")
++
++if __name__ == "__main__":
++    try:
++        test_read_ns_timeout()
++    except Exception as e:
++        print(f"test_read_ns_timeout failed: {e}")
++    
++    try:
++        test_read_ns_maxsize()
++    except Exception as e:
++        print(f"test_read_ns_maxsize failed: {e}")

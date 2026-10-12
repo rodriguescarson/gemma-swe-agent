@@ -1,0 +1,313 @@
+STDOUT:
+....................................FF.................................F [ 42%]
+...........F............................................................ [ 84%]
+..........................                                               [100%]
+=================================== FAILURES ===================================
+______ BlackTestCase.test_format_file_in_place_diff_without_stdout_buffer ______
+
+self = <tests.test_black.BlackTestCase testMethod=test_format_file_in_place_diff_without_stdout_buffer>
+
+    def test_format_file_in_place_diff_without_stdout_buffer(self) -> None:
+        for nl in ("\n", "\r\n"):
+            with TemporaryDirectory() as workspace:
+                test_file = Path(workspace) / "test.py"
+                test_file.write_bytes(f"x = ( 1 ){nl}".encode())
+                output = io.StringIO(newline="")
+                with patch("sys.stdout", output):
+>                   changed = black.format_file_in_place(
+                        test_file,
+                        fast=True,
+                        mode=DEFAULT_MODE,
+                        write_back=black.WriteBack.DIFF,
+                    )
+
+tests/test_black.py:1527: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+src = PosixPath('/tmp/sbx_v12_black_da22d43/swegemma_sandbox_352e2556-b26_yxadbdut/tmp/tmpnfap_tbe/test.py')
+fast = True
+mode = Mode(target_versions=set(), line_length=88, string_normalization=True, is_pyi=False, is_ipynb=False, skip_source_first_line=False, magic_trailing_comma=True, python_cell_magics=set(), preview=False, unstable=False, enabled_features=set())
+write_back = <WriteBack.DIFF: 2>, lock = None
+
+    def format_file_in_place(
+        src: Path,
+        fast: bool,
+        mode: Mode,
+        write_back: WriteBack = WriteBack.NO,
+        lock: Any = None,  # multiprocessing.Manager().Lock() is some crazy proxy
+        *,
+        lines: Collection[tuple[int, int]] = (),
+    ) -> bool:
+        """Format file under `src` path. Return True if changed.
+    
+        If `write_back` is DIFF, write a diff to stdout. If it is YES, write reformatted
+        code to the file.
+        `mode` and `fast` options are passed to :func:`format_file_contents`.
+        """
+        if src.suffix == ".pyi":
+            mode = replace(mode, is_pyi=True)
+        elif src.suffix == ".ipynb":
+            mode = replace(mode, is_ipynb=True)
+    
+        then = datetime.fromtimestamp(src.stat().st_mtime, timezone.utc)
+        header = b""
+        with open(src, "rb") as buf:
+            if mode.skip_source_first_line:
+                header = buf.readline()
+            src_contents, encoding, newline = decode_bytes(buf.read(), mode)
+        try:
+            dst_contents = format_file_contents(
+                src_contents, fast=fast, mode=mode, lines=lines
+            )
+        except NothingChanged:
+            return False
+        except JSONDecodeError:
+            raise ValueError(
+                f"File '{src}' cannot be parsed as valid Jupyter notebook."
+            ) from None
+        src_contents = header.decode(encoding) + src_contents
+        dst_contents = header.decode(encoding) + dst_contents
+    
+        if write_back == WriteBack.YES:
+            with open(src, "w", encoding=encoding, newline=newline) as f:
+                f.write(dst_contents)
+        elif write_back in (WriteBack.DIFF, WriteBack.COLOR_DIFF):
+            now = datetime.now(timezone.utc)
+            src_name = f"{src}\t{then}"
+            dst_name = f"{src}\t{now}"
+            if mode.is_ipynb:
+                diff_contents = ipynb_diff(src_contents, dst_contents, src_name, dst_name)
+            else:
+                diff_contents = diff(src_contents, dst_contents, src_name, dst_name)
+    
+            if write_back == WriteBack.COLOR_DIFF:
+                diff_contents = color_diff(diff_contents)
+    
+            with lock or nullcontext():
+                f = io.TextIOWrapper(
+>                   sys.stdout.buffer,
+                    ^^^^^^^^^^^^^^^^^
+                    encoding=encoding,
+                    newline=newline,
+                    write_through=True,
+                )
+E               AttributeError: '_io.StringIO' object has no attribute 'buffer'
+
+src/black/__init__.py:1027: AttributeError
+___________ BlackTestCase.test_format_stdin_to_stdout_without_buffer ___________
+
+self = <tests.test_black.BlackTestCase testMethod=test_format_stdin_to_stdout_without_buffer>
+
+    def test_format_stdin_to_stdout_without_buffer(self) -> None:
+        # Text streams aren't required to expose `.buffer` (e.g. ipykernel's
+        # OutStream in Jupyter), see #2516.
+        src = "print ( 'hello' )"
+        for write_back, expected in (
+            (black.WriteBack.YES, 'print("hello")\n'),
+            (black.WriteBack.CHECK, ""),
+            (black.WriteBack.NO, ""),
+        ):
+            output = io.StringIO()
+            assert not hasattr(output, "buffer")
+            with patch("sys.stdout", output):
+>               changed = black.format_stdin_to_stdout(
+                    fast=True, content=src, write_back=write_back, mode=DEFAULT_MODE
+                )
+
+tests/test_black.py:1488: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+fast = True
+
+    def format_stdin_to_stdout(
+        fast: bool,
+        *,
+        content: str | None = None,
+        write_back: WriteBack = WriteBack.NO,
+        mode: Mode,
+        lines: Collection[tuple[int, int]] = (),
+    ) -> bool:
+        """Format file on stdin. Return True if changed.
+    
+        If content is None, it's read from sys.stdin.
+    
+        If `write_back` is YES, write reformatted code back to stdout. If it is DIFF,
+        write a diff to stdout. The `mode` argument is passed to
+        :func:`format_file_contents`.
+        """
+        then = datetime.now(timezone.utc)
+    
+        if content is None:
+            src, encoding, newline = decode_bytes(sys.stdin.buffer.read(), mode)
+        else:
+            src, encoding, newline = content, "utf-8", "\n"
+    
+        dst = src
+        try:
+            dst = format_file_contents(src, fast=fast, mode=mode, lines=lines)
+            return True
+    
+        except NothingChanged:
+            return False
+    
+        finally:
+            f = io.TextIOWrapper(
+>               sys.stdout.buffer, encoding=encoding, newline=newline, write_through=True
+                ^^^^^^^^^^^^^^^^^
+            )
+E           AttributeError: '_io.StringIO' object has no attribute 'buffer'
+
+src/black/__init__.py:1090: AttributeError
+__________________________ BlackTestCase.test_piping ___________________________
+
+self = <tests.test_black.BlackTestCase testMethod=test_piping>
+
+    def test_piping(self) -> None:
+        _, source, expected = read_data_from_file(
+            PROJECT_ROOT / "src/black/__init__.py"
+        )
+        result = BlackRunner().invoke(
+            black.main,
+            [
+                "-",
+                "--fast",
+                f"--line-length={black.DEFAULT_LINE_LENGTH}",
+                f"--config={EMPTY_CONFIG}",
+            ],
+            input=BytesIO(source.encode("utf-8")),
+        )
+        self.assertEqual(result.exit_code, 0)
+>       self.assertFormatEqual(expected, result.stdout)
+
+tests/test_black.py:223: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+tests/util.py:192: in assertFormatEqual
+    _assert_format_equal(expected, actual)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+expected = 'import io\nimport json\nimport platform\nimport re\nimport sys\nimport tokenize\nimport traceback\nfrom collections.a... import freeze_support\n\n        freeze_support()\n\n    main()\n\n\nif __name__ == "__main__":\n    patched_main()\n'
+actual = 'import io\nimport json\nimport platform\nimport re\nimport sys\nimport tokenize\nimport traceback\nfrom collections.a... import freeze_support\n\n        freeze_support()\n\n    main()\n\n\nif __name__ == "__main__":\n    patched_main()\n'
+
+    def _assert_format_equal(expected: str, actual: str) -> None:
+        if actual != expected and (conftest.PRINT_FULL_TREE or conftest.PRINT_TREE_DIFF):
+            bdv: DebugVisitor[Any]
+            actual_out: str = ""
+            expected_out: str = ""
+            if conftest.PRINT_FULL_TREE:
+                out("Expected tree:", fg="green")
+            try:
+                exp_node = black.lib2to3_parse(expected)
+                bdv = DebugVisitor(print_output=conftest.PRINT_FULL_TREE)
+                list(bdv.visit(exp_node))
+                expected_out = "\n".join(bdv.list_output)
+            except Exception as ve:
+                err(str(ve))
+            if conftest.PRINT_FULL_TREE:
+                out("Actual tree:", fg="red")
+            try:
+                exp_node = black.lib2to3_parse(actual)
+                bdv = DebugVisitor(print_output=conftest.PRINT_FULL_TREE)
+                list(bdv.visit(exp_node))
+                actual_out = "\n".join(bdv.list_output)
+            except Exception as ve:
+                err(str(ve))
+            if conftest.PRINT_TREE_DIFF:
+                out("Tree Diff:")
+                out(
+                    diff(expected_out, actual_out, "expected tree", "actual tree")
+                    or "Trees do not differ"
+                )
+    
+        if actual != expected:
+            out(diff(expected, actual, "expected", "actual"))
+    
+>       assert actual == expected
+               ^^^^^^^^^^^^^^^^^^
+E       AssertionError
+
+tests/util.py:86: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Tree Diff:
+--- expected tree
++++ actual tree
+@@ -16279,10 +16279,11 @@
+       LPAR
+  '('
+       typedargslist
+         tname
+           NAME
++ '\n    '
+  'text'
+           COLON
+  ':'
+           NAME
+  ' '
+@@ -16330,10 +16331,11 @@
+         NAME
+  ' '
+  'False'
+       /typedargslist
+       RPAR
++ '\n'
+  ')'
+     /parameters
+     RARROW
+  ' '
+  '->'
+
+--- expected
++++ actual
+@@ -1034,11 +1034,13 @@
+             f.detach()
+ 
+     return True
+ 
+ 
+-def _write_to_stdout(text: str, encoding: str, newline: str, color: bool = False) -> None:
++def _write_to_stdout(
++    text: str, encoding: str, newline: str, color: bool = False
++) -> None:
+     if hasattr(sys.stdout, "buffer"):
+         f = io.TextIOWrapper(
+             sys.stdout.buffer, encoding=encoding, newline=newline, write_through=True
+         )
+         if color:
+
+____________ BlackTestCase.test_reformat_code_without_stdout_buffer ____________
+
+self = <tests.test_black.BlackTestCase testMethod=test_reformat_code_without_stdout_buffer>
+
+    def test_reformat_code_without_stdout_buffer(self) -> None:
+        output = io.StringIO()
+        report = MagicMock()
+        with patch("sys.stdout", output):
+            black.reformat_code(
+                "x = ( 1 )",
+                fast=True,
+                write_back=black.WriteBack.YES,
+                mode=DEFAULT_MODE,
+                report=report,
+            )
+>       self.assertEqual(output.getvalue(), "x = 1\n")
+E       AssertionError: '' != 'x = 1\n'
+E       + x = 1
+
+tests/test_black.py:1517: AssertionError
+----------------------------- Captured stderr call -----------------------------
+Traceback (most recent call last):
+  File "/tmp/sbx_v12_black_da22d43/swegemma_sandbox_352e2556-b26_yxadbdut/workspace/src/black/__init__.py", line 896, in reformat_code
+    if format_stdin_to_stdout(
+       ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/tmp/sbx_v12_black_da22d43/swegemma_sandbox_352e2556-b26_yxadbdut/workspace/src/black/__init__.py", line 1090, in format_stdin_to_stdout
+    sys.stdout.buffer, encoding=encoding, newline=newline, write_through=True
+    ^^^^^^^^^^^^^^^^^
+AttributeError: '_io.StringIO' object has no attribute 'buffer'
+- generated xml file: /tmp/sbx_v12_black_da22d43/swegemma_sandbox_352e2556-b26_yxadbdut/tmp/_swegemma_junit_5163143006cd.xml -
+=========================== short test summary info ============================
+FAILED tests/test_black.py::BlackTestCase::test_format_file_in_place_diff_without_stdout_buffer
+FAILED tests/test_black.py::BlackTestCase::test_format_stdin_to_stdout_without_buffer
+FAILED tests/test_black.py::BlackTestCase::test_piping - AssertionError
+FAILED tests/test_black.py::BlackTestCase::test_reformat_code_without_stdout_buffer
+4 failed, 166 passed in 3.94s
+
+STDERR:

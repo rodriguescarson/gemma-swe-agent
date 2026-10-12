@@ -1,0 +1,96 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000..c9fef99
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,40 @@
++
++from enum import Enum
++from dataclasses import dataclass
++from cattr import Converter
++
++@dataclass
++class Point:
++    x: int
++    y: int
++
++class Location(Enum):
++    _value_: Point
++    HOME = Point(0, 0)
++    WORK = Point(10, 10)
++
++converter = Converter()
++
++# Unstructuring
++home = Location.HOME
++unstructured = converter.unstructure(home)
++print(f"Unstructured HOME: {unstructured}")
++# Expect: {'x': 0, 'y': 0}
++
++# Structuring
++structured = converter.structure({'x': 0, 'y': 0}, Location)
++print(f"Structured HOME: {structured}")
++# Expect: Location.HOME
++
++# Test without _value_ hint
++class SimpleLocation(Enum):
++    HOME = Point(0, 0)
++
++home_simple = SimpleLocation.HOME
++unstructured_simple = converter.unstructure(home_simple)
++print(f"Unstructured simple HOME: {unstructured_simple}")
++# Expect: Point(x=0, y=0) (not unstructured further)
++
++structured_simple = converter.structure(Point(0, 0), SimpleLocation)
++print(f"Structured simple HOME: {structured_simple}")
++# Expect: SimpleLocation.HOME
+diff --git a/src/cattrs/converters.py b/src/cattrs/converters.py
+index 13f63ee..06f148e 100644
+--- a/src/cattrs/converters.py
++++ b/src/cattrs/converters.py
+@@ -9,7 +9,7 @@ from enum import Enum
+ from inspect import Signature
+ from inspect import signature as inspect_signature
+ from pathlib import Path
+-from typing import Any, Optional, Tuple, TypeVar, overload
++from typing import Any, Optional, Tuple, TypeVar, overload, get_type_hints
+ 
+ from attrs import Attribute, resolve_types
+ from attrs import has as attrs_has
+@@ -308,7 +308,7 @@ class BaseConverter:
+                 (bytes, self._structure_call),
+                 (int, self._structure_call),
+                 (float, self._structure_call),
+-                (Enum, self._structure_call),
++                (Enum, self._structure_enum),
+                 (Path, self._structure_call),
+             ]
+         )
+@@ -632,6 +632,10 @@ class BaseConverter:
+ 
+     def _unstructure_enum(self, obj: Enum) -> Any:
+         """Convert an enum to its value."""
++        hints = get_type_hints(type(obj))
++        value_type = hints.get("_value_")
++        if value_type is not None:
++            return self._unstructure_func.dispatch(value_type)(obj.value)
+         return obj.value
+ 
+     def _unstructure_seq(self, seq: Sequence[T]) -> Sequence[T]:
+@@ -697,6 +701,16 @@ class BaseConverter:
+ 
+         return structure_attrs_union
+ 
++    def _structure_enum(self, obj: Any, cl: type[Enum]) -> Any:
++        """Structure an enum value if it has a _value_ type hint."""
++        hints = get_type_hints(cl)
++        value_type = hints.get("_value_")
++        if value_type is not None:
++            value = self._structure_func.dispatch(value_type)(obj, value_type)
++        else:
++            value = obj
++        return cl(value)
++
+     @staticmethod
+     def _structure_call(obj: Any, cl: type[T]) -> Any:
+         """Just call ``cl`` with the given ``obj``.

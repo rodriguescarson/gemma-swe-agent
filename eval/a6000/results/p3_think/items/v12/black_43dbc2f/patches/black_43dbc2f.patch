@@ -1,0 +1,94 @@
+diff --git a/src/blackd/__init__.py b/src/blackd/__init__.py
+index 2f9a516..b0b64da 100644
+--- a/src/blackd/__init__.py
++++ b/src/blackd/__init__.py
+@@ -20,6 +20,7 @@
+ import click
+ 
+ import black
++from .client import BlackdClient
+ from _black_version import version as __version__
+ from black.concurrency import maybe_install_uvloop
+ from black.mode import Preview
+diff --git a/src/blackd/client.py b/src/blackd/client.py
+new file mode 100644
+index 0000000..e4ca713
+--- /dev/null
++++ b/src/blackd/client.py
+@@ -0,0 +1,76 @@
++import aiohttp
++from typing import Any, Optional, Union
++
++
++class BlackdClient:
++    def __init__(self, url: str = "http://localhost:45484"):
++        self.url = url
++        self._session: Optional[aiohttp.ClientSession] = None
++
++    async def __aenter__(self):
++        self._session = aiohttp.ClientSession()
++        return self
++
++    async def __aexit__(self, exc_type, exc_val, exc_tb):
++        await self.close()
++
++    async def close(self):
++        if self._session:
++            await self._session.close()
++            self._session = None
++
++    async def format(
++        self,
++        code: str,
++        line_length: Optional[int] = None,
++        python_variant: Optional[str] = None,
++        skip_source_first_line: bool = False,
++        skip_string_normalization: bool = False,
++        skip_magic_trailing_comma: bool = False,
++        preview: bool = False,
++        unstable: bool = False,
++        enable_unstable_feature: Optional[Union[str, list[str]]] = None,
++        fast: bool = False,
++        diff: bool = False,
++    ) -> str:
++        headers = {}
++        if line_length is not None:
++            headers["X-Line-Length"] = str(line_length)
++        if python_variant is not None:
++            headers["X-Python-Variant"] = python_variant
++        if skip_source_first_line:
++            headers["X-Skip-Source-First-Line"] = "True"
++        if skip_string_normalization:
++            headers["X-Skip-String-Normalization"] = "True"
++        if skip_magic_trailing_comma:
++            headers["X-Skip-Magic-Trailing-Comma"] = "True"
++        if preview:
++            headers["X-Preview"] = "True"
++        if unstable:
++            headers["X-Unstable"] = "True"
++        if enable_unstable_feature:
++            if isinstance(enable_unstable_feature, list):
++                headers["X-Enable-Unstable-Feature"] = ",".join(enable_unstable_feature)
++            else:
++                headers["X-Enable-Unstable-Feature"] = enable_unstable_feature
++        if fast:
++            headers["X-Fast-Or-Safe"] = "fast"
++        else:
++            headers["X-Fast-Or-Safe"] = "safe"
++        if diff:
++            headers["X-Diff"] = "True"
++
++        if self._session is None:
++            async with aiohttp.ClientSession() as session:
++                return await self._do_format(session, code, headers)
++        else:
++            return await self._do_format(self._session, code, headers)
++
++    async def _do_format(self, session: aiohttp.ClientSession, code: str, headers: dict) -> str:
++        async with session.post(self.url, data=code, headers=headers) as response:
++            if response.status == 204:
++                return code
++            if response.status != 200:
++                text = await response.text()
++                raise RuntimeError(f"blackd returned error {response.status}: {text}")
++            return await response.text()

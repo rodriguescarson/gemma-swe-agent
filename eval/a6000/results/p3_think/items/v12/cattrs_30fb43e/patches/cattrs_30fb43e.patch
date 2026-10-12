@@ -1,0 +1,67 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000..f8e267a
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,49 @@
++
++from attrs import define
++from cattrs import Converter
++from typing import Any
++
++@define
++class A:
++    x: 'B'
++
++@define
++class B:
++    y: int
++
++def test_resolution():
++    converter = Converter()
++    
++    # Override for type B
++    converter.register_structure_hook(B, lambda d: B(y=d['y']))
++    # We want to see if gen_unstructure_attrs_fromdict correctly identifies that A.x is B
++    # and uses any type overrides.
++    # But for unstructure, it's about how it's disassembled.
++    
++    # Let's use a type override for B during unstructuring
++    # Wait, type_overrides is used in gen_unstructure_attrs_fromdict
++    # Let's see what it does.
++    
++    # I'll try to reproduce the issue by adding a type override for B.
++    # Since A.x is 'B' (string), if we don't re-fetch attribs, 
++    # a.type will be 'B' (string), not B (type).
++    
++    converter.type_overrides[B] = B # Just to have it there
++    print(f"Type overrides: {converter.type_overrides}")
++    
++    unstructure_fn = converter.gen_unstructure_attrs_fromdict(A)
++    # Inside gen_unstructure_attrs_fromdict:
++    # attribs has a.type == 'B'
++    # resolve_types(A) is called. Now A.x.type == B.
++    # But attribs still has a.type == 'B' (if it's a copy or if it's not updated)
++    # attrib_overrides = { a.name: self.type_overrides[a.type] ... }
++    # 'B' is not in self.type_overrides, but B is.
++    # So attrib_overrides will be empty.
++    
++    # Now, how do we know if attrib_overrides was used?
++    # make_dict_unstructure_fn uses it.
++    
++    print("Done")
++
++if __name__ == "__main__":
++    test_resolution()
+diff --git a/src/cattrs/converters.py b/src/cattrs/converters.py
+index aa89555..7b1b12f 100644
+--- a/src/cattrs/converters.py
++++ b/src/cattrs/converters.py
+@@ -1253,6 +1253,7 @@ class Converter(BaseConverter):
+         if attrs_has(cl) and any(isinstance(a.type, str) for a in attribs):
+             # PEP 563 annotations - need to be resolved.
+             resolve_types(cl)
++            attribs = fields(origin or cl)
+         attrib_overrides = {
+             a.name: self.type_overrides[a.type]
+             for a in attribs

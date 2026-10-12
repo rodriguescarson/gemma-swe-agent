@@ -1,0 +1,97 @@
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000..ca02475
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,27 @@
++from attrs import define
++from cattrs import Converter
++from cattrs.disambiguators import create_default_dis_func
++import itertools
++
++@define
++class A: ab: int; a: str
++@define
++class B: ab: int; bc: int
++@define
++class C: bc: int
++
++c = Converter()
++
++classes = [A, B, C]
++for order in itertools.permutations(classes):
++    try:
++        dis_func = create_default_dis_func(c, *order)
++        print(f"Order {order} succeeded")
++        # Test routing
++        assert dis_func({'ab': 1, 'a': 'a'}) is A
++        assert dis_func({'ab': 1, 'bc': 1}) is B
++        assert dis_func({'bc': 1}) is C
++    except Exception as e:
++        print(f"Order {order} failed with {type(e).__name__}: {e}")
++        raise e
++print("All orders succeeded!")
+diff --git a/src/cattrs/disambiguators.py b/src/cattrs/disambiguators.py
+index f6e4392..85bd4ee 100644
+--- a/src/cattrs/disambiguators.py
++++ b/src/cattrs/disambiguators.py
+@@ -133,31 +133,34 @@ def create_default_dis_func(
+     # so we can do easy picks first, making later picks easier.
+     cls_and_attrs.sort(key=lambda c_a: len(c_a[1]), reverse=True)
+ 
+-    fallback = None  # If none match, try this.
+-
+-    for cl, cl_reqs, back_map in cls_and_attrs:
+-        # We do not have to consider classes we've already processed, since
+-        # they will have been eliminated by the match dictionary already.
+-        other_classes = [
+-            c_and_a
+-            for c_and_a in cls_and_attrs
+-            if c_and_a[0] is not cl and c_and_a[0] not in uniq_attrs_dict.values()
+-        ]
+-        other_reqs = reduce(or_, (c_a[1] for c_a in other_classes), set())
+-        uniq = cl_reqs - other_reqs
+-
+-        # We want a unique attribute with no default.
+-        cl_fields = fields_dict(get_origin(cl) or cl)
+-        for maybe_renamed_attr_name in uniq:
+-            orig_name = back_map[maybe_renamed_attr_name]
+-            if cl_fields[orig_name].default in (NOTHING, MISSING):
+-                break
+-        else:
+-            if fallback is None:
+-                fallback = cl
+-                continue
+-            raise TypeError(f"{cl} has no usable non-default attributes")
+-        uniq_attrs_dict[maybe_renamed_attr_name] = cl
++    uniq_attrs_dict: dict[str, type] = {}
++    unpinned = list(cls_and_attrs)
++
++    while True:
++        pinned_this_round = []
++        for cl, cl_reqs, back_map in unpinned:
++            other_reqs = reduce(or_, (c_a[1] for c_a in unpinned if c_a[0] is not cl), set())
++            uniq = cl_reqs - other_reqs
++
++            # We want a unique attribute with no default.
++            cl_fields = fields_dict(get_origin(cl) or cl)
++            for maybe_renamed_attr_name in uniq:
++                orig_name = back_map[maybe_renamed_attr_name]
++                if cl_fields[orig_name].default in (NOTHING, MISSING):
++                    pinned_this_round.append((maybe_renamed_attr_name, cl, (cl, cl_reqs, back_map)))
++                    break
++
++        if not pinned_this_round:
++            break
++
++        for attr_name, cl, item in pinned_this_round:
++            uniq_attrs_dict[attr_name] = cl
++            unpinned.remove(item)
++
++    if len(unpinned) > 1:
++        raise TypeError(f"{unpinned[1][0]} has no usable non-default attributes")
++
++    fallback = unpinned[0][0] if unpinned else None
+ 
+     if fallback is None:
+ 

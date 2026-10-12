@@ -1,0 +1,83 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000..737ac39
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,48 @@
++from cattrs import Converter, override
++from attrs import define, field
++
++@define
++class Foo:
++    x: list = field(factory=list)
++
++def unstruct_list_to_tuple(val):
++    return tuple(val)
++
++converter = Converter()
++converter.register_unstructure_hook(list, unstruct_list_to_tuple)
++# We want to omit if default. For Foo.x, default is [].
++# Let's set omit_if_default=True for Foo.x
++converter.type_overrides = {
++    Foo: override(omit_if_default=True)
++}
++# Wait, the override for the class might not be enough, maybe we need it for the field.
++# Let's try:
++converter = Converter()
++converter.register_unstructure_hook(list, unstruct_list_to_tuple)
++converter = Converter(omit_if_default=True)
++converter.register_unstructure_hook(list, unstruct_list_to_tuple)
++
++# If we have Foo(x=[1,2,3]), it should be {'x': (1,2,3)}
++# If we have Foo(x=[]), it should be {} because it's default.
++
++f1 = Foo(x=[1, 2, 3])
++print(f"f1: {converter.unstructure(f1)}") # Expected {'x': (1, 2, 3)}
++
++f2 = Foo(x=[])
++print(f"f2: {converter.unstructure(f2)}") # Expected {}
++
++# Now the tricky case:
++# If we have a converter that makes different values the same.
++# Let's use a converter that converts any list to an empty tuple.
++def unstruct_list_to_empty_tuple(val):
++    return ()
++
++converter = Converter(omit_if_default=True)
++converter.register_unstructure_hook(list, unstruct_list_to_empty_tuple)
++
++f3 = Foo(x=[1, 2, 3])
++# current behavior: [1, 2, 3] != [] is True, so it's included.
++# result: {'x': ()}
++# but unstruct_handler(default) is also ().
++# so if omit_if_default is True, it should be {}.
++print(f"f3: {converter.unstructure(f3)}") 
+diff --git a/src/cattrs/gen/__init__.py b/src/cattrs/gen/__init__.py
+index 62e3a37..0b5b82c 100644
+--- a/src/cattrs/gen/__init__.py
++++ b/src/cattrs/gen/__init__.py
+@@ -177,16 +177,17 @@ def make_dict_unstructure_fn_from_attrs(
+             if isinstance(d, Factory):
+                 globs[def_name] = d.factory
+                 internal_arg_parts[def_name] = d.factory
+-                if d.takes_self:
+-                    lines.append(f"  if instance.{attr_name} != {def_name}(instance):")
+-                else:
+-                    lines.append(f"  if instance.{attr_name} != {def_name}():")
+-                lines.append(f"    res['{kn}'] = {invoke}")
++                def_invoke = f"{def_name}(instance)" if d.takes_self else f"{def_name}()"
+             else:
+                 globs[def_name] = d
+                 internal_arg_parts[def_name] = d
+-                lines.append(f"  if instance.{attr_name} != {def_name}:")
+-                lines.append(f"    res['{kn}'] = {invoke}")
++                def_invoke = def_name
++
++            if not is_identity:
++                def_invoke = f"{unstruct_handler_name}({def_invoke})"
++
++            lines.append(f"  if {invoke} != {def_invoke}:")
++            lines.append(f"    res['{kn}'] = {invoke}")
+ 
+         else:
+             # No default or no override.

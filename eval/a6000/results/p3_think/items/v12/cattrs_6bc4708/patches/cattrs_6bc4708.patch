@@ -1,0 +1,126 @@
+diff --git a/repro.py b/repro.py
+new file mode 100644
+index 0000000..994fae7
+--- /dev/null
++++ b/repro.py
+@@ -0,0 +1,35 @@
++
++from typing import Annotated
++from attrs import define
++from cattrs import Converter
++from cattrs.gen import AttributeOverride
++
++@define
++class MyClass:
++    x: Annotated[int, "some metadata"]
++
++def my_unstruct_hook(v):
++    return v - 1
++
++def my_struct_hook(v, _):
++    return v + 1
++
++# Create a converter with an override for 'int'
++converter = Converter(
++    type_overrides={int: AttributeOverride(unstruct_hook=my_unstruct_hook, struct_hook=my_struct_hook)}
++)
++
++obj = MyClass(x=10)
++unstruct = converter.unstructure(obj)
++print(f"Unstructured: {unstruct}")
++
++# Expected: x should be 9 because of the override for int.
++# Current: x will be 10 because the override is for int, but the type is Annotated[int, ...].
++
++struct = converter.structure({ "x": 10 }, MyClass)
++print(f"Structured: {struct.x}")
++# Expected: x should be 11 because of the override for int.
++# Current: x will be 10.
++
++assert unstruct["x"] == 9
++assert struct.x == 11
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000..f3ed318
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,35 @@
++import attr
++from typing import Annotated
++from cattrs import Converter
++
++@attr.s
++class User:
++    name: Annotated[str, "some metadata"]
++
++converter = Converter()
++# Override str to be uppercase for all str, including those in Annotated
++converter.register_unstructure_hook(str, lambda x: x.upper())
++# Actually, type_overrides is for when we want to use a DIFFERENT converter or a DIFFERENT function for a specific type.
++# The issue mentions self.type_overrides, which is used in `Converter`'s constructor.
++
++# Let's use type_overrides.
++# If we override str with something else:
++def my_str_unstructure(val):
++    return f"overridden: {val}"
++
++converter = Converter(type_overrides={str: my_str_unstructure})
++
++user = User(name="alice")
++unstructured = converter.unstructure(user)
++print(f"Unstructured: {unstructured}")
++assert unstructured["name"] == "overridden: alice"
++
++def my_str_structure(val):
++    return f"structured: {val}"
++
++converter = Converter(type_overrides={str: my_str_structure})
++structured = converter.structure({"name": "alice"}, User)
++print(f"Structured: {structured}")
++assert structured.name == "structured: alice"
++
++print("Success!")
+diff --git a/src/cattrs/converters.py b/src/cattrs/converters.py
+index 54d67a4..f4db9d8 100644
+--- a/src/cattrs/converters.py
++++ b/src/cattrs/converters.py
+@@ -1264,11 +1264,14 @@ class Converter(BaseConverter):
+         if attrs_has(cl) and any(isinstance(a.type, str) for a in attribs):
+             # PEP 563 annotations - need to be resolved.
+             resolve_types(origin or cl)
+-        attrib_overrides = {
+-            a.name: self.type_overrides[a.type]
+-            for a in attribs
+-            if a.type in self.type_overrides
+-        }
++        attrib_overrides = {}
++        for a in attribs:
++            if a.type in self.type_overrides:
++                attrib_overrides[a.name] = self.type_overrides[a.type]
++            elif is_annotated(a.type):
++                origin = get_origin(a.type)
++                if origin in self.type_overrides:
++                    attrib_overrides[a.name] = self.type_overrides[origin]
+ 
+         return make_dict_unstructure_fn(
+             cl, self, _cattrs_omit_if_default=self.omit_if_default, **attrib_overrides
+@@ -1306,11 +1309,14 @@ class Converter(BaseConverter):
+         if attrs_has(cl) and any(isinstance(a.type, str) for a in attribs):
+             # PEP 563 annotations - need to be resolved.
+             resolve_types(origin or cl)
+-        attrib_overrides = {
+-            a.name: self.type_overrides[a.type]
+-            for a in attribs
+-            if a.type in self.type_overrides
+-        }
++        attrib_overrides = {}
++        for a in attribs:
++            if a.type in self.type_overrides:
++                attrib_overrides[a.name] = self.type_overrides[a.type]
++            elif is_annotated(a.type):
++                origin = get_origin(a.type)
++                if origin in self.type_overrides:
++                    attrib_overrides[a.name] = self.type_overrides[origin]
+         return make_dict_structure_fn(
+             cl,
+             self,

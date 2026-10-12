@@ -1,0 +1,94 @@
+diff --git a/isort/hooks.py b/isort/hooks.py
+index af9020f..f9bfc9f 100644
+--- a/isort/hooks.py
++++ b/isort/hooks.py
+@@ -76,14 +76,17 @@ def git_hook(
+     )
+     for filename in files_modified:
+         if filename.endswith(".py"):
+-            # Get the staged contents of the file
+-            staged_cmd = ["git", "show", f":{filename}"]
+-            staged_contents = get_output(staged_cmd)
+-
+             try:
+-                if not api.check_code_string(
+-                    staged_contents, file_path=Path(filename), config=config
+-                ):
++                if lazy:
++                    is_sorted = api.check_file(filename, config=config)
++                else:
++                    # Get the staged contents of the file
++                    staged_cmd = ["git", "show", f":{filename}"]
++                    staged_contents = get_output(staged_cmd)
++                    is_sorted = api.check_code_string(
++                        staged_contents, file_path=Path(filename), config=config
++                    )
++                if not is_sorted:
+                     errors += 1
+                     if modify:
+                         api.sort_file(filename, config=config)
+diff --git a/reproduce_issue.py b/reproduce_issue.py
+new file mode 100644
+index 0000000..8bd25f5
+--- /dev/null
++++ b/reproduce_issue.py
+@@ -0,0 +1,52 @@
++import os
++import subprocess
++from pathlib import Path
++from isort import hooks
++
++def run_command(command, cwd=None):
++    return subprocess.run(command, shell=True, capture_output=True, text=True, cwd=cwd)
++
++def test_lazy_git_hook():
++    repo_dir = Path("test_repo")
++    if repo_dir.exists():
++        subprocess.run("rm -rf test_repo", shell=True)
++    repo_dir.mkdir()
++
++    # 1. Initialize git repo
++    run_command("git init", cwd=repo_dir)
++    
++    # 2. Create test.py with sorted imports
++    test_file = repo_dir / "test.py"
++    test_file.write_text("import a\nimport b\n")
++    
++    # 3. Stage and commit
++    run_command("git add test.py", cwd=repo_dir)
++    run_command("git commit -m 'initial'", cwd=repo_dir)
++
++    # 4. Modify test.py on disk to be unsorted
++    test_file.write_text("import b\nimport a\n")
++
++    # 5. Test lazy=False
++    # Should return 0 because no files are staged
++    res_lazy_false = hooks.git_hook(lazy=False, strict=True)
++    print(f"lazy=False result: {res_lazy_false}")
++    assert res_lazy_false == 0
++
++    # 6. Test lazy=True
++    # Should return 1 because test.py is modified on disk and is unsorted
++    # Debug: print files_modified
++    import isort.hooks as hooks_mod
++    diff_cmd = ["git", "diff-index", "--name-only", "--diff-filter=ACMRTUXB", "HEAD"]
++    files_modified = hooks_mod.get_lines(diff_cmd)
++    print(f"files_modified: {files_modified}")
++    res_lazy_true = hooks.git_hook(lazy=True, strict=True)
++    print(f"lazy=True result: {res_lazy_true}")
++    assert res_lazy_true == 1
++
++if __name__ == "__main__":
++    try:
++        test_lazy_git_hook()
++        print("Test passed!")
++    except Exception as e:
++        print(f"Test failed: {e}")
++        exit(1)
+diff --git a/test_repo b/test_repo
+new file mode 160000
+index 0000000..e0d45db
+--- /dev/null
++++ b/test_repo
+@@ -0,0 +1 @@
++Subproject commit e0d45dbac452cfb363b950d7f649b8159d7a2614-dirty
