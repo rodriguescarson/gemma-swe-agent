@@ -43,11 +43,11 @@ case "$cmd" in
     P3=${1:?p3_out}; NAME=${2:?name}; shift 2; RUN="$HOME/g4/runs/train_$NAME"; mkdir -p "$RUN"     # extra args go to train/stitch_rows.py (e.g. --max-seqs-per-task-stage 6)
     TOK="$MODEL/tokenizer.json"; [ -f "$TOK" ] || TOK="$ROOT/adapters/v11b/tokenizer.json"
     "$PY" "$ROOT/train/stitch_rows.py" "$P3/rows.jsonl" --out "$RUN/seqs.jsonl" --report "$RUN/stitch_report.json" --tokenizer-json "$TOK" \
-      --holdout-tasks "$ROOT/data/v11/v11b_holdout_tasks.txt" --holdout-out "$RUN/holdout.jsonl" --holdout-auto 5 --max-tokens 14336 "$@"
+      --holdout-tasks "$ROOT/data/v11/v11b_holdout_tasks.txt" --holdout-out "$RUN/holdout.jsonl" --holdout-auto 5 --max-tokens 14336 --require-thought "$@"
     # the probe's copy keeps sequences up to 16,384 tokens so the top memory bucket exists
     HOLD="$ROOT/data/v11/v11b_holdout_tasks.txt"; [ -f "$RUN/seqs.jsonl.holdout_tasks.txt" ] && HOLD="$RUN/seqs.jsonl.holdout_tasks.txt"
     "$PY" "$ROOT/train/stitch_rows.py" "$P3/rows.jsonl" --out "$RUN/seqs_probe.jsonl" --report "$RUN/stitch_probe_report.json" --tokenizer-json "$TOK" \
-      --holdout-tasks "$HOLD" --max-tokens 16384 "$@" >/dev/null
+      --holdout-tasks "$HOLD" --max-tokens 16384 --require-thought "$@" >/dev/null
     "$PY" "$ROOT/train/validate_rows.py" --stitched "$RUN/seqs.jsonl" --min-rows 40 --max-tokens 14336 --no-tokenizer --require-thought --min-thought-share 0.8 --report "$RUN/validate_stitched.json" \
       --exclude-ids "$ROOT/data/heldout1k/sample200_ids.txt" --exclude-ids "$ROOT/data/heldout1k/s200_valid_ids.txt" | tail -12 ;;
   probe|full)

@@ -30,7 +30,10 @@ Gate (a) extended (2026-10-11, GAPS "gate (a) extended"): the thought must reach
 Mid-run on the box, `scripts/a6000/think_share.py ~/g4/runs/p3_think --min-share 0.8 --render` runs this renderer and stitcher on
 the captures (RENDER GATE: thinking flag on every call, completions with thought >= 0.80, exact chain pairs >= 0.80, breaks
 <= 0.02, model spans with thought >= 0.80); then the rows gate above (`validate_rows.py --min-thought-share`), then the stitch
-gate above. Reasonless calls (thinking on, empty thought) stay in the rows: dropping a row would not drop its span (the stitcher
+gate above. Stitch gate addition (pre-registered 2026-10-12 after the first real stitch: 3 of 159 sequences carried no non-empty
+thought at all): `train.sh stitch` passes `--require-thought`, the stitcher drops such sequences and reports `dropped_no_thought`
+with their tasks, and the gate allows at most 5% dropped (a sequence without a thought teaches calling without thinking, the v11
+failure; above 5% the collection itself is suspect: stop). Reasonless calls (thinking on, empty thought) stay in the rows: dropping a row would not drop its span (the stitcher
 re-includes the harness's rendering of that reply), keeping it keeps the model's own bytes. A span masked by the weight rules
 masks its thought with it; `span_thought_masked` in the stitch report counts those.
 

@@ -22,6 +22,12 @@ MODEL_OPEN, TURN_CLOSE = "<|turn>model\n", "<turn|>"
 TR_OPEN, TR_CLOSE = "<|tool_response>", "<tool_response|>"
 TC_OPEN, TC_CLOSE = "<|tool_call>", "<tool_call|>"
 EMPTY_THOUGHT = "<|channel>thought\n<channel|>"
+THOUGHT_RE = re.compile(r"<\|channel>thought\n.*?<channel\|>", re.S)   # a (possibly empty) thought channel
+
+
+def has_thought(text):
+    """True when the text carries at least one NON-empty thought channel (the validator's per-sequence --require-thought test)."""
+    return any(m.group(0) != EMPTY_THOUGHT for m in THOUGHT_RE.finditer(text))
 READ_SHARE = 0.15
 CALL_RE = re.compile(r"<\|tool_call>call:([A-Za-z_][\w.-]*)\{")
 ERROR_RE = re.compile(r'"status"\s*:\s*"error"|"error_type"\s*:|"error"\s*:\s*"[^"]|\bError\b.*not found|Traceback \(most recent', re.S)

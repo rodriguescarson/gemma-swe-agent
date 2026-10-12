@@ -425,9 +425,11 @@ and stop when it needs the owner.
 4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json `ok: true` (it now
    also requires thought_share >= 0.8: model spans starting with a non-empty thought / model spans), `sequences_with_thought ==
    sequences`, >= 40 sequences (one per solved trajectory with v12; the run's schedule scales with the count, `bash
-   scripts/a6000/train.sh recipe N`, applied by `train.sh full`); paste stitch_report.json's numbers (sequences, tokens, breaks, healed, compactions, span_*
-   counts incl. span_thought_masked, thought_share) into GATE.md addendum 15 with the date and the pulled commit. If the gate
-   fails, log why to P2_LOG.md, push, stop.
+   scripts/a6000/train.sh recipe N`, applied by `train.sh full`), and `dropped_no_thought` <= 5% of sequences (train.sh passes
+   --require-thought: sequences with no non-empty thought are dropped and listed with their tasks; 2026-10-12: 3 of 159); paste
+   stitch_report.json's numbers (sequences, tokens, breaks, healed, compactions, span_* counts incl. span_thought_masked,
+   thought_share, dropped_no_thought + tasks) into GATE.md addendum 15 with the date and the pulled commit. If the gate fails,
+   log why to P2_LOG.md, push, stop.
 5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (about
    1 h). Append probe_report.json's verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k and the repeat losses to
    addendum 15, commit, push. FULL -> step 6. REDUCED -> re-stitch with `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think
@@ -453,7 +455,7 @@ A6000 box, WSL2, work only in ~/g4 and Docker. Repo ~/g4/gemma-swe-agent, branch
 1. STATE: `pgrep -af "autopilot|vllm|or_proxy|pace_proxy|race|qlora"` (anything alive = stop, say so); `nvidia-smi` (>1 GB used, no process = stale WSL VRAM: owner runs `wsl --shutdown`, reopens, restart at 0); `df -h ~` (>=150 GB free); `ls ~/g4/runs/p3_think`. One block to P2_LOG.md.
 2. ROWS: `~/g4/venv/bin/python scripts/a6000/p3_build.py --out ~/g4/runs/p3_think` (build rc 0); `wc -l ~/g4/runs/p3_think/rows.jsonl`. Rows gate: the report's `thoughts:` line shows share >= 0.80; below it, log to P2_LOG.md, push, stop.
 3. ENV+BASE: `bash scripts/a6000/train.sh env` (must print `cuda ok`); `bash scripts/a6000/train.sh dequant` (~10 min; ~/g4/model-bf16/DEQUANT.json, checked_against_library 3).
-4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json ok true (incl. thought_share >= 0.8), sequences_with_thought == sequences, >=40 sequences (one per solved trajectory with v12; `train.sh full` scales epochs by the count). Put stitch_report.json numbers (sequences, tokens, breaks, healed, compactions, span_* incl. span_thought_masked, thought_share) in GATE.md addendum 15 with date + pulled commit. Fail = log to P2_LOG.md, push, stop.
+4. STITCH: `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think think1`. Gate: validate_stitched.json ok true (incl. thought_share >= 0.8), sequences_with_thought == sequences, dropped_no_thought <= 5% of sequences (--require-thought drops thoughtless ones, listed by task), >=40 sequences (one per solved trajectory with v12; `train.sh full` scales epochs by the count). Put stitch_report.json numbers (sequences, tokens, breaks, healed, compactions, span_* incl. span_thought_masked, thought_share) in GATE.md addendum 15 with date + pulled commit. Fail = log to P2_LOG.md, push, stop.
 5. PROBE: `bash scripts/a6000/train.sh probe think1`; poll `bash scripts/a6000/train.sh status think1` every 10 min (~1 h). Add probe_report.json verdict, reasons, tok_s, peak_gb_at_12k, oom_at_16k, forward2k, repeat losses to addendum 15; commit, push. FULL -> 6. REDUCED -> re-stitch with `... stitch ~/g4/runs/p3_think think1 --max-seqs-per-task-stage 6`, then 6 with `--max-tokens 12288`. FALLBACK -> `gzip -k ~/g4/runs/p3_think/rows.jsonl`, note the path, stop.
 6. RUN: `bash scripts/a6000/train.sh full think1 [--max-tokens 12288]` (~13-18 h). Hourly: status + last `eval` line (nll_text, nll_tool) to P2_LOG.md; alarm_tok_s_halved true on 3 consecutive steps = report, keep going; if the process dies, the same command resumes. At `done`: summary.json (best_nll_text, steps, elapsed_h) to addendum 15.
 7. PACKAGE: ARM = content of ~/g4/runs/p3_think/ARM (v12 or v5h2-think). `~/g4/venv/bin/python train/package_adapter.py ~/g4/runs/train_think1/run/best --bundle submissions/$ARM --out submissions/${ARM}_think1 --name think1 --key-style loud --stages <v12: agent | v5h2-think: fixer,verifier>`; `~/g4/venv/bin/python scripts/adapters_dataset.py --bundle submissions/${ARM}_think1 --slug g4-adapters-think1 --out ~/g4/ds --push --kaggle ~/g4/venv/bin/kaggle`. Commit the bundle without any .safetensors, push.
@@ -476,7 +478,8 @@ confirmed open-weight (the Mac side decides that; here you train and package). N
    ~/g4/runs/p3_think2/rows.jsonl`, then `bash scripts/a6000/train.sh stitch ~/g4/runs/p3_think2 think2 --holdout-tasks
    ~/g4/runs/train_think1/seqs.jsonl.holdout_tasks.txt` (think1's held-out tasks, so the two arms are read on the same 5 tasks; if
    that file does not exist, think1 used data/v11/v11b_holdout_tasks.txt: pass that). Gate as P11 step 4 (ok true incl. thought_share
-   >= 0.8, sequences_with_thought == sequences, >= 40 sequences); stitch_report.json numbers to addendum 15.
+   >= 0.8, sequences_with_thought == sequences, dropped_no_thought <= 5%, >= 40 sequences); stitch_report.json numbers (incl.
+   dropped_no_thought + tasks) to addendum 15.
 3. RUN: no second probe (same model, same caps as think1's verdict). `bash scripts/a6000/train.sh full think2 [--max-tokens 12288 if
    think1 was REDUCED]`; the recipe scales by the sequence count (train.sh recipe N). Poll hourly as in P11 step 6; at `done`,
    summary.json (best_nll_text, steps, elapsed_h) to addendum 15 NEXT TO think1's numbers (same held-out tasks: the first comparison).

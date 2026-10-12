@@ -172,3 +172,25 @@ def test_holdout_auto_draws_tasks_when_the_named_ones_are_absent(tmp_path):
     assert r.returncode == 0, r.stderr[-600:]
     drawn = (tmp_path / "seqs.jsonl.holdout_tasks.txt").read_text().split()
     assert len(drawn) == 1 and len(out.read_text().splitlines()) == 2 and len((tmp_path / "held.jsonl").read_text().splitlines()) == 1
+
+
+def test_require_thought_drops_thoughtless_sequences_and_reports_them(tmp_path):
+    """2026-10-12: 3 of 159 real sequences carried no non-empty thought (box P2_LOG); such a sequence teaches calling without
+    thinking (the v11 failure), so train.sh stitch passes --require-thought and the gate allows <= 5% dropped."""
+    rows = chain(task="t1", traj="cap|t1") + chain(task="t2", traj="cap|t2", thoughts=False)
+    seqs, held, rep = ST.stitch(rows, tok=None)
+    assert rep["sequences"] == 2 and rep["dropped_no_thought"] == 0 and rep["dropped_no_thought_tasks"] == []
+    seqs, held, rep = ST.stitch(rows, tok=None, require_thought=True)
+    assert rep["sequences"] == 1 and rep["dropped_no_thought"] == 1 and rep["dropped_no_thought_tasks"] == ["t2"]
+    assert seqs[0]["meta"]["task"] == "t1" and S.has_thought(seqs[0]["text"])
+    inp = tmp_path / "rows.jsonl"; inp.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    r = subprocess.run([sys.executable, str(ROOT / "train" / "stitch_rows.py"), str(inp), "--out", str(tmp_path / "seqs.jsonl"),
+                        "--report", str(tmp_path / "rep.json"), "--require-thought"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-800:]
+    rep2 = json.loads((tmp_path / "rep.json").read_text())
+    assert rep2["sequences"] == 1 and rep2["dropped_no_thought"] == 1 and rep2["dropped_no_thought_tasks"] == ["t2"]
+    v = subprocess.run([sys.executable, str(ROOT / "train" / "validate_rows.py"), "--stitched", str(tmp_path / "seqs.jsonl"), "--min-rows", "1",
+                        "--no-tokenizer", "--require-thought", "--min-thought-share", "0.8", "--report", str(tmp_path / "val.json")], capture_output=True, text=True)
+    val = json.loads((tmp_path / "val.json").read_text())
+    assert val["ok"] and val["sequences_with_thought"] == val["sequences"] == 1, v.stdout[-800:]
+    assert "--require-thought" in (ROOT / "scripts" / "a6000" / "train.sh").read_text()

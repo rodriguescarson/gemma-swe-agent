@@ -23,7 +23,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from train.spans import EMPTY_THOUGHT, TR_OPEN, supervised_char_spans, weight_spans  # noqa: E402
+from train.spans import EMPTY_THOUGHT, TR_OPEN, has_thought, supervised_char_spans, weight_spans  # noqa: E402
 
 CHARS_PER_TOKEN = 3.6   # measured on the v11b rows (plan); used when no tokenizer is given
 
@@ -89,8 +89,9 @@ def auto_holdout(rows, n, seed=1):
     return set(random.Random(seed).sample(tasks, min(n, len(tasks))))
 
 
-def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0.15, seed=1, holdout=frozenset()):
+def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0.15, seed=1, holdout=frozenset(), require_thought=False):
     groups, rep = defaultdict(list), Counter()
+    dropped_tasks = []
     for r in rows:
         m = r["meta"]
         if not m.get("traj"):
@@ -112,6 +113,9 @@ def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0
             if n_tok > max_tokens:
                 rep["over_max_tokens"] += 1
                 continue
+            if require_thought and not has_thought(text):      # 2026-10-12: 3 of 159 real sequences; such a sequence teaches calling without thinking
+                rep["dropped_no_thought"] += 1; dropped_tasks.append(task)
+                continue
             if task in holdout:
                 held.append(item)
             else:
@@ -127,6 +131,8 @@ def stitch(rows, max_per_task_stage=10, max_tokens=14336, tok=None, read_share=0
         rep["supervised_chars"] += sum(b - a for a, b, w in s["spans"] if w > 0)
         rep["masked_chars"] += sum(b - a for a, b, w in s["spans"] if w == 0)
     rep = dict(rep)                                       # a Counter.update would try to add the strings below
+    rep["dropped_no_thought"] = rep.get("dropped_no_thought", 0)
+    rep["dropped_no_thought_tasks"] = sorted(set(dropped_tasks))
     model_spans = rep.get("span_text", 0) + rep.get("span_tool", 0)
     rep["thought_share"] = round(rep.get("span_thought", 0) / model_spans, 4) if model_spans else 0.0   # the P11 stitch gate: >= 0.8
     rep.update({"groups": len(groups), "sequences": len(seqs), "holdout_sequences": len(held),
@@ -149,6 +155,7 @@ def main(argv=None):
     ap.add_argument("--tokenizer-json", default=None); ap.add_argument("--read-share", type=float, default=0.15); ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--holdout-tasks", default=None); ap.add_argument("--holdout-out", default=None)
     ap.add_argument("--holdout-auto", type=int, default=0, help="when the holdout file names no task of these rows, draw this many tasks (seeded) and write them to <out>.holdout_tasks.txt")
+    ap.add_argument("--require-thought", action="store_true", help="drop sequences with no non-empty thought channel (reported as dropped_no_thought + tasks; the P11 stitch gate allows <= 5%%)")
     a = ap.parse_args(argv)
     rows = [json.loads(l) for l in open(a.rows) if l.strip()]
     hold = {l.strip() for l in open(a.holdout_tasks) if l.strip()} if a.holdout_tasks else set()
@@ -157,7 +164,7 @@ def main(argv=None):
         hold = auto_holdout(rows, a.holdout_auto, a.seed)
         Path(a.out + ".holdout_tasks.txt").write_text("".join(t + "\n" for t in sorted(hold)))
         print(f"holdout: none of the named tasks are in these rows; drew {sorted(hold)} -> {a.out}.holdout_tasks.txt")
-    seqs, held, rep = stitch(rows, a.max_seqs_per_task_stage, a.max_tokens, load_tokenizer(a.tokenizer_json), a.read_share, a.seed, hold)
+    seqs, held, rep = stitch(rows, a.max_seqs_per_task_stage, a.max_tokens, load_tokenizer(a.tokenizer_json), a.read_share, a.seed, hold, a.require_thought)
     Path(a.out).parent.mkdir(parents=True, exist_ok=True)
     with open(a.out, "w") as f:
         for s in seqs:
