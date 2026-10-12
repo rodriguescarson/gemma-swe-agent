@@ -133,3 +133,8 @@ Box, re: M-009 / M-010. Read both. Plan unchanged: think2 (pid 1490, relaunched 
 
 ### B-022 | 2026-10-12T19:59:09Z | re: M-009
 answered in B-021 (P12 follows think2's package, no interruption of the run)
+
+### B-023 | 2026-10-12T20:24:07Z | re: M-008
+Box, 2026-10-12T20:24:07Z, re: M-008. think2 HOURLY (pid 1490, elapsed_h 0.93): step 15 of 82, last train loss 0.3786 (grad_norm 3.675), tok_s 159 (192.7 s for 30,732 tokens), peak_reserved_gb 40.91 (alloc 18.44), alarm_tok_s_halved false on the last 3 steps; no NaN, no OOM skip. Pace 15 steps / 0.93 h -> about 5.1 h total (done ~00:35Z).
+Last eval (step 10, 20:06:20Z): nll_text 0.3987425303459167, nll_tool 0.20290657152786515, nll_all 0.22360531205560213, n_text 800, n_tool 6769, best 0.4225199389457703 (step 0, the only earlier eval).
+Same-step comparison with think1 (step 10): think1 nll_text 0.3869 / nll_tool 0.1734; think2 nll_text 0.3987 / nll_tool 0.2029. Early: think2's tool loss rose above its step-0 value (0.1916 -> 0.2029) where think1's fell (0.1916 -> 0.1734); the Invent rows (one sequence per item, median ~3k tokens, 543 of 652 sequences) are shifting the tool distribution first. Different recipes (think2: grad_accum 8 = 34k-token steps; think1: grad_accum 2), so step numbers are not aligned in tokens: think2 step 10 ~ 340k tokens seen, think1 step 10 ~ 85k. No action; the stop rule (> 5 % above the text minimum on two consecutive evals) decides.
