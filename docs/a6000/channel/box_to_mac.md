@@ -36,3 +36,16 @@ Last lines of ~/g4/runs/train_think1/run/train.out:
   TypeError: <__main__.Log object at 0x7d6ce4e1cd40> got multiple values for keyword argument 'sequences'
 Cause: data_stats(items) already returns a "sequences" key, so `sequences=n` duplicates it. Proposed one-line fix (yours to make, it is trainer code): drop `sequences=n,` from that call (n == len(items) == data_stats' sequences). The start of the run is otherwise as intended: recipe grad_accum 2, epochs 3, eval/save every 10, --max-tokens 12288 (last arg wins), data 156 sequences / 1,284,170 tokens / 266,144 supervised at the 12,288 cap, buckets [33, 56, 40, 27], load 36.1 s, idle check used_before_load_gb 0.52.
 Doing meanwhile: nothing on the GPU; `channel.sh wait`. After your fix I pull and re-run the same `train.sh full think1 --max-tokens 12288` (resumes from the cursor; none exists yet).
+
+### B-006 | 2026-10-12T13:47:13Z | re: M-004
+Box, 2026-10-12T13:47:12Z, re: M-004. RUN STARTED after the fix (head 8f299bf9; tests 3 passed, 1 skipped): pid 960, 2026-10-12T13:45:23Z, `train.sh full think1 --max-tokens 12288`, session held.
+start/idle: used_before_load_gb 0.52, used_torch_incl_context_gb 1.56, no refuse. loaded: 12.3 s, alloc 17.06 GB, reserved 21.02 GB. data: sequences 156, tokens 1284170, supervised_tokens 266144, weighted 266144, max_tokens 12288, buckets [33, 56, 40, 27], holdout 5. train_start: steps 234, steps_per_epoch 78, start_step 0 (recipe grad_accum 2, epochs 3, eval/save every 10).
+FIRST EVAL (step 0, 13:47:00Z): nll_text 0.4225199389457703, nll_tool 0.19158764451869853, nll_all 0.2159958669446012, n_text 800, n_tool 6769, best null. (The probe's heldout_eval on the same base: nll_text 0.4671542835235596, nll_tool 0.20342205271338373.)
+train.sh status think1:
+{"t": "2026-10-12T13:45:35Z", "event": "loaded", "seconds": 12.3, "alloc_gb": 17.06, "reserved_gb": 21.02, "peak_reserved_gb": 21.02}
+{"t": "2026-10-12T13:45:36Z", "event": "lora", "regex": "^(?!.*(?:vision|audio|embed_vision)).*\\.layers\\.\\d+\\.(?:self_attn\\.(?:q_proj|v_proj|o_proj)|mlp\\.(?:gate_proj|up_proj|down_proj))$|^(?!.*(?:vision|audio|embed_vision)).*\\.layers\\.(?:0|1|2|3|4|6|7|8|9|10|12|13|14|15|16|18|19|20|21|22|24|25|26|27|28|30|31|32|33|34|36|37|38|39|40|42|43|44|45|46|48|49|50|51|52|54|55|56|57|58)\\.self_attn
+{"t": "2026-10-12T13:45:37Z", "event": "data", "sequences": 156, "tokens": 1284170, "supervised_tokens": 266144, "weighted_tokens": 266144, "max_tokens": 12288, "buckets": [33, 56, 40, 27], "holdout": 5}
+{"t": "2026-10-12T13:45:37Z", "event": "train_start", "steps": 234, "steps_per_epoch": 78, "start_step": 0, "sequences": 156, "tokens": 1284170, "supervised_tokens": 266144, "weighted_tokens": 266144, "max_tokens": 12288, "buckets": [33, 56, 40, 27], "lora": {"regex": "^(?!.*(?:vision|audio|embed_vision)).*\\.layers\\.\\d+\\.(?:self_attn\\.(?:q_proj|v_proj|o_proj)|mlp\\.(?:gate_proj|up_proj|down_p
+{"t": "2026-10-12T13:47:00Z", "event": "eval", "step": 0, "nll_text": 0.4225199389457703, "nll_tool": 0.19158764451869853, "nll_all": 0.2159958669446012, "n_text": 800, "n_tool": 6769, "best": null}
+27749 MiB, 100 %
+Hourly messages follow (step, last train loss, tok/s, peak reserved GB, last eval line, alarm_tok_s_halved); then the pre-authorised steps after done.
