@@ -1452,3 +1452,6 @@ not run (no capture)
 }`
 - thoughts: 2633 of 2677 rebalanced rows carry a non-empty thought channel (share 0.98; the P11 rows gate is >= 0.80)
 - preference pairs (a solved and a failed attempt of the same task): **0** (raw material in pairs_raw.jsonl: task, solved passes, failed passes; the Adaption SDK's alignment schema is applied on the Mac, the package is not installed here)
+
+### P2 addendum 15 (P11, the thinking-on QLoRA on the box; started 2026-10-12T07:52:17Z; branch head f0ce10e2; thresholds as pre-registered in docs/a6000/TRAIN_LOCAL.md)
+Stitch of the P10 collection (bundle v12, 468 tasks finished, 159 solved, 3006 rows, 2677 rebalanced, thoughts 2633/2677): the first stitch failed the strict rule (156 of 159 sequences with a thought); the owner chose to drop thought-less sequences by rule (`--require-thought`, bounded at 5 %). Result: sequences 156, tasks 149, tokens 1323176, breaks 10, healed 42, compactions 0, dropped_no_thought 3 (arrow_f77aa1d, cattrs_b55fbe0, isort_61071d7), span_thought 1422, span_thought_masked 454, span_tool 1330, span_text 161, span_error 160, span_repeat 122, span_read_over_share 182, thought_share 0.9537, holdout_sequences 5. validate_stitched ok true.
