@@ -68,3 +68,28 @@ def test_skill_scripts_do_not_shadow_stdlib(b):
     stdlib = set(sys.stdlib_module_names)
     for p in b.glob("skills/*/scripts/*.py"):
         assert p.stem not in stdlib, f"{p} shadows stdlib module '{p.stem}'"
+
+def test_make_kernel_takes_adapter_weights_from_a_dataset(tmp_path):
+    """sub15 (2026-10-13): a 242 MB adapter cannot ride base64 inside a notebook; with --adapters-dataset the kernel copies
+    <name>__adapter_model.safetensors from the private dataset, checks its sha256 against adapters/MANIFEST.json and zips it."""
+    import hashlib, json
+    b = tmp_path / "v12_t"; (b / "adapters" / "t").mkdir(parents=True)
+    (b / "agent.yaml").write_text("name: a\nmodel: gemma-4-31b-it-qat-w4a16-ct\nadapter: t\ninstruction: hi\n")
+    w = b"W" * 100; (b / "adapters" / "t" / "adapter_model.safetensors").write_bytes(w)
+    (b / "adapters" / "t" / "adapter_config.json").write_text("{}")
+    (b / "adapters" / "MANIFEST.json").write_text(json.dumps({"files": {"t/adapter_model.safetensors": hashlib.sha256(w).hexdigest(), "t/adapter_config.json": "0" * 64}}))
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "t-kernel-ds", "--adapters-dataset", "owner/g4-adapters-t"], cwd=tmp_path, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-400:]
+    nb = (tmp_path / "kernels/t-kernel-ds/t-kernel-ds.ipynb").read_text()
+    assert base64.b64encode(w).decode() not in nb and '"DATASET = \\"owner/g4-adapters-t\\""' in json.dumps(nb) or 'DATASET = "owner/g4-adapters-t"' in nb
+    assert "adapters/MANIFEST.json" in nb and "sha mismatch" in nb and "t__adapter_model.safetensors" not in nb      # the name is built from the manifest at run time
+    meta = json.loads((tmp_path / "kernels/t-kernel-ds/kernel-metadata.json").read_text())
+    assert meta["dataset_sources"] == ["owner/g4-adapters-t"] and meta["enable_gpu"] is False
+    # the embedded files still carry the config and the manifest; without the flag the weights are embedded (the old behaviour)
+    assert "adapters/t/adapter_config.json" in nb
+    subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "t-kernel-embed"], cwd=tmp_path, check=True, capture_output=True)
+    assert base64.b64encode(w).decode() in (tmp_path / "kernels/t-kernel-embed/t-kernel-embed.ipynb").read_text()
+    # a weight the manifest does not name refuses
+    (b / "adapters" / "MANIFEST.json").write_text(json.dumps({"files": {}}))
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "t-kernel-bad", "--adapters-dataset", "owner/x"], cwd=tmp_path, capture_output=True, text=True)
+    assert r.returncode != 0 and "names no sha256" in r.stderr
