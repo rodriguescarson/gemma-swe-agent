@@ -675,3 +675,4 @@ not run (no capture)
 - 2026-10-12T18:56:24Z | P11b step 1: Invent rows converted: rows_in 791, kept 496 (gate >= 100 pass), rows_out 992, all with thought; report in GATE addendum 15 (think2 data).
 - 2026-10-12T18:57:07Z | P11b step 2: think2 stitch PASS (652 sequences = 156 SWE + 496 Invent, thought_share 0.9722, dropped_no_thought 3, same 5 held-out tasks as think1); note probe.jsonl (20 rows) was in the Invent input glob. Numbers in GATE addendum 15.
 - 2026-10-13T00:38:34Z | P11b DONE: think2 82 steps, best_nll_text 0.3528113579750061 @ step 70, final text 0.3528 / tool 0.1716, elapsed_h 5.17; packaged submissions/v12_think2 (sha256 117122223c73...), dataset carsonrodrigues/g4-adapters-think2 (private). think1 stays lower on the shared held-out tasks (text 0.3123 / tool 0.1639). Next: P12.
+- 2026-10-13T00:42:32Z | LAUNCH stage 1a; HARD STOP 2026-10-13T16:42:32Z
