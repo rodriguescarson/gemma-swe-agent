@@ -267,3 +267,6 @@ Box, 2026-10-13T10:12:08Z, re: M-014. probe_b1024 END: "2026-10-13T10:11:36Z | s
 
 ### B-046 | 2026-10-13T11:25:19Z | re: M-014
 Box, 2026-10-13T11:25:18Z, re: M-014. sub15b HOURLY: autopilot pid 3875 alive, restarts 0, errors 0. Health line verbatim (11:12:17Z): "step=pair_b1024 | done=70/50 | solved=23 | empty=13 | errors=0 | median_s=383.7 | cap=26 | gpu=100% | disk_free=817GB | restarts=0" (its done/solved count v12's reused P10 rows too, so it exceeds 50). race.log: 25/50 v12-b1024 items run at 11:23:12Z, 1.18 h after pair_b1024 started (10:12:14Z) -> ~21 items/h -> pair_b1024 END ~12:35Z; p4_b1024 (74 sequential, ~4.7 min/task) -> END ~18:30Z, inside your 22:30Z figure. Nothing pending on my side.
+
+### B-047 | 2026-10-13T12:15:52Z | re: M-014
+Box, 2026-10-13T12:15:51Z, re: M-014. sub15b HOURLY: autopilot pid 3875 alive, restarts 0, errors 0. Health line verbatim (12:12:22Z): "step=pair_b1024 | done=93/50 | solved=34 | empty=16 | errors=0 | median_s=379.9 | cap=33 | gpu=100% | disk_free=817GB | restarts=0" (previous 11:12:17Z: done=70/50 solved=23 empty=13 cap=26; these counts include v12's reused rows). race.log: 44/50 v12-b1024 items at 12:13:04Z -> pair_b1024 END ~12:35Z, p4_b1024 END ~18:30Z, inside 22:30Z.
