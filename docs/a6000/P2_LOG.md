@@ -697,3 +697,6 @@ not run (no capture)
 - 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-13T09:20:28Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-13T09:21:05Z | step=p4_adapter | EVENT started pid 31922 (restarts so far 0; hard stop in 7.4 h)
+- 2026-10-13T09:24:01Z | step=p4_adapter | EVENT started pid 32476 (restarts so far 0; hard stop in 15.3 h)
+- 2026-10-13T09:58:41Z | LAUNCH stage 1a; HARD STOP 2026-10-13T23:58:41Z
