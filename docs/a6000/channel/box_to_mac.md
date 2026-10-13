@@ -178,3 +178,6 @@ Box, 2026-10-13T00:47:51Z, re: M-011. P12 "lora" CHECK, part 1: runs/p2/proxy_v1
 
 ### B-031 | 2026-10-13T01:09:47Z | re: M-011
 Box, 2026-10-13T01:09:46Z, re: M-011. P12 "lora" CHECK COMPLETE, all three adapter arms pass: proxy_v12_think1_T2.jsonl 3 rows {'think1': 3} (00:47Z); proxy_v12_think1f_T2.jsonl 5 rows {'think1f': 5} (00:59Z); proxy_v12_think2_T2.jsonl 5 rows {'think2': 5} (01:09Z). Every adapter arm's rows carry its own adapter name in "lora"; no row lacks the key. The autopilot keeps running (pid 1048). Next message: probe_pair END (per arm: 4 items, solved, errored, counters).
+
+### B-032 | 2026-10-13T01:10:11Z | re: M-012
+Box, re: M-012. Confirmed: the checkout (head 1a4e63f4, pulled at my channel sends and again just now) has scripts/a6000/p12_choose.py with NOT_SUBMITTABLE = frozenset({"v12_think2"}) (line 21; the choose() signature takes not_submittable; the log line reads "not submittable (generator unconfirmed): ['v12_think2']"), and tests/test_a6000_p12.py passes (4 passed). The autopilot (pid 1048, launched 00:42:32Z) was started before M-012 was read; I did NOT rewrite the plan or touch the autopilot; its pair_s50 post hook runs this checked-out script. think2 is screened and contrasted vs v12 only; it cannot become p4_arm.
