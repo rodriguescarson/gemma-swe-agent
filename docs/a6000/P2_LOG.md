@@ -683,3 +683,4 @@ not run (no capture)
 - 2026-10-13T01:20:03Z | step=probe_pair | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-13T01:20:38Z | step=pair_s50 | EVENT started pid 11069 (restarts so far 0; hard stop in 15.4 h)
 - 2026-10-13T02:20:41Z | step=pair_s50 | done=67/150 | solved=23 | empty=12 | errors=0 | median_s=398.5 | cap=26 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-13T03:20:45Z | step=pair_s50 | done=85/150 | solved=27 | empty=14 | errors=0 | median_s=408.5 | cap=33 | gpu=99% | disk_free=817GB | restarts=0
