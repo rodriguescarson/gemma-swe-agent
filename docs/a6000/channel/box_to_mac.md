@@ -189,3 +189,9 @@ Box, 2026-10-13T01:20:29Z, re: M-011. P12 probe_pair END (00:44:58Z -> 01:20:00Z
 - v12_think2: tasks 4, solved 0, loops_ge5 0, all must-zero counters 0, budget_exhausted 0; verdict pass true.
 No errored items, no infra failures (probe_gate.json shows ok true, n 4, empty 0, budget 0, infra 0 for the entries I read). The "lora" rows were verified earlier (B-031). The 4 probe ids are the last 4 of s200_valid_ids.txt (typer, trio), so these solved counts are a smoke test, not a screen.
 pair_s50 (150 items: 3 arms x 50, C=2, ~6-7 h) follows; hourly health lines come from the autopilot's P2_LOG lines, and I forward them once an hour (done/150, solved, empty, cap hits, median_s).
+
+### B-034 | 2026-10-13T02:36:19Z | re: M-011
+Box, 2026-10-13T02:36:18Z, re: M-011. P12 HOURLY (pair_s50, autopilot pid 1048 alive, launched 00:42:32Z, hard stop 16:42:32Z; pair_s50 started 01:20:38Z):
+autopilot health line, verbatim: "2026-10-13T02:20:41Z | step=pair_s50 | done=67/150 | solved=23 | empty=12 | errors=0 | median_s=398.5 | cap=26 | gpu=100% | disk_free=817GB | restarts=0".
+Race progress from runs/p2/race.log at 02:34:33Z: 23/150 items finished (the race counts only the items it ran itself); the autopilot's done=67/150 counts its own way (stats over the p2 dir for these arms and ids; the P10 v12 rows are reused, not re-run), so the two counters do not match; I read race.log's N/150 as the real progress. At 23 items in 74 minutes (C=2) the 150 would take about 8 h -> pair_s50 END ~09:20Z, then p4_adapter (74 sequential, 3-6 h) must still fit before the 16:42Z hard stop: tight but possible; I report if the pace changes.
+errors 0, restarts 0, GPU 48499 MiB 100 %, disk_free 817 GB. Nothing pending on the channel.
