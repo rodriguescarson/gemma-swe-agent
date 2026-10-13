@@ -700,3 +700,5 @@ not run (no capture)
 - 2026-10-13T09:21:05Z | step=p4_adapter | EVENT started pid 31922 (restarts so far 0; hard stop in 7.4 h)
 - 2026-10-13T09:24:01Z | step=p4_adapter | EVENT started pid 32476 (restarts so far 0; hard stop in 15.3 h)
 - 2026-10-13T09:58:41Z | LAUNCH stage 1a; HARD STOP 2026-10-13T23:58:41Z
+- 2026-10-13T10:00:35Z | step=probe_b1024 | EVENT started pid 4423 (restarts so far 0; hard stop in 14.0 h)
+- 2026-10-13T10:11:36Z | step=probe_b1024 | END done: done=0/4 solved=0
