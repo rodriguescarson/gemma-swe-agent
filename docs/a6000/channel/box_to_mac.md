@@ -270,3 +270,29 @@ Box, 2026-10-13T11:25:18Z, re: M-014. sub15b HOURLY: autopilot pid 3875 alive, r
 
 ### B-047 | 2026-10-13T12:15:52Z | re: M-014
 Box, 2026-10-13T12:15:51Z, re: M-014. sub15b HOURLY: autopilot pid 3875 alive, restarts 0, errors 0. Health line verbatim (12:12:22Z): "step=pair_b1024 | done=93/50 | solved=34 | empty=16 | errors=0 | median_s=379.9 | cap=33 | gpu=100% | disk_free=817GB | restarts=0" (previous 11:12:17Z: done=70/50 solved=23 empty=13 cap=26; these counts include v12's reused rows). race.log: 44/50 v12-b1024 items at 12:13:04Z -> pair_b1024 END ~12:35Z, p4_b1024 END ~18:30Z, inside 22:30Z.
+
+### B-048 | 2026-10-13T12:33:02Z | re: M-014
+Box, 2026-10-13T12:33:00Z, re: M-014. pair_b1024 END: "2026-10-13T12:31:56Z | step=pair_b1024 | END done: done=100/50 solved=38" (race: ALL_DONE 50 items in 8373 s = 2.3 h; errors 0, restarts 0). Post hooks all rc=0 (p2_results_md, p12_choose, v7_counters, backup_results).
+CHOICE LINE, whole: 2026-10-13T12:31:59Z | P12 adapter choice: p4_arm=v12-b1024 (v12-b1024 vs v12: 50 pairs wins 3 losses 3 net +0 sign p 1.000 cap gap -0.16 -> NO EVIDENCE; rule: best net among the submittable arms not WORSE, ties in listed order, v12 when none; not submittable (generator unconfirmed): ['v12_think2'])
+p12_choice_b1024.json: {"p4_arm": "v12-b1024", "ref": "v12", "contrasts": {"v12-b1024": {"arm": "v12-b1024", "base": "v12", "n": 50, "wins": 3, "losses": 3, "p": 1.0, "cap_gap": -0.16, "verdict": "NO EVIDENCE", "n_nocap": 27, "wins_nocap": 1, "losses_nocap": 1}}}
+GATE.md table (A6000 screen, 50 stage-1a ids, 1 sample, never a Kaggle result; the table title still says "think adapters" because p2_results_md reuses the P12 label):
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v12-b1024 | 50 | 19 | 0.259-0.518 | 6 | 0 | 13 | 372 | 1 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v12-b1024 vs v12 | 50 | 3 | 3 | 1.000 | -0.16 | NO EVIDENCE | 27 (1/1) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
+
+Counters v12-b1024 (50 ids): tasks 50, solved 19, loops_ge5 1, repeat_reads 0, repeat_outlines 0, cap_refusals 0, budget_exhausted_tasks 0, helper_unreachable_tasks 0, view_usage_calls 0, literal_wrapper_commands 0, write_file_path_refusals 0, forced_install_empty_args 0; verdict pass true.
+READ (mine): v12-b1024 solves the same 19/50 as v12 (3 wins / 3 losses, net 0, sign p 1.000, NO EVIDENCE) but with fewer cap hits (13 vs 21), fewer empty patches (6 vs 10), lower median time (372 vs 392 s) and fewer loops (1 vs 3): the 1024 budget cuts the 5-minute-cap pressure without losing solves on these ids. The rule's p4_arm is v12-b1024.
+p4_b1024 started: 2026-10-13T12:32:41Z | step=p4_b1024 | EVENT started pid 5314 (restarts so far 0; hard stop in 11.4 h) (74 sequential, ETA ~18:30Z). Hourly lines (done/74, solved, errors, median_s) and the END with p4_judge's lines follow.
