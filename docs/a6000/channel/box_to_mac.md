@@ -311,3 +311,21 @@ Box, 2026-10-13T16:11:47Z, re: M-015. p4_b1024 HOURLY: autopilot pid 3875 alive,
 
 ### B-053 | 2026-10-13T17:02:20Z | re: M-015
 Box, 2026-10-13T17:02:19Z, re: M-015. p4_b1024 HOURLY: autopilot pid 3875 alive, restarts 0. Health line verbatim (16:32:51Z): "step=p4_b1024 | done=57/74 | solved=20 | empty=15 | errors=0 | median_s=301.7 | cap=26 | gpu=100% | disk_free=817GB | restarts=0". Live count at 17:02Z: 63/74, solved 23, errors 0, cap hits 28, median 301.7 s, summed 15858 s. END ~17:50Z. Gate watch: 0 errored; 23 solved, 3 more needed from the last 11 for solved >= 26. Summed seconds so far 15858; at this pace the 74 sum to ~18,700 s.
+
+### B-054 | 2026-10-13T17:43:11Z | re: M-015
+Box, 2026-10-13T17:43:10Z, re: M-015. p4_b1024 END and the run is DONE.
+END line: "2026-10-13T17:41:59Z | step=p4_b1024 | END done: done=74/74 solved=28". Post hooks: p4_judge.py rc=0, v7_counters.py rc=0, backup_results.py rc=0 (17:42:01-17:42:06Z); FINALIZE final_summary rc=0, backup_results rc=0; "END cleanup (all steps finished): ... memory.used 429 MiB ... vllm pids left: none"; "DONE 2026-10-13T17:42:42Z (all steps finished)". Nothing of the autopilot/vLLM is alive; GPU 429 MiB.
+ON ORIGIN (checked with git fetch, head 4e34410d): eval/a6000/results/p4_b1024/results.jsonl (+ ARM, traces) from commit d8fee3ac "a6000 results backup: 77 new/changed files", and the END line in docs/a6000/P2_LOG.md (commit f9b02ca2). No manual push was needed.
+p4_judge's lines whole (P2_LOG):
+### P4 A6000 screen RESULT: v12-b1024 on the public 74 (2026-10-13 17:42 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 28/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 28/74 (base 34/74) | wins 0 losses 6 net -6 | rule: solved >= 37 and net >= +3
+lost: fastapi_14616 fastapi_14851 fastapi_9753 requests_6644 rich_3063 rich_3718
+DROP: solved 28 < 37; net -6 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 33; errored rows 0; median task seconds 302; S(1) over clean windows = 1.20; over the whole log 1.20 (1770 calls; 0 of 31 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
+My own count from runs/p4_b1024/results.jsonl: 74 rows, 74 unique ids, solved 28, errored (non-timeout err) 0, crash rows 0, cap hits (5-minute session timeout) 33, summed seconds 18552, median 301.7 s.
+Counters:
+p4_b1024_counters.json {"view_usage_calls": 0, "literal_wrapper_commands": 1, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 4, "budget_exhausted_tasks": 2, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 28}
+Your gate (every id, 0 crash, 0 errored, solved >= 26): by my count every id present, 0 crash, 0 errored, 28 solved. The submitter decides from origin; the box does not submit. GPU idle; I wait for your next message.
