@@ -1556,3 +1556,12 @@ think2 run (2026-10-13T00:38:34Z; train.sh full think2 --max-tokens 12288 --eval
 | v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
 | v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
 | v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
+
+### P4 A6000 screen RESULT: v12-b1024 on the public 74 (2026-10-13 17:42 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 28/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 28/74 (base 34/74) | wins 0 losses 6 net -6 | rule: solved >= 37 and net >= +3
+lost: fastapi_14616 fastapi_14851 fastapi_9753 requests_6644 rich_3063 rich_3718
+DROP: solved 28 < 37; net -6 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 33; errored rows 0; median task seconds 302; S(1) over clean windows = 1.20; over the whole log 1.20 (1770 calls; 0 of 31 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
