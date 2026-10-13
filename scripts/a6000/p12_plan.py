@@ -6,7 +6,7 @@ counters). vLLM serves the union bundle's adapters: plan["serve_bundle"] -> auto
 shape as p10_plan.py. tests/test_a6000_p12.py.
 
     python scripts/a6000/p12_plan.py --serve-bundle ~/g4/serve_bundle [--arms v12_think1 v12_think1f v12_think2]
-        [--ref v12] [--plan ~/g4/runs/autopilot_plan.json] [--scale-fallback 1.0] [--dry-run]
+        [--ref v12] [--tag T] [--control] [--plan ~/g4/runs/autopilot_plan.json] [--scale-fallback 1.0] [--dry-run]
 The plan REPLACES the steps of the file and is closed (no step is added while it runs)."""
 import argparse
 import json
@@ -21,9 +21,11 @@ DEFAULT_ARMS = ["v12_think1", "v12_think1f", "v12_think2"]
 COMPARATORS = ("v4h2", "v7c", "v7d", "v5h2-think")   # thinking-off rows and the P10 reference on the same 50 ids (box only)
 
 
-def p12_steps(runs, py, arms, ref=REF, scale_fallback=1.0, tag=None):
+def p12_steps(runs, py, arms, ref=REF, scale_fallback=1.0, tag=None, control=False):
     """tag None = the adapter screen's names (probe_pair / pair_s50 / p4_adapter); a tag gives every step, log and the p4 dir its
-    own name (sub15b, 2026-10-13: a new plan in the same runs dir must not reuse p4_adapter's resumable results.jsonl)."""
+    own name (sub15b, 2026-10-13: a new plan in the same runs dir must not reuse p4_adapter's resumable results.jsonl).
+    control (sub16, 2026-10-14): one arm read as a control, not a contender: the 74 public tasks (the slot's gate) run right
+    after the probe on that arm (p4_run --arm), and the pair vs ref runs last, reported only."""
     runs = str(runs)
     out = f"{runs}/p2"
     all_arms = [ref, *arms]
@@ -49,14 +51,14 @@ def p12_steps(runs, py, arms, ref=REF, scale_fallback=1.0, tag=None):
     # population run clean (0 crash rows) before any slot (the standing rule); sequential, the bundle's own budgets, as P4
     p4dir, p4log = f"{runs}/{n_p4}", f"{runs}/{n_p4}_proxy.jsonl"
     p4 = {"name": n_p4, "total": 74, "docker": False,
-          "cmd": [py, "scripts/a6000/p4_run.py", "--out", p4dir, "--port", "8002"],
+          "cmd": [py, "scripts/a6000/p4_run.py", "--out", p4dir, "--port", "8002", *(["--arm", arms[0]] if control else [])],
           "proxy": {"listen": 8002, "host": "127.0.0.1", "log": p4log}, "speed_log": p4log,
           "stats": {"type": "results_jsonl", "file": f"{p4dir}/results.jsonl"},
           "purge": [py, "scripts/a6000/p4_purge.py", f"{p4dir}/results.jsonl"], "purge_since": [py, "scripts/a6000/p4_purge_since.py", f"{p4dir}/results.jsonl"],
           "post": [[py, "scripts/a6000/p4_judge.py", "--out", p4dir, "--proxy-log", p4log],
                    [py, "scripts/a6000/v7_counters.py", p4dir, "--json", f"{runs}/{n_p4}_counters.json"],
                    [py, "scripts/a6000/backup_results.py"]]}
-    return [probe, s50, p4]
+    return [probe, p4, s50] if control else [probe, s50, p4]
 
 
 def finalize_hooks(runs, py):
@@ -64,8 +66,8 @@ def finalize_hooks(runs, py):
             ["bash", "-c", "kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true"]]
 
 
-def write_plan(path, runs, py, arms, serve_bundle, ref=REF, scale_fallback=1.0, tag=None):
-    plan = {"steps": p12_steps(runs, py, arms, ref, scale_fallback, tag), "finalize": finalize_hooks(runs, py), "open": False,
+def write_plan(path, runs, py, arms, serve_bundle, ref=REF, scale_fallback=1.0, tag=None, control=False):
+    plan = {"steps": p12_steps(runs, py, arms, ref, scale_fallback, tag, control), "finalize": finalize_hooks(runs, py), "open": False,
             "serve_bundle": str(serve_bundle) if serve_bundle else ""}
     Path(path).write_text(json.dumps(plan, indent=1))
     return plan
@@ -75,9 +77,12 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--serve-bundle", default="", help="the union bundle (scripts/a6000/union_bundle.py) vLLM registers as LoRA modules; omit for arms without adapters")
     ap.add_argument("--tag", default=None, help="name the steps, logs and the p4 dir after this tag (a second plan in the same runs dir)")
+    ap.add_argument("--control", action="store_true", help="one arm read as a control: probe -> p4 on that arm -> pair (reported only)")
     ap.add_argument("--arms", nargs="+", default=DEFAULT_ARMS); ap.add_argument("--ref", default=REF)
     ap.add_argument("--plan", default=str(G4 / "runs" / "autopilot_plan.json")); ap.add_argument("--scale-fallback", type=float, default=1.0); ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args(argv)
+    if a.control and len(a.arms) != 1:
+        ap.error("--control reads exactly one arm")
     py = str(G4 / "venv" / "bin" / "python")
     sb = Path(a.serve_bundle).expanduser() if a.serve_bundle else None
     names = sorted(p.name for p in (sb / "adapters").iterdir() if p.is_dir()) if sb and (sb / "adapters").is_dir() else []
@@ -85,11 +90,11 @@ def main(argv=None):
     if missing:
         raise SystemExit(f"no bundle for arms {missing} under submissions/")
     if a.dry_run:
-        print(json.dumps({"steps": [s["name"] for s in p12_steps(str(G4 / "runs"), py, a.arms, a.ref, a.scale_fallback, a.tag)], "serve_bundle": str(sb or ""), "adapters": names}))
+        print(json.dumps({"steps": [s["name"] for s in p12_steps(str(G4 / "runs"), py, a.arms, a.ref, a.scale_fallback, a.tag, a.control)], "serve_bundle": str(sb or ""), "adapters": names}))
         return 0
     if sb and not names:
         raise SystemExit(f"{sb}: no adapters/<name>/ directories: build it with scripts/a6000/union_bundle.py first")
-    plan = write_plan(a.plan, str(G4 / "runs"), py, a.arms, sb, a.ref, a.scale_fallback, a.tag)
+    plan = write_plan(a.plan, str(G4 / "runs"), py, a.arms, sb, a.ref, a.scale_fallback, a.tag, a.control)
     print("plan steps:", [s["name"] for s in plan["steps"]], "| arms:", a.arms, "vs", a.ref, "| serve_bundle:", sb, "adapters:", names, "| open:", plan["open"])
     return 0
 

@@ -123,3 +123,32 @@ def test_a_tagged_plan_for_an_arm_without_adapters_gets_its_own_names_and_no_ser
     assert plan["serve_bundle"] == "" and json.loads((tmp_path / "plan.json").read_text())["serve_bundle"] == ""
     r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--arms", "v12-b1024", "--tag", "b1024", "--dry-run"], capture_output=True, text=True)
     assert r.returncode == 0 and json.loads(r.stdout) == {"steps": ["probe_b1024", "pair_b1024", "p4_b1024"], "serve_bundle": "", "adapters": []}, r.stderr[-400:]
+
+
+def test_a_control_plan_runs_its_arm_on_the_74_first_then_the_pair(tmp_path, monkeypatch):
+    """sub16 (2026-10-14): v0-think is a control read, not a contender. The 74-task run is the slot's gate, so it runs right
+    after the probe and on the named arm (p4_run --arm), never on p12_choose's pick; the pair vs v12 runs after it, reported only."""
+    P = _mod("p12_plan")
+    steps = P.p12_steps("/home/u/g4/runs", "/py", ["v0-think"], tag="v0t", control=True)
+    assert [s["name"] for s in steps] == ["probe_v0t", "p4_v0t", "pair_v0t"]
+    p4 = steps[1]
+    assert p4["cmd"][p4["cmd"].index("--arm") + 1] == "v0-think" and p4["cmd"][p4["cmd"].index("--out") + 1] == "/home/u/g4/runs/p4_v0t"
+    assert [s["name"] for s in P.p12_steps("/r", "/py", ["v12-b1024"], tag="b1024")] == ["probe_b1024", "pair_b1024", "p4_b1024"]
+    assert "--arm" not in P.p12_steps("/r", "/py", ["v12-b1024"], tag="b1024")[2]["cmd"]                  # contenders keep the choice file
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--arms", "v0-think", "--tag", "v0t", "--control", "--dry-run"], capture_output=True, text=True)
+    assert r.returncode == 0 and json.loads(r.stdout)["steps"] == ["probe_v0t", "p4_v0t", "pair_v0t"], r.stderr[-400:]
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--arms", "v0-think", "v12-b1024", "--control", "--dry-run"], capture_output=True, text=True)
+    assert r.returncode != 0 and "one arm" in r.stderr                                                    # a control names exactly one arm
+
+
+def test_p4_run_arm_flag_overrides_the_choice_file(tmp_path, monkeypatch):
+    R = _mod("p4_run")
+    f = tmp_path / "choice.json"; f.write_text(json.dumps({"p4_arm": "v12"}))
+    monkeypatch.setattr(R, "CHOICE", f)
+    seen = {}
+    fake = type(sys)("run_eval"); fake.main = lambda argv: seen.setdefault("argv", argv) and 0
+    monkeypatch.setitem(sys.modules, "run_eval", fake)
+    assert R.main(["--out", str(tmp_path / "p4"), "--arm", "v0-think"]) == 0
+    assert seen["argv"][0].endswith("submissions/v0-think") and (tmp_path / "p4" / "ARM").read_text() == "v0-think"
+    seen.clear()
+    assert R.main(["--out", str(tmp_path / "p4b")]) == 0 and seen["argv"][0].endswith("submissions/v12")
