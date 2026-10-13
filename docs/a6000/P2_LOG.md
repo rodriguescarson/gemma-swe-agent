@@ -690,3 +690,10 @@ not run (no capture)
 - 2026-10-13T07:21:06Z | step=pair_s50 | done=164/150 | solved=55 | empty=32 | errors=0 | median_s=412.7 | cap=62 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-13T08:21:11Z | step=pair_s50 | done=182/150 | solved=65 | empty=33 | errors=0 | median_s=412.7 | cap=67 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-13T09:20:16Z | step=pair_s50 | END done: done=200/150 solved=71
+- 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-13T09:20:20Z | P12 adapter choice: p4_arm=v12_think1f (v12_think1 vs v12: 50 pairs wins 3 losses 5 net -2 sign p 0.727 cap gap -0.06 -> NO EVIDENCE; v12_think1f vs v12: 50 pairs wins 4 losses 5 net -1 sign p 1.000 cap gap -0.04 -> NO EVIDENCE; v12_think2 vs v12: 50 pairs wins 3 losses 5 net -2 sign p 0.727 cap gap -0.08 -> NO EVIDENCE; rule: best net among the submittable arms not WORSE, ties in listed order, v12 when none; not submittable (generator unconfirmed): ['v12_think2'])
+- 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/p12_choose.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-13T09:20:20Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-13T09:20:28Z | step=pair_s50 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0

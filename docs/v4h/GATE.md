@@ -1466,3 +1466,52 @@ think2 data (2026-10-12T18:56:24Z; Invent rows, carsonrodrigues/g4-invent-rows -
 think2 stitch (2026-10-12T18:57:07Z; rows = p3_think/rows.jsonl (3006) + rows_invent.jsonl (992) = 3998; held-out tasks reused from think1: arrow_cc1cbeb attrs_e048efc black_650983f boltons_ec1ff9f more_itertools_40cee34): validate_stitched ok true, problems 0, sequences 652 (== sequences_with_thought), tasks 645, tokens 2819261, breaks 10, healed 42, compactions 0, capped_per_task_stage 0, dropped_no_thought 3 (arrow_f77aa1d, cattrs_b55fbe0, isort_61071d7; 0.5 % of 655), over_max_tokens 53, span_thought 2414, span_thought_masked 950, span_tool 2322, span_text 161, span_error 160, span_repeat 122, span_read_over_share 678, thought_share 0.9722 (validator 0.9726, model_spans 2446, thought_spans 2379), stages {swe_single_agent 109, null 543}, tokens p50/p90/max 3025 / 9556 / 14244, holdout_sequences 5. Note: the 791 Invent input rows include probe.jsonl (20 rows) because the glob matched it.
 
 think2 run (2026-10-13T00:38:34Z; train.sh full think2 --max-tokens 12288 --eval-every 10 --save-every 10; 652 sequences, grad_accum 8, 1 epoch = 82 steps; pid 1490, 2026-10-12T19:26:28Z -> 2026-10-13T00:36:33Z, a first launch at 18:58Z with eval/save every 40 was killed at step 7 per M-008): summary.json steps 82 (no early stop), best_nll_text 0.3528113579750061 (step 70), final_eval nll_text 0.35275146722793577 nll_tool 0.17155843930012685 nll_all 0.1907095058006219 (n_text 800, n_tool 6769), oom_skipped 0, elapsed_h 5.17, peak_reserved_gb 41.93, alarm_tok_s_halved never, max grad_norm 57.521 (step 68, clipped at 1.0). Evals (step: text / tool): 0: 0.4225 / 0.1916; 10: 0.3987 / 0.2029; 20: 0.3865 / 0.1894; 30: 0.3751 / 0.1769; 40: 0.3667 / 0.1740; 50: 0.3586 / 0.1723; 60: 0.3563 / 0.1724; 70: 0.3528 / 0.1721; 80: 0.3533 / 0.1716. Same held-out tasks as think1 (arrow_cc1cbeb attrs_e048efc black_650983f boltons_ec1ff9f more_itertools_40cee34): think1 best (step 60) text 0.3123 / tool 0.1639, final (step 130) 0.3302 / 0.1613 (tool minimum 0.1591 @ 90); think2 best text 0.3528 (+13 % vs think1 best) / tool 0.1721 (+5 %): think1 is lower on both on this first comparison, think2 reached its minimum with the learning rate near its end. Pack: submissions/v12_think2 (adapter think2, r16, alpha 32, 800 bf16 tensors, key-style loud, stages agent, 242.6 MB, sha256 117122223c7362151ae1138a483c53246b7b3845aca38af41bfa625e1c59fa2a; trainer file best/adapter_model.safetensors sha256 9699955a364b4c81a446ebc2b78b7d83a8dc2c6a005bfc3c0fe8de2593d6bdfa); dataset carsonrodrigues/g4-adapters-think2 (private; think2__adapter_model.safetensors 242603656 B); manifest + config force-added, no weights in git.
+
+### P2 think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think) RESULT (2026-10-13 09:20 UTC)
+##### all items
+**think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think): 50 ids, arms v12, v12_think1, v12_think1f, v12_think2, v4h2, v7c, v7d, v5h2-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v12_think1 | 50 | 17 | 0.224-0.478 | 6 | 0 | 18 | 461 | 2 |
+| v12_think1f | 50 | 18 | 0.241-0.499 | 12 | 0 | 19 | 454 | 4 |
+| v12_think2 | 50 | 17 | 0.224-0.478 | 10 | 0 | 17 | 432 | 1 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v12_think1 vs v12 | 50 | 3 | 5 | 0.727 | -0.06 | NO EVIDENCE | 25 (1/3) |
+| v12_think1f vs v12 | 50 | 4 | 5 | 1.000 | -0.04 | NO EVIDENCE | 25 (1/2) |
+| v12_think2 vs v12 | 50 | 3 | 5 | 0.727 | -0.08 | NO EVIDENCE | 22 (0/2) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think) without contended items: 50 ids, arms v12, v12_think1, v12_think1f, v12_think2, v4h2, v7c, v7d, v5h2-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v12_think1 | 50 | 17 | 0.224-0.478 | 6 | 0 | 18 | 461 | 2 |
+| v12_think1f | 50 | 18 | 0.241-0.499 | 12 | 0 | 19 | 454 | 4 |
+| v12_think2 | 50 | 17 | 0.224-0.478 | 10 | 0 | 17 | 432 | 1 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v12_think1 vs v12 | 50 | 3 | 5 | 0.727 | -0.06 | NO EVIDENCE | 25 (1/3) |
+| v12_think1f vs v12 | 50 | 4 | 5 | 1.000 | -0.04 | NO EVIDENCE | 25 (1/2) |
+| v12_think2 vs v12 | 50 | 3 | 5 | 0.727 | -0.08 | NO EVIDENCE | 22 (0/2) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
