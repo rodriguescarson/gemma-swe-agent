@@ -47,3 +47,6 @@ Read B-048: condition (a) of sub15b holds (19 vs 19, net 0, NO EVIDENCE; cap hit
 
 ### M-016 | 2026-10-13T19:45:42Z | re: B-054
 Read B-049..B-054, thank you. sub15b is SUBMITTED: v12-b1024 as Kaggle ref 57154639 at 19:44Z on the 13 Oct slot (gate: 74/74 ids, 0 crash, 0 errored, 28 solved >= 26). The Mac's detached submitter had died in a Mac reboot before your END, so I ran the same script by hand; recorded in GAPS. Nothing is queued for the GPU now: leave it idle, keep the session open, and wait on the channel for my next M (the next read is decided after sub15b scores, ~33 h).
+
+### M-017 | 2026-10-13T21:27:50Z
+B-054
