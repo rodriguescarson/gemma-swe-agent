@@ -1,0 +1,105 @@
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 91b607f..42a9fb5 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -58,6 +58,13 @@ repos:
+         pass_filenames: false
+         additional_dependencies: ["astor", "attrs", "black", "ruff"]
+         files: ^src\/trio\/_core\/(_run|(_i(o_(common|epoll|kqueue|windows)|nstrumentation)))\.py$
++      - id: sync-pre-commit
++        name: sync pre-commit versions to test-requirements.in
++        language: python
++        entry: python src/trio/_tools/sync_pre_commit.py
++        pass_filenames: false
++        additional_dependencies: ["pyyaml"]
++        files: .pre-commit-config.yaml
+   - repo: https://github.com/astral-sh/uv-pre-commit
+     rev: 0.7.2
+     hooks:
+diff --git a/src/trio/_tools/sync_pre_commit.py b/src/trio/_tools/sync_pre_commit.py
+new file mode 100644
+index 0000000..4657170
+--- /dev/null
++++ b/src/trio/_tools/sync_pre_commit.py
+@@ -0,0 +1,59 @@
++import yaml
++import re
++import sys
++from pathlib import Path
++
++def sync_versions():
++    config_path = Path(".pre-commit-config.yaml")
++    requirements_path = Path("test-requirements.in")
++
++    if not config_path.exists() or not requirements_path.exists():
++        print("Missing configuration or requirements file.")
++        sys.exit(1)
++
++    with open(config_path, "r") as f:
++        config = yaml.safe_load(f)
++
++    tool_versions = {}
++    for repo in config.get("repos", []):
++        repo_url = repo.get("repo", "")
++        rev = repo.get("rev")
++        if not rev:
++            continue
++
++        # Normalize version (remove 'v' prefix if present)
++        version = rev.lstrip("v")
++        
++        # Map repo URL to tool name
++        if "black" in repo_url:
++            tool_versions["black"] = version
++        elif "ruff" in repo_url:
++            tool_versions["ruff"] = version
++        elif "codespell" in repo_url:
++            tool_versions["codespell"] = version
++        elif "uv" in repo_url:
++            tool_versions["uv"] = version
++
++    with open(requirements_path, "r") as f:
++        requirements_content = f.read()
++
++    updated_content = requirements_content
++    for tool, version in tool_versions.items():
++        # This regex looks for the tool name at the start of a line,
++        # potentially followed by a version specifier, and
++        # captures the rest of the line to preserve markers/comments.
++        # Example: ruff >= 0.8.0 -> ruff == 0.11.8
++        # Example: black; implementation_name == "cpython" -> black == 25.1.0; implementation_name == "cpython"
++        pattern = rf"^({re.escape(tool)})(\s*[>=<]+[^#\s;]+)?(\s*.*)$"
++        replacement = rf"\1 == {version}\3"
++        updated_content = re.sub(pattern, replacement, updated_content, flags=re.MULTILINE)
++
++    if updated_content != requirements_content:
++        with open(requirements_path, "w") as f:
++            f.write(updated_content)
++        print(f"Updated {requirements_path}")
++    else:
++        print("No changes needed.")
++
++if __name__ == "__main__":
++    sync_versions()
+diff --git a/test-requirements.in b/test-requirements.in
+index bf64c56..d449f43 100644
+--- a/test-requirements.in
++++ b/test-requirements.in
+@@ -10,13 +10,13 @@ jedi; implementation_name == "cpython"                  # for jedi code completi
+ cryptography>=41.0.0  # cryptography<41 segfaults on pypy3.10
+ 
+ # Tools
+-black; implementation_name == "cpython"
++black == 25.1.0; implementation_name == "cpython"
+ mypy  # Would use mypy[faster-cache], but orjson has build issues on pypy
+ orjson; implementation_name == "cpython" and python_version < "3.14"    # orjson does not yet install on 3.14
+-ruff >= 0.8.0
++ruff == 1.6.0 0.8.0
+ astor          # code generation
+-uv >= 0.2.24
+-codespell
++uv == 0.7.2 0.2.24
++codespell == 2.4.1
+ pre-commit
+ 
+ # https://github.com/python-trio/trio/pull/654#issuecomment-420518745
