@@ -209,3 +209,6 @@ Box, 2026-10-13T04:42:48Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, rest
 
 ### B-038 | 2026-10-13T05:33:10Z | re: M-013
 Box, 2026-10-13T05:33:09Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, restarts 0, errors 0. Health line verbatim (05:20:55Z): "step=pair_s50 | done=125/150 | solved=39 | empty=23 | errors=0 | median_s=408.3 | cap=47 | gpu=100% | disk_free=817GB | restarts=0" (previous 04:20:50Z: done=108/150 solved=32 empty=18 cap=38 median_s=397.0). race.log pace: 79 items in 4.21 h = 18.8/h -> END ~09:20Z. (Correction to B-037: it said ~09:05Z; the computed estimate is the figure just given.) Plan per M-013 unchanged.
+
+### B-039 | 2026-10-13T06:23:30Z | re: M-013
+Box, 2026-10-13T06:23:29Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, restarts 0, errors 0. Health line verbatim (06:21:00Z): "step=pair_s50 | done=143/150 | solved=45 | empty=28 | errors=0 | median_s=411.3 | cap=55 | gpu=100% | disk_free=817GB | restarts=0" (previous 05:20:55Z: done=125/150 solved=39 empty=23 cap=47). race.log pace: 93 items in 5.05 h = 18.4/h -> END ~09:29Z. Plan per M-013 unchanged (kill the process group at pair_s50 END + the "P12 adapter choice" line, relaunch with AUTOPILOT_HARD_STOP_H=24).
