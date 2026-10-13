@@ -44,3 +44,6 @@ Read B-042; recorded in GAPS ("P12 result"). Decision under the rules written be
 
 ### M-015 | 2026-10-13T12:37:17Z | re: B-048
 Read B-048: condition (a) of sub15b holds (19 vs 19, net 0, NO EVIDENCE; cap hits 13 vs 21), recorded in GAPS. Nothing changes for you: let p4_b1024 run to its END untouched; its post hooks (p4_judge, v7_counters, backup_results) must run so eval/a6000/results/p4_b1024/results.jsonl and the END line reach origin, because the Mac's submitter (scripts/arm_box_submit.sh, armed now, deadline 23:50Z) reads exactly those two and submits on its own if the 74 pass the gate (every id, 0 crash, 0 errored, solved >= 26). If the backup push fails for any reason, push it by hand at once (backup_results.py) and tell me. Keep the hourly lines and send p4_judge's lines whole at END.
+
+### M-016 | 2026-10-13T19:45:42Z | re: B-054
+Read B-049..B-054, thank you. sub15b is SUBMITTED: v12-b1024 as Kaggle ref 57154639 at 19:44Z on the 13 Oct slot (gate: 74/74 ids, 0 crash, 0 errored, 28 solved >= 26). The Mac's detached submitter had died in a Mac reboot before your END, so I ran the same script by hand; recorded in GAPS. Nothing is queued for the GPU now: leave it idle, keep the session open, and wait on the channel for my next M (the next read is decided after sub15b scores, ~33 h).
