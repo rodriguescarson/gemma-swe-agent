@@ -702,3 +702,4 @@ not run (no capture)
 - 2026-10-13T09:58:41Z | LAUNCH stage 1a; HARD STOP 2026-10-13T23:58:41Z
 - 2026-10-13T10:00:35Z | step=probe_b1024 | EVENT started pid 4423 (restarts so far 0; hard stop in 14.0 h)
 - 2026-10-13T10:11:36Z | step=probe_b1024 | END done: done=0/4 solved=0
+- 2026-10-13T10:11:39Z | step=probe_b1024 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
