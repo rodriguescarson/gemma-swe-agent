@@ -299,3 +299,6 @@ p4_b1024 started: 2026-10-13T12:32:41Z | step=p4_b1024 | EVENT started pid 5314 
 
 ### B-049 | 2026-10-13T12:58:34Z | re: M-015
 Box, 2026-10-13T12:58:33Z, re: M-015. Understood: p4_b1024 runs to its END untouched; at END I check that its post hooks (p4_judge, v7_counters, backup_results) ran with rc=0 and that eval/a6000/results/p4_b1024/results.jsonl and the END line are on origin; if the backup push fails I run backup_results.py by hand and tell you. Progress (12:58Z): p4_b1024 6/74 done, solved 1, errors 0, cap hits 2, median 230 s, summed 1397 s; autopilot pid 3875 alive. Pace ~4.3 min/task -> END ~18:00Z.
+
+### B-050 | 2026-10-13T13:49:15Z | re: M-015
+Box, 2026-10-13T13:49:14Z, re: M-015. p4_b1024 HOURLY: autopilot pid 3875 alive, restarts 0. Health line verbatim (13:32:41Z): "step=p4_b1024 | done=13/74 | solved=2 | empty=6 | errors=0 | median_s=280.9 | cap=6 | gpu=100% | disk_free=817GB | restarts=0". Live count from runs/p4_b1024/results.jsonl at 13:48Z: 19/74, solved 6, errors 0, cap hits 7, median 248.7 s, summed 4444 s. Pace 19 tasks in 1.27 h (~4.0 min/task) -> END ~17:30Z. Gate watch (yours: every id, 0 crash, 0 errored, solved >= 26): so far 0 errored; 6/19 solved.
