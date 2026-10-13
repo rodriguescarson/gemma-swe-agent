@@ -15,13 +15,17 @@ sys.path.insert(0, str(HERE))
 import p2_report as rep  # noqa: E402
 
 CHOICE = Path.home() / "g4" / "runs" / "autopilot_choice.json"
+# Arms that may be screened and reported but never become p4_arm (the day's submission): think2 was trained on Adaption Invent
+# rows whose generator is not yet confirmed open-weight (GAPS "Invent (Adaption) rows as an auxiliary arm", rule 5; "P12
+# pre-registration" (3)). Its contrast vs the reference is still computed and logged. Fixed 2026-10-13 00:45Z, before the screen.
+NOT_SUBMITTABLE = frozenset({"v12_think2"})
 
 
-def choose(out, ids, arms, ref, contrast=None):
-    """-> (p4_arm, {arm: contrast}): the best net among the arms not WORSE vs ref (ties: listed order); ref when all are WORSE."""
+def choose(out, ids, arms, ref, contrast=None, not_submittable=NOT_SUBMITTABLE):
+    """-> (p4_arm, {arm: contrast}): the best net among the submittable arms not WORSE vs ref (ties: listed order); ref when none."""
     contrast = contrast or (lambda arm: rep.contrast(str(out), arm, ref, ids=ids))
     cs = {arm: contrast(arm) for arm in arms}
-    ok = [arm for arm in arms if cs[arm]["verdict"] != "WORSE"]
+    ok = [arm for arm in arms if cs[arm]["verdict"] != "WORSE" and arm not in not_submittable]
     if not ok:
         return ref, cs
     best = max(ok, key=lambda arm: (cs[arm]["wins"] - cs[arm]["losses"], -arms.index(arm)))
@@ -48,7 +52,8 @@ def main(argv=None):
     write_choice(a.choice, arm)
     parts = [f"{x} vs {a.ref}: {c['n']} pairs wins {c['wins']} losses {c['losses']} net {c['wins'] - c['losses']:+d} sign p {c['p']:.3f} cap gap {c['cap_gap']:+.2f} -> {c['verdict']}"
              for x, c in cs.items()]
-    line = f"P12 adapter choice: p4_arm={arm} ({'; '.join(parts)}; rule: best net among the arms not WORSE, ties in listed order, {a.ref} when all are WORSE)"
+    line = (f"P12 adapter choice: p4_arm={arm} ({'; '.join(parts)}; rule: best net among the submittable arms not WORSE, ties in listed order, "
+            f"{a.ref} when none; not submittable (generator unconfirmed): {sorted(NOT_SUBMITTABLE)})")
     print(line)
     if a.json:
         Path(a.json).write_text(json.dumps({"p4_arm": arm, "ref": a.ref, "contrasts": cs}, indent=1, default=str))

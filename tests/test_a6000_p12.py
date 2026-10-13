@@ -94,6 +94,11 @@ def test_choose_picks_the_best_net_that_is_not_worse_and_falls_back_to_the_refer
           "v12_think2": {"n": 50, "wins": 2, "losses": 11, "p": 0.02, "cap_gap": 0.3, "verdict": "WORSE"}}
     arm, got = C.choose("/x", ["a"], arms, "v12", contrast=lambda a: cs[a])
     assert arm == "v12_think1f" and got == cs
+    # think2's generator is unconfirmed: it is contrasted and logged but never p4_arm, even with the best net
+    top2 = dict(cs); top2["v12_think2"] = {"n": 50, "wins": 15, "losses": 1, "p": 0.001, "cap_gap": 0.0, "verdict": "BETTER"}
+    arm2, got2 = C.choose("/x", ["a"], arms, "v12", contrast=lambda a: top2[a])
+    assert arm2 == "v12_think1f" and got2["v12_think2"]["verdict"] == "BETTER" and "v12_think2" in C.NOT_SUBMITTABLE
+    assert C.choose("/x", ["a"], arms, "v12", contrast=lambda a: top2[a], not_submittable=frozenset())[0] == "v12_think2"
     tie = dict(cs); tie["v12_think1f"] = dict(cs["v12_think1f"], wins=6, losses=4)
     assert C.choose("/x", ["a"], arms, "v12", contrast=lambda a: tie[a])[0] == "v12_think1"          # ties: listed order
     worse = {a: dict(c, verdict="WORSE") for a, c in cs.items()}
