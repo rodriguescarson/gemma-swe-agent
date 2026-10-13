@@ -1,0 +1,102 @@
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 91b607f..6350a4c 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -80,3 +80,12 @@ repos:
+           "-o",
+           "docs-requirements.txt"]
+         files: ^docs-requirements\.(in|txt)$
++
++  - repo: local
++    hooks:
++      - id: sync-pre-commit
++        name: sync pre-commit versions
++        language: python
++        entry: python src/trio/_tools/sync_pre_commit.py
++        pass_filenames: false
++        files: ^test-requirements\.txt$
+diff --git a/src/trio/_tools/sync_pre_commit.py b/src/trio/_tools/sync_pre_commit.py
+new file mode 100644
+index 0000000..53c2147
+--- /dev/null
++++ b/src/trio/_tools/sync_pre_commit.py
+@@ -0,0 +1,79 @@
++import yaml
++import re
++import sys
++
++def main():
++    try:
++        with open('.pre-commit-config.yaml', 'r') as f:
++            config = yaml.safe_load(f)
++    except FileNotFoundError:
++        print("Error: .pre-commit-config.yaml not found")
++        sys.exit(1)
++
++    # Map repo url to package name
++    repo_to_pkg = {
++        'https://github.com/psf/black-pre-commit-mirror': 'black',
++        'https://github.com/astral-sh/ruff-pre-commit': 'ruff',
++        'https://github.com/codespell-project/codespell': 'codespell',
++        'https://github.com/adhtruong/mirrors-typos': 'typos',
++        'https://github.com/sphinx-contrib/sphinx-lint': 'sphinx-lint',
++        'https://github.com/woodruffw/zizmor-pre-commit': 'zizmor',
++    }
++
++    versions = {}
++    for repo in config.get('repos', []):
++        url = repo.get('repo')
++        if url in repo_to_pkg:
++            rev = repo.get('rev')
++            if rev:
++                # Strip leading 'v'
++                version = rev[1:] if rev.startswith('v') else rev
++                versions[repo_to_pkg[url]] = version
++
++    if not versions:
++        print("No matching tool versions found in .pre-commit-config.yaml")
++        return
++
++    try:
++        with open('test-requirements.txt', 'r') as f:
++            lines = f.readlines()
++    except FileNotFoundError:
++        print("Error: test-requirements.txt not found")
++        sys.exit(1)
++
++    updated = False
++    new_lines = []
++    for line in lines:
++        matched = False
++        for pkg, ver in versions.items():
++            # Match package==version at the start of the line.
++            # We allow markers after the version.
++            pattern = r'^' + re.escape(pkg) + r'==[^\s;]+'
++            if re.match(pattern, line):
++                # Replace the version part.
++                eq_idx = line.find('==')
++                # Find the end of the version part.
++                end_of_ver = len(line)
++                for i in range(eq_idx + 2, len(line)):
++                    if line[i] in (' ', ';', '\n', '\r'):
++                        end_of_ver = i
++                        break
++                
++                new_line = line[:eq_idx+2] + ver + line[end_of_ver:]
++                new_lines.append(new_line)
++                matched = True
++                updated = True
++                break
++        
++        if not matched:
++            new_lines.append(line)
++
++    if updated:
++        with open('test-requirements.txt', 'w') as f:
++            f.writelines(new_lines)
++        print("Updated test-requirements.txt with versions from .pre-commit-config.yaml")
++    else:
++        print("No changes needed for test-requirements.txt")
++
++if __name__ == '__main__':
++    main()
