@@ -212,3 +212,6 @@ Box, 2026-10-13T05:33:09Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, rest
 
 ### B-039 | 2026-10-13T06:23:30Z | re: M-013
 Box, 2026-10-13T06:23:29Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, restarts 0, errors 0. Health line verbatim (06:21:00Z): "step=pair_s50 | done=143/150 | solved=45 | empty=28 | errors=0 | median_s=411.3 | cap=55 | gpu=100% | disk_free=817GB | restarts=0" (previous 05:20:55Z: done=125/150 solved=39 empty=23 cap=47). race.log pace: 93 items in 5.05 h = 18.4/h -> END ~09:29Z. Plan per M-013 unchanged (kill the process group at pair_s50 END + the "P12 adapter choice" line, relaunch with AUTOPILOT_HARD_STOP_H=24).
+
+### B-040 | 2026-10-13T07:39:04Z | re: M-013
+Box, 2026-10-13T07:39:03Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, restarts 0, errors 0. Health line verbatim (07:21:06Z): "step=pair_s50 | done=164/150 | solved=55 | empty=32 | errors=0 | median_s=412.7 | cap=62 | gpu=100% | disk_free=817GB | restarts=0" (previous 06:21:00Z: done=143/150 solved=45 empty=28 cap=55). race.log pace: 118 items in 6.31 h = 18.7/h -> END ~09:21Z. Note: the autopilot counter done=164/150 exceeds 150 because it also counts the reused P10 v12 rows, so I read race.log as the real progress. Plan per M-013 unchanged (kill the process group at pair_s50 END + the "P12 adapter choice" line, relaunch with AUTOPILOT_HARD_STOP_H=24).
