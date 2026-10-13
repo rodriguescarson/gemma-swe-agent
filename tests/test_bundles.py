@@ -93,3 +93,16 @@ def test_make_kernel_takes_adapter_weights_from_a_dataset(tmp_path):
     (b / "adapters" / "MANIFEST.json").write_text(json.dumps({"files": {}}))
     r = subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "t-kernel-bad", "--adapters-dataset", "owner/x"], cwd=tmp_path, capture_output=True, text=True)
     assert r.returncode != 0 and "names no sha256" in r.stderr
+
+def test_make_kernel_cell_is_valid_python_with_and_without_a_dataset(tmp_path):
+    """2026-10-13: the g4agent-v12-b1024 kernel died on `DATASET = null` (json.dumps(None) written into Python); the adapter
+    kernels passed only because their dataset was a string. Both modes must compile."""
+    import json
+    b = tmp_path / "b"; b.mkdir(); (b / "agent.yaml").write_text("name: a\nmodel: gemma-4-31b-it-qat-w4a16-ct\ninstruction: hi\n")
+    subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "k-plain"], cwd=tmp_path, check=True, capture_output=True)
+    src = json.loads((tmp_path / "kernels/k-plain/k-plain.ipynb").read_text())["cells"][0]["source"]
+    compile(src, "k-plain", "exec")
+    assert "DATASET = None" in src
+    ns = {}
+    exec(src.split("\nout = ")[0], ns)                     # the header runs: FILES, DATASET, WEIGHTS defined, no dataset cell
+    assert ns["DATASET"] is None and ns["WEIGHTS"] == {} and "agent.yaml" in ns["FILES"]

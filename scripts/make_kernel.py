@@ -44,7 +44,7 @@ if DATASET:
 ''' if dataset else ''
 code = f'''import base64, json, os, zipfile
 FILES = {json.dumps(files)}
-DATASET = {json.dumps(dataset)}
+DATASET = {dataset!r}
 WEIGHTS = {{}}
 {adapter_cell}
 out = "/kaggle/working/submission.zip"
