@@ -218,3 +218,39 @@ Box, 2026-10-13T07:39:03Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, rest
 
 ### B-041 | 2026-10-13T08:29:23Z | re: M-013
 Box, 2026-10-13T08:29:22Z, re: M-013. P12 HOURLY: autopilot pid 1048 alive, restarts 0, errors 0. Health line verbatim (08:21:11Z): "step=pair_s50 | done=182/150 | solved=65 | empty=33 | errors=0 | median_s=412.7 | cap=67 | gpu=100% | disk_free=817GB | restarts=0" (previous 07:21:06Z: done=164/150 solved=55 empty=32 cap=62). race.log pace: 134 items in 7.15 h = 18.8/h -> END ~09:20Z. Note: the autopilot counter done=164/150 exceeds 150 because it also counts the reused P10 v12 rows, so I read race.log as the real progress. Plan per M-013 unchanged (kill the process group at pair_s50 END + the "P12 adapter choice" line, relaunch with AUTOPILOT_HARD_STOP_H=24).
+
+### B-042 | 2026-10-13T09:24:55Z | re: M-013
+Box, 2026-10-13T09:24:54Z, re: M-013. pair_s50 END and the M-013 procedure DONE.
+PAIR END: "2026-10-13T09:20:16Z | step=pair_s50 | END done: done=200/150 solved=71" (race: ALL_DONE 150 items in 28767 s = 8.0 h; errors 0, restarts 0).
+CHOICE LINE, whole: 2026-10-13T09:20:20Z | P12 adapter choice: p4_arm=v12_think1f (v12_think1 vs v12: 50 pairs wins 3 losses 5 net -2 sign p 0.727 cap gap -0.06 -> NO EVIDENCE; v12_think1f vs v12: 50 pairs wins 4 losses 5 net -1 sign p 1.000 cap gap -0.04 -> NO EVIDENCE; v12_think2 vs v12: 50 pairs wins 3 losses 5 net -2 sign p 0.727 cap gap -0.08 -> NO EVIDENCE; rule: best net among the submittable arms not WORSE, ties in listed order, v12 when none; not submittable (generator unconfirmed): ['v12_think2'])
+GATE.md table (A6000 screen, 50 stage-1a ids, 1 sample, never a Kaggle result):
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v12_think1 | 50 | 17 | 0.224-0.478 | 6 | 0 | 18 | 461 | 2 |
+| v12_think1f | 50 | 18 | 0.241-0.499 | 12 | 0 | 19 | 454 | 4 |
+| v12_think2 | 50 | 17 | 0.224-0.478 | 10 | 0 | 17 | 432 | 1 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v12_think1 vs v12 | 50 | 3 | 5 | 0.727 | -0.06 | NO EVIDENCE | 25 (1/3) |
+| v12_think1f vs v12 | 50 | 4 | 5 | 1.000 | -0.04 | NO EVIDENCE | 25 (1/2) |
+| v12_think2 vs v12 | 50 | 3 | 5 | 0.727 | -0.08 | NO EVIDENCE | 22 (0/2) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
+
+READ (mine, for you to weigh): v12 19/50, v12_think1 17, v12_think1f 18, v12_think2 17; every adapter contrast vs v12 is NO EVIDENCE (wins/losses 3/5, 4/5, 3/5; sign p 0.727 / 1.000 / 0.727; cap gaps -0.06 / -0.04 / -0.08); no adapter beat the control and none is WORSE, so the rule picked v12_think1f (net -1, the best net among the submittable arms) rather than v12 itself ("v12 when none" applies only when all are WORSE): p4_adapter is therefore running an arm that did not beat v12 on these 50 ids. Whether to submit it is your rule (sub15), not mine.
+Counters (v7_counters, 50 ids per arm):
+v12: tasks 50 solved 19 loops_ge5 4 repeat_reads 0 repeat_outlines 0 cap_refusals 0 budget_exhausted 0 view_usage 0 literal_wrapper 0 write_file_refusals 0 forced_install_empty 0 helper_unreachable 0
+v12_think1: tasks 50 solved 17 loops_ge5 2 repeat_reads 0 repeat_outlines 0 cap_refusals 0 budget_exhausted 0 view_usage 0 literal_wrapper 0 write_file_refusals 0 forced_install_empty 0 helper_unreachable 0
+v12_think1f: tasks 50 solved 18 loops_ge5 5 repeat_reads 0 repeat_outlines 0 cap_refusals 0 budget_exhausted 0 view_usage 0 literal_wrapper 0 write_file_refusals 0 forced_install_empty 0 helper_unreachable 0
+v12_think2: tasks 50 solved 17 loops_ge5 1 repeat_reads 0 repeat_outlines 0 cap_refusals 0 budget_exhausted 1 view_usage 0 literal_wrapper 0 write_file_refusals 0 forced_install_empty 0 helper_unreachable 0
+KILL (M-013): at 09:21:06Z, before I could act, the autopilot (pid 1048, own session/process group 1048) had started p4_adapter (child pid 31922 + proxy 31921) at 09:21:05Z. I killed process group 1048 (TERM, then individual KILL for the leftover children 31921/31922) and vLLM's group 1548 (pids 1585/1693); ps showed nothing of autopilot/vLLM/EngineCore/pace_proxy/p2_race/p4_run left; nvidia-smi 405 MiB. The partial p4_adapter output (3 s old) is covered by the purge_since hook.
+RELAUNCH: AUTOPILOT_HARD_STOP_H=24 launch line, session held: new autopilot pid 32028 (pgid 32028), state file marked probe_pair + pair_s50 done, so it went straight to p4_adapter: "2026-10-13T09:24:01Z | step=p4_adapter | EVENT started pid 32476 (restarts so far 0; hard stop in 15.3 h)" with pace_proxy pid 32475 on port 8002 and vLLM (pids 32124/32232). NOTE the hard stop: the state file keeps the ORIGINAL launch epoch (00:42:32Z), so the 24 h hard stop is 2026-10-14T00:42:32Z, not relaunch+24 h; that is 15.3 h from now, enough for p4_adapter (74 sequential tasks, 3-8 h) and still after your 2026-10-14 00:00Z submission window end, so p4_adapter END by ~19:30Z is the figure that matters.
+Next: I verify the "lora" key on the p4_adapter proxy rows (expected "v12_think1f"), then hourly lines (done/74, solved, errors, median_s) and p4_adapter END with p4_judge's lines.
