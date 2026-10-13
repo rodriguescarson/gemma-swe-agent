@@ -81,7 +81,7 @@ def test_make_kernel_takes_adapter_weights_from_a_dataset(tmp_path):
     r = subprocess.run([sys.executable, str(ROOT / "scripts/make_kernel.py"), str(b), "t-kernel-ds", "--adapters-dataset", "owner/g4-adapters-t"], cwd=tmp_path, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[-400:]
     nb = json.loads((tmp_path / "kernels/t-kernel-ds/t-kernel-ds.ipynb").read_text())["cells"][0]["source"]
-    assert base64.b64encode(w).decode() not in nb and 'DATASET = "owner/g4-adapters-t"' in nb
+    assert base64.b64encode(w).decode() not in nb and "DATASET = 'owner/g4-adapters-t'" in nb
     assert "adapters/MANIFEST.json" in nb and "sha mismatch" in nb and "t__adapter_model.safetensors" not in nb      # the name is built from the manifest at run time
     meta = json.loads((tmp_path / "kernels/t-kernel-ds/kernel-metadata.json").read_text())
     assert meta["dataset_sources"] == ["owner/g4-adapters-t"] and meta["enable_gpu"] is False
