@@ -705,3 +705,4 @@ not run (no capture)
 - 2026-10-13T10:11:39Z | step=probe_b1024 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-13T10:12:14Z | step=pair_b1024 | EVENT started pid 7454 (restarts so far 0; hard stop in 13.8 h)
 - 2026-10-13T11:12:17Z | step=pair_b1024 | done=70/50 | solved=23 | empty=13 | errors=0 | median_s=383.7 | cap=26 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-13T12:12:22Z | step=pair_b1024 | done=93/50 | solved=34 | empty=16 | errors=0 | median_s=379.9 | cap=33 | gpu=100% | disk_free=817GB | restarts=0
