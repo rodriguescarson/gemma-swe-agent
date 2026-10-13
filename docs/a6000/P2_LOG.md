@@ -714,3 +714,4 @@ not run (no capture)
 - 2026-10-13T12:32:07Z | step=pair_b1024 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
 - 2026-10-13T12:32:41Z | step=p4_b1024 | EVENT started pid 5314 (restarts so far 0; hard stop in 11.4 h)
 - 2026-10-13T13:32:41Z | step=p4_b1024 | done=13/74 | solved=2 | empty=6 | errors=0 | median_s=280.9 | cap=6 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-13T14:32:44Z | step=p4_b1024 | done=29/74 | solved=11 | empty=7 | errors=0 | median_s=301.7 | cap=11 | gpu=100% | disk_free=817GB | restarts=0
