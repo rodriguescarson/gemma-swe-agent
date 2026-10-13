@@ -106,3 +106,20 @@ def test_choose_picks_the_best_net_that_is_not_worse_and_falls_back_to_the_refer
     f = tmp_path / "choice.json"; f.write_text(json.dumps({"p3_arm": "v12"}))
     C.write_choice(f, "v12_think1f")
     assert json.loads(f.read_text()) == {"p3_arm": "v12", "p4_arm": "v12_think1f"}
+
+
+def test_a_tagged_plan_for_an_arm_without_adapters_gets_its_own_names_and_no_serve_bundle(tmp_path):
+    """sub15b (2026-10-13): v12-b1024 runs in the same runs dir after the adapter screen; its p4 dir must not be p4_adapter
+    (resumable results.jsonl would mix arms) and vLLM serves the base only."""
+    P = _mod("p12_plan")
+    steps = P.p12_steps("/home/u/g4/runs", "/py", ["v12-b1024"], tag="b1024")
+    assert [s["name"] for s in steps] == ["probe_b1024", "pair_b1024", "p4_b1024"]
+    probe, pair, p4 = steps
+    assert pair["proxy"]["log"] == "/home/u/g4/runs/p2/proxy_pair_b1024.jsonl" and pair["cmd"][2] == "/home/u/g4/runs/p2"
+    assert p4["cmd"][p4["cmd"].index("--out") + 1] == "/home/u/g4/runs/p4_b1024" and p4["proxy"]["log"] == "/home/u/g4/runs/p4_b1024_proxy.jsonl"
+    ch = [h for h in pair["post"] if h[1].endswith("p12_choose.py")][0]
+    assert ch[ch.index("--json") + 1] == "/home/u/g4/runs/p12_choice_b1024.json" and ch[ch.index("--arms") + 1:ch.index("--ref")] == ["v12-b1024"]
+    plan = P.write_plan(tmp_path / "plan.json", "/home/u/g4/runs", "/py", ["v12-b1024"], None, tag="b1024")
+    assert plan["serve_bundle"] == "" and json.loads((tmp_path / "plan.json").read_text())["serve_bundle"] == ""
+    r = subprocess.run([sys.executable, str(ROOT / "scripts/a6000/p12_plan.py"), "--arms", "v12-b1024", "--tag", "b1024", "--dry-run"], capture_output=True, text=True)
+    assert r.returncode == 0 and json.loads(r.stdout) == {"steps": ["probe_b1024", "pair_b1024", "p4_b1024"], "serve_bundle": "", "adapters": []}, r.stderr[-400:]
