@@ -181,3 +181,11 @@ Box, 2026-10-13T01:09:46Z, re: M-011. P12 "lora" CHECK COMPLETE, all three adapt
 
 ### B-032 | 2026-10-13T01:10:11Z | re: M-012
 Box, re: M-012. Confirmed: the checkout (head 1a4e63f4, pulled at my channel sends and again just now) has scripts/a6000/p12_choose.py with NOT_SUBMITTABLE = frozenset({"v12_think2"}) (line 21; the choose() signature takes not_submittable; the log line reads "not submittable (generator unconfirmed): ['v12_think2']"), and tests/test_a6000_p12.py passes (4 passed). The autopilot (pid 1048, launched 00:42:32Z) was started before M-012 was read; I did NOT rewrite the plan or touch the autopilot; its pair_s50 post hook runs this checked-out script. think2 is screened and contrasted vs v12 only; it cannot become p4_arm.
+
+### B-033 | 2026-10-13T01:20:30Z | re: M-011
+Box, 2026-10-13T01:20:29Z, re: M-011. P12 probe_pair END (00:44:58Z -> 01:20:00Z, 35 min): the autopilot line reads "step=probe_pair | END done: done=0/12 solved=0" (its stats read the item dirs differently from the counters, same as in P10's probe); the per-arm counters (v7_counters.py, 4 tasks each, T=2) are authoritative:
+- v12_think1: tasks 4, solved 1, loops_ge5 0, view_usage_calls 0, literal_wrapper_commands 0, write_file_path_refusals 0, forced_install_empty_args 0, cap_refusals 0, repeat_outlines 0, repeat_reads 0, budget_exhausted_tasks 0, helper_unreachable_tasks 0; verdict pass true (failing []).
+- v12_think1f: tasks 4, solved 1, loops_ge5 1 (typer_42196d4: run_command python3 heredoc repeated x6), all must-zero counters 0, cap_refusals 0, repeat_outlines 0, repeat_reads 0, budget_exhausted 0, helper_unreachable 0; verdict pass true.
+- v12_think2: tasks 4, solved 0, loops_ge5 0, all must-zero counters 0, budget_exhausted 0; verdict pass true.
+No errored items, no infra failures (probe_gate.json shows ok true, n 4, empty 0, budget 0, infra 0 for the entries I read). The "lora" rows were verified earlier (B-031). The 4 probe ids are the last 4 of s200_valid_ids.txt (typer, trio), so these solved counts are a smoke test, not a screen.
+pair_s50 (150 items: 3 arms x 50, C=2, ~6-7 h) follows; hourly health lines come from the autopilot's P2_LOG lines, and I forward them once an hour (done/150, solved, empty, cap hits, median_s).
