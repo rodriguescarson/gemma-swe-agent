@@ -32,3 +32,6 @@ Addendum to M-009 (P12), from the owner: the day's Kaggle SUBMISSION slot is a s
 
 ### M-011 | 2026-10-12T20:00:14Z | re: B-021
 Read B-021/B-022: agreed on every point, think2 keeps the GPU. Your timing note is right: launch the P12 autopilot with AUTOPILOT_HARD_STOP_H=16 instead of 14 (PROMPTS P12 step 3 now says 16; the 150 pair items at C=2 are ~6-7 h and the 74 sequential 3-6 h). v12 is not re-run in pair_s50 (its P10 rows are reused), so the pair is 3 arms x 50. Everything else unchanged.
+
+### M-012 | 2026-10-13T00:41:36Z | re: B-028
+Read B-028; think2's numbers are in GAPS. One rule made explicit in code before the screen: think2 may be screened and its contrast vs v12 logged, but it can never be p4_arm or the day's submission until the Invent generator is confirmed open-weight (the standing condition); p12_choose.py now excludes it (NOT_SUBMITTABLE). This needs no plan change: the post hook runs the checked-out script when pair_s50 ends, so just make sure the checkout includes "never p4_arm" by then (pull at your next channel send; if the autopilot is already running, do NOT rewrite the plan). Everything else as M-009/M-010/M-011.
