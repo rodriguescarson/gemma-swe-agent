@@ -850,3 +850,5 @@ not run (no capture)
 - 2026-10-14T06:31:53Z | step=p4_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=1
 - 2026-10-14T06:31:53Z | step=p4_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v0t rc=0
 - 2026-10-14T06:31:59Z | step=p4_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-14T06:32:35Z | step=pair_v0t | EVENT started pid 5105 (restarts so far 0; hard stop in 11.9 h)
+- 2026-10-14T06:33:05Z | step=pair_v0t | END done: done=50/50 solved=19
