@@ -13,7 +13,6 @@ import json, re, subprocess, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-wt_root, py = Path(sys.argv[1]), sys.argv[2]
 CASES = [("rich_3777", "p4_b1024", "tests/test_console.py"),
          ("rich_3278", "p4_v0t2", "tests/test_ansi.py"),
          ("rich_3180", "p4_v7d", "tests/test_cells.py tests/test_text.py")]
@@ -36,27 +35,33 @@ def src_only(patch):
     return s if s.endswith("\n") else s + "\n"
 
 
-def run_tests(wt, files):
+def run_tests(wt, files, py):
     r = sh(f"PYTHONPATH=. {py} -m pytest -q -p no:cacheprovider -o python_classes='Test* *Test' {files}", wt)
     out = r.stdout.strip().splitlines()
     first = next((l for l in out if l.startswith("E ")), "")
     return out[-1] if out else r.stderr[-200:], first
 
 
-for tid, run, files in CASES:
-    wt = wt_root / tid
-    row = [json.loads(l) for l in (ROOT / "eval/a6000/results" / run / "results.jsonl").read_text().splitlines()
-           if l.strip() and json.loads(l)["id"] == tid][-1]
-    sh("git checkout -q -- . && git clean -fdq", wt)
-    (wt / "_p.diff").write_text(src_only(row["patch"]))
-    r = sh("git apply _p.diff && rm _p.diff", wt)
-    assert r.returncode == 0, r.stderr
-    base_summary, first = run_tests(wt, files)
-    tp = tasks[tid]["test_patch"]
-    (wt / "_tp.diff").write_text(tp if tp.endswith("\n") else tp + "\n")
-    assert sh("git apply _tp.diff && rm _tp.diff", wt).returncode == 0
-    scored, _ = run_tests(wt, files)
-    print(f"{tid} {run}: existing tests with the run's patch -> {base_summary}")
-    print(f"    first error line: {first[:160]}")
-    print(f"    with the hidden test_patch (the score) -> {scored}")
-    sh("git checkout -q -- . && git clean -fdq", wt)
+def main():
+    wt_root, py = Path(sys.argv[1]), sys.argv[2]
+    for tid, run, files in CASES:
+        wt = wt_root / tid
+        row = [json.loads(l) for l in (ROOT / "eval/a6000/results" / run / "results.jsonl").read_text().splitlines()
+               if l.strip() and json.loads(l)["id"] == tid][-1]
+        sh("git checkout -q -- . && git clean -fdq", wt)
+        (wt / "_p.diff").write_text(src_only(row["patch"]))
+        r = sh("git apply _p.diff && rm _p.diff", wt)
+        assert r.returncode == 0, r.stderr
+        base_summary, first = run_tests(wt, files, py)
+        tp = tasks[tid]["test_patch"]
+        (wt / "_tp.diff").write_text(tp if tp.endswith("\n") else tp + "\n")
+        assert sh("git apply _tp.diff && rm _tp.diff", wt).returncode == 0
+        scored, _ = run_tests(wt, files, py)
+        print(f"{tid} {run}: existing tests with the run's patch -> {base_summary}")
+        print(f"    first error line: {first[:160]}")
+        print(f"    with the hidden test_patch (the score) -> {scored}")
+        sh("git checkout -q -- . && git clean -fdq", wt)
+
+
+if __name__ == "__main__":
+    main()
