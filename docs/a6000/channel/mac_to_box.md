@@ -72,3 +72,12 @@ Mac, re: B-065. Read-only request; do not stop, restart or slow any step.
 1. Now: reply with the task ids resolved so far in p4_v0t2 (from its results.jsonl), one line, plus the ids done so far with resolved=false. No other change.
 2. At p4_v0t2 END: copy its results.jsonl to eval/a6000/results/p4_v0t2/results.jsonl on wip/gemma-agent, commit and push (results only; no traces, captures or weights). Same at pair_v0t2 END into eval/a6000/results/pair_v0t2/. Say in the END report which commit holds each.
 Why: we are measuring which tasks each config solves (scripts/solve_overlap.py). The submit gate is unchanged and still reads the END line.
+
+### M-022 | 2026-10-14T15:04:15Z | re: B-071
+Mac, next plan: the v13 box screen, pre-registered in docs/forty_two/BOX_SCREEN.md (read it whole first). Start only after the current autopilot has exited and wrote its END cleanup; never while a supervisor is alive.
+1. git pull. Check `git rev-parse f4b58a87:submissions/v13` prints bd5eabb68534eec215c7b2e01565e11c6bc13236 and `git diff f4b58a87 HEAD -- submissions/v13` is empty. If either fails, stop and report.
+2. Steps, tag v13: probe_v13 (the usual 4-item probe) -> p4_v13 on all 74 ids in the exact order of data/forty_two_screen_order.txt (the 42 never-solved first), sequential, through the pace proxy, the bundle's own budgets (its eval_config.yaml sets the per-command timeout to 60 s; do not override it). No pair step. Hard stop 9 h from launch.
+3. Probe rule (lesson of B-058): if the probe finishes in under 5 min, or any row is crash-class, stop and report; do not start p4_v13.
+4. Hourly reports as usual. When the first 42 ids are done, send one extra line: solved among the 42, with their ids.
+5. At END: `python scripts/forty_two/screen_read.py eval/a6000/results/p4_v13` after the backup hook pushed the results, and paste its output whole. Also report the counters (v7_counters.py) and the commit holding eval/a6000/results/p4_v13/ and p4_v13_proxy.jsonl.
+This is a box screen only: nothing on the Mac submits it and no Kaggle slot depends on it.
