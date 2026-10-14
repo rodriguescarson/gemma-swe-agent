@@ -9,8 +9,9 @@ offline, the write-up). The rule names no task, file, function, option or test.
 Constraints pinned here:
 - every file other than prompts/system.md is byte-identical to submissions/v13 (same modes);
 - prompts/system.md is v13's with exactly one rule appended after the last rule;
-- the rule has no fenced block, backtick, brace and nothing shaped like a tool call (the coordinator's 2026-10-14 warning: on the
-  v13 screen one task's first reply put a tool call in the message text, suspected to follow the fenced heredoc);
+- the rule has no fenced block, backtick, brace and nothing shaped like a tool call (the coordinator's 2026-10-14
+  note: on the v13 screen one task's first reply put a tool call in the message text and never recovered; such leaks also
+  occurred 10 times in the six earlier box runs, all recovered, so this is a precaution, not a known cause);
 - no public-task specifics (the deny list of tests/test_v13_leakage.py) and scripts/validate.py passes."""
 import filecmp, importlib.util, os, subprocess, sys
 from pathlib import Path
