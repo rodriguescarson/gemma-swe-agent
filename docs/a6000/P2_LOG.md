@@ -977,3 +977,4 @@ not run (no capture)
 - 2026-10-14T08:02:10Z | step=p4_v0t2 | done=11/74 | solved=0 | empty=4 | errors=0 | median_s=303.6 | cap=10 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-14T09:02:13Z | step=p4_v0t2 | done=27/74 | solved=8 | empty=7 | errors=0 | median_s=302.2 | cap=16 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-14T10:02:16Z | step=p4_v0t2 | done=40/74 | solved=15 | empty=10 | errors=0 | median_s=302.1 | cap=22 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-14T11:02:19Z | step=p4_v0t2 | done=54/74 | solved=19 | empty=11 | errors=0 | median_s=302.1 | cap=29 | gpu=100% | disk_free=817GB | restarts=0
