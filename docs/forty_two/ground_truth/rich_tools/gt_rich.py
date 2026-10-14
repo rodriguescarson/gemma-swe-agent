@@ -206,6 +206,22 @@ def summary_line(text: str) -> str:
     return lines[-1][:200] if lines else ""
 
 
+# Every test command runs under scripts/forty_two/bounded.py: the whole process group is killed above BOUND_MB of RSS
+# (exit 137) or after the time limit (exit 124). Set by main() from --repo. A kill on a hang task is a measured result.
+BOUNDED: list = []
+BOUND_MB, BOUND_SECS = 1500, 120
+
+
+def bounded(cmd, secs=BOUND_SECS):
+    return (BOUNDED + ["--mb", str(BOUND_MB), "--secs", str(min(secs, BOUND_SECS)), "--"] + cmd) if BOUNDED else cmd
+
+
+def kill_reason(rc):
+    if BOUNDED:
+        return {124: "TIME", 137: "MEMORY"}.get(rc)
+    return "TIME" if rc == "TIMEOUT" else None
+
+
 def pytest_cmd(py: str, targets, junit: Path):
     return [py, "-s", "-m", "pytest", *targets, f"--junitxml={junit}", "-p", "no:anyio", "-o", "timeout=0",
             "-o", "python_classes=Test* *Test", "-q", "-p", "no:cacheprovider"]
@@ -220,11 +236,14 @@ def run_tests(tree: Tree, py: str, targets, label: str, timeout: int, extra_env=
     env.pop("PYTHONPATH", None)
     if extra_env:
         env.update(extra_env)
-    rc, o, e, secs = sh(pytest_cmd(py, targets, junit), cwd=tree.path, env=env, timeout=timeout)
+    rc, o, e, secs = sh(bounded(pytest_cmd(py, targets, junit), timeout), cwd=tree.path, env=env, timeout=timeout + 60)
     res = {"exit": rc, "secs": secs, "summary": summary_line(o + "\n" + e), "tests": junit_outcomes(junit, tree.path)}
-    if rc == "TIMEOUT":
+    if kill_reason(rc):
+        res["killed"] = kill_reason(rc)
+        res["kill_msg"] = e.strip().splitlines()[-1][:200] if e.strip() else ""
+    if kill_reason(rc) or rc == "TIMEOUT":
         # retry node by node so a hang still gives per-test outcomes
-        rc2, o2, _, _ = sh([py, "-s", "-m", "pytest", *targets, "--collect-only", "-q", "-p", "no:cacheprovider"],
+        rc2, o2, _, _ = sh(bounded([py, "-s", "-m", "pytest", *targets, "--collect-only", "-q", "-p", "no:cacheprovider"]),
                            cwd=tree.path, env=env, timeout=120)
         nodes = [l.strip() for l in o2.splitlines() if "::" in l]
         # ids are relative to pytest's rootdir, which is tests/ when tests/pytest.ini exists (rich has one)
@@ -245,9 +264,11 @@ def run_tests(tree: Tree, py: str, targets, label: str, timeout: int, extra_env=
             j = tree.work / "junit" / "node.xml"
             if j.exists():
                 j.unlink()
-            r, oo, ee, s = sh(pytest_cmd(py, [n], j), cwd=tree.path, env=env, timeout=20)
-            if r == "TIMEOUT":
-                tests[n] = {"status": "timeout", "msg": "no result within 20 s (hang)"}
+            r, oo, ee, s = sh(bounded(pytest_cmd(py, [n], j), 60), cwd=tree.path, env=env, timeout=120)
+            if kill_reason(r) or r == "TIMEOUT":
+                last = (ee.strip().splitlines() or [""])[-1][:120]
+                tests[n] = {"status": "killed_" + (kill_reason(r) or "TIME").lower(),
+                            "msg": f"bounded.py killed it after {s} s ({last})"}
             else:
                 got = junit_outcomes(j, tree.path)
                 tests[n] = next(iter(got.values())) if got else {"status": "error", "msg": summary_line(oo + ee)}
@@ -282,9 +303,12 @@ def main():
     ap.add_argument("--work", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--wheels", default=None)
-    ap.add_argument("--timeout", type=int, default=300)
-    ap.add_argument("--skip-full", action="store_true")
+    ap.add_argument("--timeout", type=int, default=120)
+    ap.add_argument("--full", action="store_true", help="also run the whole suite (off by default since 2026-10-14)")
+    ap.add_argument("--no-bound", action="store_true", help="do not wrap test commands in scripts/forty_two/bounded.py")
     a = ap.parse_args()
+    if not a.no_bound:
+        BOUNDED[:] = [sys.executable, str(a.repo / "scripts" / "forty_two" / "bounded.py")]
 
     task = Task(a.repo, a.id)
     rec = {"id": a.id, "repo": task.repo, "base_commit": task.base_commit, "created_at": task.created_at,
@@ -309,6 +333,11 @@ def main():
     env = dict(os.environ, VIRTUAL_ENV=str(venv), UV_OFFLINE="1")
     rc1, _, e1, _ = sh(["uv", "pip", "install", "-q", "--offline", *wl, *PINS], env=env)
     rc2, _, e2, _ = sh(["uv", "pip", "install", "-q", "--offline", "--no-deps", "-e", str(tree.path)], env=env)
+    if rc1 != 0 or rc2 != 0:      # the uv cache can be pruned between tasks: fetch the same pins from PyPI (no model, free)
+        rec["install_online"] = True
+        env.pop("UV_OFFLINE")
+        rc1, _, e1, _ = sh(["uv", "pip", "install", "-q", *wl, *PINS], env=env)
+        rc2, _, e2, _ = sh(["uv", "pip", "install", "-q", "--no-deps", "-e", str(tree.path)], env=env)
     rec["timings_s"]["install"] = round(time.time() - t0, 2)
     rec["install_ok"] = rc1 == 0 and rc2 == 0
     if not rec["install_ok"]:
@@ -367,7 +396,7 @@ def main():
         rec["timings_s"]["f2p_only"] = r["secs"]
         rec["f2p_only"] = {"exit": r["exit"], "summary": r["summary"]}
     # 5. full suite, gold state
-    if not a.skip_full:
+    if a.full:
         envf = dict(os.environ, PYTHONSAFEPATH="1", PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
         rc, o, e, secs = sh(["timeout", "600", py, "-s", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider", "--continue-on-collection-errors",
                              "-p", "no:anyio", "-o", "python_classes=Test* *Test"], cwd=tree.path, env=envf, timeout=700)
