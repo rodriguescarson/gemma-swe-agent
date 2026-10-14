@@ -488,3 +488,17 @@ Box, 2026-10-14T18:39:14Z, re: M-022 (item 4). THE 42 DONE at 18:38:58Z: solved 
 Box, 2026-10-14T19:29:46Z, re: M-023. p4_v13 HOURLY: autopilot pid 93 alive, restarts 0. Health line verbatim: "2026-10-14T19:23:33Z | step=p4_v13 | done=53/74 | solved=14 | empty=19 | errors=1 | median_s=301.7 | cap=32 | gpu=100% | disk_free=817GB | restarts=0". Live at 2026-10-14T19:29:46Z: 55/74, solved 15, errored 1, cap hits 33, median 301.7 s, summed 14735 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3718, rich_3777, rich_4075.
 Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 2 ['fastapi_14487(first call, 4 of 4 replies)', 'fastapi_15589(first at reply 6, 1 of 6 replies)'].
 Backup: "19:29:45 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13: 01d108d4. The 74 by ~20:55Z. Note the second text-leak row above: it did not end the task (the row has calls and no err), so it is not an errored row.
+
+### B-081 | 2026-10-14T20:37:25Z | re: M-022
+Box, 2026-10-14T20:37:24Z, re: M-022 / M-023. p4_v13 END; the box is idle.
+END: "2026-10-14T20:36:09Z | step=p4_v13 | END done: done=74/74 solved=31"; post hooks p4_judge rc=0, v7_counters rc=0, backup_results rc=0 (20:36:11-20:36:15Z); FINALIZE rc=0; "END cleanup (all steps finished): ... memory.used 255 MiB ... vllm pids left: none"; "DONE 2026-10-14T20:36:50Z (all steps finished)". Nothing alive.
+COMMIT holding eval/a6000/results/p4_v13/ (results.jsonl 74 rows, identical to the box file; 74 traces) and eval/a6000/results/p4_v13_proxy.jsonl: 443a249c "a6000 results backup: 21 new/changed files".
+`python scripts/forty_two/screen_read.py eval/a6000/results/p4_v13`, output whole:
+INVALID solved 31/74 (ref 28) paired +5 -2 net +3 p 0.453 | the 42: 4 | cap 36 | malformed 0 edit/write ok 0 attempts 0 commands>=61s 0 template edits 112 refused 17
+wins: fastapi_9753 rich_3676 rich_3718 rich_3777 rich_4075
+losses: rich_3506 rich_3521
+the 42 solved: fastapi_9753 rich_3718 rich_3777 rich_4075
+box_p4_gate.py on the same file: FAIL solved 31/74 crash 0 errored 1 cap 36 missing 0 secs 18746 (floor 26)
+Counters (v7_counters.py, p4_v13_counters.json): tasks 74, solved 31, loops_ge5 0, budget_exhausted_tasks 0, repeat_reads 0, repeat_outlines 0, cap_refusals 0, helper_unreachable_tasks 0, view_usage_calls 0, literal_wrapper_commands 0, write_file_path_refusals 0, forced_install_empty_args 0; verdict pass true.
+Leak scan (final, all 74 traces): zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 4 ['fastapi_14487(first call, 4 of 4 replies)', 'fastapi_15589(first at reply 6, 1 of 6 replies)', 'rich_3518(first call, 1 of 3 replies)', 'rich_3521(first call, 1 of 2 replies)']. Only fastapi_14487 failed (0 executed calls, err "without calling submit_patch"); the other three recovered after the leaked reply.
+Read (mine): INVALID by rule 1 because of fastapi_14487's errored row, as agreed in M-023. The rest would meet every PASS condition: 31 >= 28, paired net +3 (wins fastapi_9753 rich_3676 rich_3718 rich_3777 rich_4075; losses rich_3506 rich_3521) >= +2, 4 of the 42 >= 2; malformed 0, edit/write ok 0 and attempts 0, commands >= 61 s 0 (both levers applied as designed). Cap hits 36 (p4_b1024: 33). The template refused 17 of 112 edits. Note that one of the two losses (rich_3521) is also a text-leak row. The box idles; waiting on the channel for the next plan.
