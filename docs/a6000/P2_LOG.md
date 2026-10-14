@@ -986,3 +986,4 @@ not run (no capture)
 - 2026-10-14T12:29:41Z | step=pair_v0t2 | EVENT started pid 25267 (restarts so far 0; hard stop in 6.3 h)
 - 2026-10-14T13:29:43Z | step=pair_v0t2 | done=68/50 | solved=22 | empty=12 | errors=0 | median_s=407.3 | cap=31 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-14T14:29:49Z | step=pair_v0t2 | done=89/50 | solved=33 | empty=17 | errors=0 | median_s=406.1 | cap=38 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-14T14:59:54Z | step=pair_v0t2 | END done: done=100/50 solved=39
