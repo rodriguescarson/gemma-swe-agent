@@ -104,7 +104,7 @@ def model_calls(trace: dict) -> tuple[float, list[dict]]:
                 end = float(oex.get("timestamp") or (c.get("extra") or {}).get("timestamp") or ts)
                 tools.append({"name": c.get("function_name"), "args": c.get("arguments") or {},
                               "start": float((c.get("extra") or {}).get("timestamp") or ts), "end": end,
-                              "obs": str(ob.get("content") or "")})
+                              "obs": str(ob.get("content") or ""), "has_obs": bool(ob)})
         u = _usage(ss)
         args_chars = sum(len(json.dumps(t["args"])) for t in tools)
         calls.append({"ts": ts, "rel": ts - t0, "usage": u, "think_chars": len(think), "text_chars": len(text) + args_chars,
@@ -175,6 +175,7 @@ def analyse_task(row: dict, trace: dict, proxy: list[dict]) -> dict:
     seen, prev_sig, rep_any_n, rep_any_s, rep_cons_n, rep_cons_s = {}, None, 0, 0.0, 0, 0.0
     reads_before, rereads_after_comp_n, rereads_after_comp_s = set(), 0, 0.0
     errors = collections.Counter()
+    open_at_cap = 0
     comp_times = sorted(float(r["t"]) for r in compactions)
     per_call = []
     for c in calls:
@@ -198,13 +199,15 @@ def analyse_task(row: dict, trace: dict, proxy: list[dict]) -> dict:
             call_model_s = max(0.0, interval - comp_in)
         call_tool_s = 0.0
         for t in c["tools"]:
+            if capped and c is calls[-1] and not t.get("has_obs", True) and t["name"] not in ("submit_patch", "get_status"):
+                t["end"] = t_end; open_at_cap += 1    # still running when the cap fired: the trace never got its observation
             ts = max(0.0, min(t["end"], t_end) - t["start"])
             kind = tool_kind(t["name"], t["args"])
             tools_s[kind] += ts; tools_n[kind] += 1; call_tool_s += ts
             e = obs_error(t["obs"])
             if e:
                 errors[e] += 1
-            if e == "TimeoutExceeded" or "TimeoutExceeded" in t["obs"][:300]:
+            if e == "TimeoutExceeded" or "TimeoutExceeded" in t["obs"][:300] or (capped and not t.get("has_obs", True) and ts > 30):
                 timeouts += 1
             sig = json.dumps([t["name"], t["args"]], sort_keys=True)
             cost = call_model_s + ts
@@ -247,7 +250,7 @@ def analyse_task(row: dict, trace: dict, proxy: list[dict]) -> dict:
         "tools_n": dict(sorted(tools_n.items())), "gaps_s": round(gaps, 1), "tail_s": round(tail, 1),
         "repeat_any": rep_any_n, "repeat_any_s": round(rep_any_s, 1), "repeat_consec": rep_cons_n,
         "repeat_consec_s": round(rep_cons_s, 1), "reread_after_compaction": rereads_after_comp_n,
-        "reread_after_compaction_s": round(rereads_after_comp_s, 1), "cmd_timeouts": timeouts, "tool_errors": dict(errors),
+        "reread_after_compaction_s": round(rereads_after_comp_s, 1), "cmd_timeouts": timeouts, "open_at_cap": open_at_cap, "tool_errors": dict(errors),
         "calls": per_call,
     }
 
