@@ -4,7 +4,7 @@
 #   docs/forty_two/evidence/fastapi_census.txt        where the levers fire in recorded traces, text-call leaks, greps
 # Reads committed traces and the read-only task snapshots in ~/.cache/g4/ws; every python run goes through bounded.py.
 set -u
-PY=/Users/carson/Projects/gemma-swe-agent/.venv/bin/python
+PY="${PY:-$HOME/Projects/gemma-swe-agent/.venv/bin/python}"     # the project venv (Python 3.12, swegemma installed)
 B="$PY $PWD/scripts/forty_two/bounded.py --mb 1500 --secs 120 --"
 R=eval/a6000/results
 IDS="fastapi_14616 fastapi_9753 fastapi_14419 fastapi_14448 fastapi_14986 fastapi_13920"
