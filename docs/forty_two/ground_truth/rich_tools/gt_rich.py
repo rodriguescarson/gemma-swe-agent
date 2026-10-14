@@ -227,6 +227,18 @@ def run_tests(tree: Tree, py: str, targets, label: str, timeout: int, extra_env=
         rc2, o2, _, _ = sh([py, "-s", "-m", "pytest", *targets, "--collect-only", "-q", "-p", "no:cacheprovider"],
                            cwd=tree.path, env=env, timeout=120)
         nodes = [l.strip() for l in o2.splitlines() if "::" in l]
+        # ids are relative to pytest's rootdir, which is tests/ when tests/pytest.ini exists (rich has one)
+        fixed = []
+        for n in nodes:
+            path = n.split("::", 1)[0]
+            if not (tree.path / path).exists():
+                for t in targets:
+                    cand = str(Path(t).parent / path)
+                    if (tree.path / cand).exists():
+                        n = cand + "::" + n.split("::", 1)[1]
+                        break
+            fixed.append(n)
+        nodes = fixed
         tests = {}
         t0 = time.time()
         for n in nodes:
