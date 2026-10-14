@@ -357,11 +357,11 @@ def main():
     # 5. full suite, gold state
     if not a.skip_full:
         envf = dict(os.environ, PYTHONSAFEPATH="1", PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
-        rc, o, e, secs = sh(["timeout", "600", py, "-s", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider",
+        rc, o, e, secs = sh(["timeout", "600", py, "-s", "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider", "--continue-on-collection-errors",
                              "-p", "no:anyio", "-o", "python_classes=Test* *Test"], cwd=tree.path, env=envf, timeout=700)
         rec["timings_s"]["full_suite"] = secs
         rec["full_suite"] = {"exit": rc, "summary": summary_line(o + "\n" + e)}
-        rec["commands"]["full_suite"] = ("cd $WORK/wt/" + a.id + " && timeout 600 python -s -m pytest tests -q "
+        rec["commands"]["full_suite"] = ("cd $WORK/wt/" + a.id + " && timeout 600 python -s -m pytest tests -q --continue-on-collection-errors "
                                          "-p no:cacheprovider -p no:anyio -o python_classes='Test* *Test'")
     # 6. Pygments variants, gold state
     for label, vdir in (("pyg221", "kpar221"), ("ipylex", "kparipy")):
