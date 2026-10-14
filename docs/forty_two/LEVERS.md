@@ -130,7 +130,8 @@ read shows a verification timeout (exit 124 on a non-hanging patch): 90 s.
 - **Issue text pinned in the instruction (`{problem_description}`).** Compaction (26 of the 42 tasks) summarises the issue away;
   the system instruction survives it. Not built: no measured effect (re-reads after compaction are of files, not the issue), and it
   adds 134 tokens per call (median; 540 at p90), which moves the compaction threshold earlier. Worth a separate read.
-- **Thinking budget 1,024 -> 512.** Up to 41 s per task back on the 42 (31 s on solved) by the L4 model; but the long-thinking
+- **Thinking budget 1,024 -> 512.** About 27 s per task back on the 42 (15 s on solved; thinking tokens above 512 per call,
+  char-share estimate, TIMING.md sect. 12; 41 s is the upper bound if visible output were cut too); but the long-thinking
   calls are where edits are designed, and the 4,096 -> 1,024 step was neutral on 50 ids (19 vs 19). A single-variable read on
   its own, after v13.
 - **Faster search tools, async tool execution, parallel tool calls.** Tools take under 0.02 s per non-hung call; the model

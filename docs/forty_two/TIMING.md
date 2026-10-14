@@ -205,3 +205,32 @@ Considered and not built (why):
 Box caveat for the screen: the A6000 is 38 s per task slower than the L4 model on the 42 (row 6), and the previous task's cut
 call can overlap the next task's first calls. On Kaggle the same bundle has more model time per task; time-bound flips are
 under-counted on the box, not over-counted.
+
+## 12. Cross-check with the cloud sessions' accounting (2026-10-14, after their fastapi batch landed)
+
+The cloud fastapi write-ups (origin/forty-two-cloud-fastapi 3ea61103) measured the 15 fastapi/requests tasks of the 42 over all
+six box runs (90 task-runs). Same population through scripts/forty_two/timing.py (the commands are inline in this section's
+commit message; each runs in seconds):
+
+| quantity (fastapi 15 x 6 runs) | cloud | here | why they differ |
+|---|---|---|---|
+| total seconds | 17,057 | 17,057 (sum of row `secs`); agent windows 16,705 | same rows; `secs` adds setup, verification and hung-verification tails |
+| model share / tool share | 89 % / 4.4 % | 86.6 % / 4.8 % of the agent windows | denominators (row secs vs agent windows); compaction counted separately here (4.5 %) |
+| single model calls of 30 s or more | 3,230 s | 3,497 s (65 calls) by trace interval; 2,798 s (51 calls) by the proxy's own call duration | the trace interval also holds a compaction summary or box lateness when one precedes the call |
+| identical calls | 2,407 s, 1,188 repeats (identical reply too) | 2,479 s, 1,209 repeats (any earlier identical call) | definition |
+| compaction summaries | 751 s | 751 s | none |
+| hung repro on fastapi_14258 | ~180 s x 3 | 181 s (b1024), 180 s (v0t2), 180 s + 84 s (v7d) | none |
+
+No disagreement on substance. Two things the cross-check adds to sections 0-11:
+- **Long single calls are a bucket of their own.** On p4_b1024 the 42 spend 3,421 s of 11,761 agent seconds (29 %) in model
+  calls of 30 s or more (fastapi 1,017 s, rich 2,404 s); over all six runs, 9,201 s on the 42. They are calls whose thinking reaches
+  the budget and are then followed by a long script or edit. A 512 thinking budget would remove an estimated 27 s per task on the 42
+  (thinking tokens above 512 per call, char-share estimate; 15 s on solved tasks), less than the 41 s upper bound of section 8,
+  which also counted visible output. Still not built into v13 (LEVERS.md, "considered"): it is the obvious next single-variable read.
+- **Identical-call loops:** over the six runs, 7,486 s on the 42 (fastapi 2,479, rich 5,007), mostly in the thinking-off
+  pipelines. On p4_b1024 the largest loop class is the malformed edit resend (rich_3718 21x, fastapi_14616 14x), which lever 1
+  removes; the rest (identical greps, re-reads after compaction) has no structural fix in a declarative bundle.
+- **Test files that cannot import (cloud finding 2: 295 of 564 fastapi test files import inline_snapshot or dirty_equals).** On
+  p4_b1024 the agent ran pytest 7 times on the 42 and 5 times on solved tasks (3 import errors, 1 of them a snapshot/dirty_equals
+  import); it checks with its own python repros instead (3.4 per task). Steering it toward self-written repros would change little
+  on this line; not built.
