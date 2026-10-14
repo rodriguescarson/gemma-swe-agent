@@ -137,6 +137,7 @@ def analyse(tid, run, box=True):
     calls = Counter()
     pytest_runs, edits, edit_fail = [], [], 0
     prev_ts = start
+    tail = 0.0
     for ts, s, tcs, ex in steps:
         # model call that produced this step: the latest proxy completion at or before ts (+0.5 s)
         lat = None
@@ -149,7 +150,11 @@ def analyse(tid, run, box=True):
         tool_s = None
         if tcs and proxy:
             nxt = [ps for ps in pstarts if ps >= ts - 0.05]
-            tool_s = round((min(nxt) if nxt else end) - ts, 2)
+            if nxt:
+                tool_s = round(min(nxt) - ts, 2)
+            else:   # nothing after it in the proxy log: the tool plus a model call the cap cut off (proxy logs only
+                tail = round(end - ts, 2)       # completed calls), so it is reported as tail_s, not as tool time
+                tool_s = None
         elif tcs and not box:
             tool_s = None
         rec = {"t": round(ts - start, 1), "author": ex.get("author") or (tcs[0].get("extra") or {}).get("author") if tcs else ex.get("author"),
@@ -204,7 +209,8 @@ def analyse(tid, run, box=True):
         "run": run, "bundle": BUNDLE.get(run, run), "resolved": row.get("resolved"), "exit": row.get("exit"),
         "calls": row.get("calls"), "secs": secs, "err": row.get("err"), "patch_chars": len(patch), "patch_files": pfiles,
         "model_calls": len(proxy) if proxy else None, "model_s": model_s, "tools_s": tools_s,
-        "other_s": round(secs - model_s - tools_s, 1) if proxy else None,
+        "tail_s": tail if proxy else None,
+        "other_s": round(secs - model_s - tools_s - tail, 1) if proxy else None,
         "tool_s_by_kind": {k: round(v, 1) for k, v in sorted(tool_by_kind.items(), key=lambda kv: -kv[1])},
         "n_by_kind": dict(n_by_kind.most_common()),
         "unmatched_model_calls": unmatched if proxy else None,
@@ -238,7 +244,7 @@ def main():
                                             "runs": res}, indent=1) + "\n")
     for r, x in res.items():
         print(f"=== {r} ({x['bundle']}) resolved={x['resolved']} exit={x['exit']} calls={x['calls']} secs={x['secs']} err={x['err']}")
-        print(f"    model {x['model_s']}s in {x['model_calls']} calls | tools {x['tools_s']}s {x['tool_s_by_kind']} | other {x['other_s']}s"
+        print(f"    model {x['model_s']}s in {x['model_calls']} calls | tools {x['tools_s']}s {x['tool_s_by_kind']} | tail {x['tail_s']}s | other {x['other_s']}s"
               f" | max prompt {x['prompt_tokens_max']} | completion sum {x['completion_tokens_sum']} | slowest {x['slowest_model_calls_s']}")
         print(f"    kinds {x['n_by_kind']} | errors {x['errors_by_tool']} | edit fails {x['edit_failures']} | edited {x['files_edited_ok']}"
               f" | patch {x['patch_chars']} chars {x['patch_files']}")

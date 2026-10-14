@@ -52,8 +52,8 @@ Sources:
 | p4 (v5h2) | 164 / 70 (budget) | 154.6 (77) | 2.3 | right function, predicate `"json" in field_info.metadata` | 3 F2P fail |
 | p4_v7 (v7) | 117 / 70 (budget) | 107.1 (79) | 2.2 | **empty patch** | 3 F2P fail |
 | p4_v7c (v7c) | 255 / 70 (budget) | 243.9 (77) | 3.8 | right function, predicate `m.__name__ == "Json"` | 3 F2P fail |
-| p4_v7d (v7d) | 305 / 68 (time cap) | 286.1 (72) | 9.5 | right function, narrowed to `params.Form` | form passes; query and header fail |
-| p4_b1024 (v12-b1024) | 305 / 14 (time cap) | 296.8 (30) | 4.2 | only `reproduce_issue.py`, no source edit | 3 F2P fail |
+| p4_v7d (v7d) | 305 / 68 (time cap) | 286.1 (72) | 6.0 (+3.5 cut off at the cap) | right function, narrowed to `params.Form` | form passes; query and header fail |
+| p4_b1024 (v12-b1024) | 305 / 14 (time cap) | 296.8 (30) | 0.9 (+3.4 cut off at the cap) | only `reproduce_issue.py`, no source edit | 3 F2P fail |
 | p4_v0t2 (v0-think) | 305 / 26 (time cap) | 298.6 (28) | 1.3 | `is_sequence_field` in `_compat/v2.py`, plus 4 debug scripts | 3 F2P fail |
 
 Measured from the trace timelines:
@@ -93,8 +93,9 @@ Measured from the trace timelines:
 | | Seconds |
 |---|---|
 | model calls | 1,387.1 |
-| tool runtime | 23.3 |
-| other (harness) | 39.7 |
+| tool runtime | 16.5 |
+| tail cut off by the cap | 6.9 |
+| other (harness) | 39.6 |
 
 Among the model time:
 - Repeated identical calls: 152.8 s (b1024's `write_file`), 58.4 s (v7) and 25.7 s (p4).
