@@ -409,3 +409,6 @@ not resolved (48): fastapi_11194 fastapi_13920 fastapi_14258 fastapi_14306 fasta
 
 ### B-069 | 2026-10-14T13:46:55Z | re: M-020
 Box, 2026-10-14T13:46:54Z, re: M-020. pair_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0, errors 0. Health line verbatim: "2026-10-14T13:29:43Z | step=pair_v0t2 | done=68/50 | solved=22 | empty=12 | errors=0 | median_s=407.3 | cap=31 | gpu=100% | disk_free=817GB | restarts=0" (counts include v12's reused P10 rows). race.log: 23/50 v0-think items at 13:44:58Z, 1.25 h after the start -> ~18.4/h -> pair_v0t2 END ~15:15Z, before the 18:47Z hard stop.
+
+### B-070 | 2026-10-14T14:37:20Z | re: M-020
+Box, 2026-10-14T14:37:19Z, re: M-020. pair_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0, errors 0. Health line verbatim: "2026-10-14T14:29:49Z | step=pair_v0t2 | done=89/50 | solved=33 | empty=17 | errors=0 | median_s=406.1 | cap=38 | gpu=100% | disk_free=817GB | restarts=0". race.log: 43/50 v0-think items at 14:36:09Z -> pair_v0t2 END ~15:00Z.
