@@ -130,14 +130,58 @@ def command_census(runs):
     return n_traces, durs
 
 
+def crosscheck(R, never):
+    """TIMING.md sect. 12: the fastapi/requests 15 of the 42 over the given runs, and the long-call / 512-budget numbers."""
+    fast = {i for i in never if not i.startswith("rich")}
+    for name, sel in [("fastapi 15", fast), ("rich 27", never - fast)]:
+        agent = model = tool = comp = rep = big_proxy = big_iv = 0.0; nrep = nbig = nbig_iv = 0; secs = 0.0
+        for r, T in R.items():
+            rows = timing.load_rows(BOX / r)
+            for t in T:
+                if t["id"] not in sel:
+                    continue
+                agent += t["agent_s"]; model += t["model_s"]; tool += t["tool_s"]; comp += t["compaction_s"]
+                rep += t["repeat_any_s"]; nrep += t["repeat_any"]; secs += float(rows[t["id"]]["secs"] or 0)
+                big = [c["model_s"] for c in t["calls"] if c["model_s"] >= 30]; big_proxy += sum(big); nbig += len(big)
+                tr = json.loads((BOX / r / "results" / "traces" / f"trace_{t['id']}.json").read_text())
+                t0, calls = timing.model_calls(tr); prev = t0
+                for c in calls:
+                    if c["ts"] - prev >= 30:
+                        big_iv += c["ts"] - prev; nbig_iv += 1
+                    prev = max([c["ts"]] + [x["end"] for x in c["tools"]])
+        print(f"- {name} over {len(R)} runs: row secs {secs:.0f}, agent {agent:.0f}, model {100 * model / agent:.1f} %, tools "
+              f"{100 * tool / agent:.1f} %, compaction {comp:.0f} s, calls >= 30 s {big_proxy:.0f} s ({nbig}) by proxy duration / "
+              f"{big_iv:.0f} s ({nbig_iv}) by trace interval, identical repeats {rep:.0f} s ({nrep})")
+    for r in R:
+        if r != "p4_b1024":
+            continue
+        rows = timing.load_rows(BOX / r)
+        for name, sel in [("the 42", lambda i: i in never), ("solved", lambda i: rows[i]["resolved"])]:
+            above = 0.0; n = 0; big = 0.0; agent = 0.0
+            for t in R[r]:
+                if not sel(t["id"]):
+                    continue
+                n += 1; agent += t["agent_s"]; big += sum(c["model_s"] for c in t["calls"] if c["model_s"] >= 30)
+                tr = json.loads((BOX / r / "results" / "traces" / f"trace_{t['id']}.json").read_text())
+                for c in timing.model_calls(tr)[1]:
+                    if c["usage"] and (c["think_chars"] + c["text_chars"]):
+                        above += max(0.0, c["usage"][1] * c["think_chars"] / (c["think_chars"] + c["text_chars"]) - 512)
+            print(f"- {r} {name}: calls >= 30 s {big:.0f} s of {agent:.0f} agent s; thinking tokens above 512 (est) {above:.0f} = "
+                  f"{above * timing.L4_B:.0f} L4 s, {above * timing.L4_B / n:.1f} s per task")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", nargs="+", default=["p4", "p4_v7", "p4_v7c", "p4_v7d", "p4_b1024", "p4_v0t2"])
     ap.add_argument("--main", default="p4_b1024")
     ap.add_argument("--json")
+    ap.add_argument("--crosscheck", action="store_true", help="only TIMING.md sect. 12")
     a = ap.parse_args()
     never = set(never_ids())
     R = {r: run_tasks(r) for r in a.runs}
+    if a.crosscheck:
+        crosscheck(R, never)
+        return
     rows = {r: timing.load_rows(BOX / r) for r in a.runs}
     tasks_jsonl = {json.loads(l)["instance_id"]: json.loads(l) for l in (ROOT / "data" / "tasks.jsonl").read_text().splitlines() if l.strip()}
 

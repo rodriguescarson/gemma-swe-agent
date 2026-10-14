@@ -209,8 +209,8 @@ under-counted on the box, not over-counted.
 ## 12. Cross-check with the cloud sessions' accounting (2026-10-14, after their fastapi batch landed)
 
 The cloud fastapi write-ups (origin/forty-two-cloud-fastapi 3ea61103) measured the 15 fastapi/requests tasks of the 42 over all
-six box runs (90 task-runs). Same population through scripts/forty_two/timing.py (the commands are inline in this section's
-commit message; each runs in seconds):
+six box runs (90 task-runs). Same population through scripts/forty_two/timing.py; every number in this section comes from
+`python scripts/forty_two/timing_report.py --crosscheck` (about 10 s):
 
 | quantity (fastapi 15 x 6 runs) | cloud | here | why they differ |
 |---|---|---|---|
