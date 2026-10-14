@@ -973,3 +973,5 @@ not run (no capture)
 - 2026-10-14T06:49:31Z | step=probe_v0t2 | EVENT started pid 1870 (restarts so far 0; hard stop in 12.0 h)
 - 2026-10-14T07:01:31Z | step=probe_v0t2 | END done: done=0/4 solved=0
 - 2026-10-14T07:01:34Z | step=probe_v0t2 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-14T07:02:10Z | step=p4_v0t2 | EVENT started pid 5345 (restarts so far 0; hard stop in 11.8 h)
+- 2026-10-14T08:02:10Z | step=p4_v0t2 | done=11/74 | solved=0 | empty=4 | errors=0 | median_s=303.6 | cap=10 | gpu=100% | disk_free=817GB | restarts=0
