@@ -838,3 +838,5 @@ not run (no capture)
 - 2026-10-14T06:25:52Z | step=probe_v0t | EVENT started pid 1035 (restarts so far 0; hard stop in 12.0 h)
 - 2026-10-14T06:27:22Z | step=probe_v0t | END done: done=0/4 solved=0
 - 2026-10-14T06:27:25Z | step=probe_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-14T06:28:00Z | step=p4_v0t | EVENT started pid 3549 (restarts so far 0; hard stop in 11.9 h)
+- 2026-10-14T06:28:30Z | step=p4_v0t | EVENT step exited rc=1; restart 1/3
