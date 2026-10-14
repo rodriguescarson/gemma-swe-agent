@@ -36,8 +36,10 @@ def kind(fn, args):
         lc = c.lower()
         if "/tmp/swe/" in c or re.search(r"\b(locate|view|check|repro|verify)\.py\b", c) and "/tmp/" in c:
             return "helper"
-        if re.search(r"\bpytest\b|\bunittest\b|\btox\b", lc):
+        if re.search(r"(^|[\n;&|(]\s*)(timeout\s+\d+\s+)?(\S+=\S+\s+)*(python3?\s+-m\s+)?(pytest|unittest|tox)\b", lc):
             return "test"
+        if re.match(r"(cat|tee)\s*>+\s*/tmp/", c) and re.search(r"\bpython3?\b", c):
+            return "python"     # scratch script written to /tmp and run in the same command
         if re.search(r"(^|\s)sed\s+-i|perl\s+-[a-z]*i|\bcat\s*>|>\s*\S+\.py\b|\btee\b|\bpatch\s+-p", c):
             return "edit_shell"
         if re.match(r"^(timeout\s+\d+\s+)?(\S+=\S+\s+)*(cd \S+ && )?(timeout\s+\d+\s+)?python3?\b", c):
