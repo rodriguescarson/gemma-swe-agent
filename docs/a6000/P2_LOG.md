@@ -1116,3 +1116,5 @@ not run (no capture)
 - 2026-10-14T15:00:34Z | END cleanup (all steps finished): nvidia-smi compute apps: none | memory.used 220 MiB (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: none
 - DONE 2026-10-14T15:00:55Z (all steps finished)
 - 2026-10-14T15:07:02Z | LAUNCH stage 1a; HARD STOP 2026-10-15T00:07:02Z
+- 2026-10-14T15:09:09Z | step=probe_v13 | EVENT started pid 865 (restarts so far 0; hard stop in 9.0 h)
+- 2026-10-14T15:22:40Z | step=probe_v13 | END done: done=0/4 solved=0
