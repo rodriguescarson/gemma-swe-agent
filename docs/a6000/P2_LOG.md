@@ -852,3 +852,8 @@ not run (no capture)
 - 2026-10-14T06:31:59Z | step=p4_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
 - 2026-10-14T06:32:35Z | step=pair_v0t | EVENT started pid 5105 (restarts so far 0; hard stop in 11.9 h)
 - 2026-10-14T06:33:05Z | step=pair_v0t | END done: done=50/50 solved=19
+- 2026-10-14T06:33:08Z | step=pair_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/p2_results_md.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-14T06:33:08Z | P12 adapter choice: p4_arm=v0-think (v0-think vs v12: 0 pairs wins 0 losses 0 net +0 sign p 1.000 cap gap -0.42 -> NO EVIDENCE; rule: best net among the submittable arms not WORSE, ties in listed order, v12 when none; not submittable (generator unconfirmed): ['v12_think2'])
+- 2026-10-14T06:33:08Z | step=pair_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/p12_choose.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-14T06:33:08Z | step=pair_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-14T06:33:11Z | step=pair_v0t | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
