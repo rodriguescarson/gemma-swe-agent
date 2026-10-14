@@ -17,3 +17,38 @@ One line per task, in the order they were done (L4-solved first). Fields: UTC ti
 - 2026-10-14T13:08Z | fastapi_15588 | HIDDEN_SPEC (corrects the old EDIT_TOOL_FAILURE): all 6 box patches reject newlines in event and id correctly and keep the 18 P2P green, but every F2P fails on the match='SSE <field> must be a single line' regex. The file's own 'must not contain null characters' convention points away from that wording. | no | none (counts toward the ceiling, not an agent lever) | F2P 6 | gold passes yes
 - 2026-10-14T13:09Z | fastapi_15661 | FEATURE_TOO_LARGE + HIDDEN_SPEC: an empty PR template; the test imports 7 names from a new 216-line scripts/prepare_release.py (typer CLI, exact strings). Runs wrote workflows or a scripts/release.py; v7c ran one grep 48x; b1024/v0t2 only read until the cap. | no | none realistic | F2P 16 | gold passes yes
 - 2026-10-14T13:10Z | fastapi_15800 | FEATURE_TOO_LARGE: a title-only issue; the gold is +649 lines over 8 files; 60 F2P (not 47). The best box patch (b1024) passes 17/60; v7/v7c/v7d spent 54-59 calls each re-running a no-match grep for the method they were asked to create. | no | none for the task; never repeat a no-match search | F2P 60 | gold passes yes
+
+## Batch summary (15 tasks; written after the last task)
+
+| id | root cause | gold passes (clean env) | F2P | feasible in 5 min | general lever |
+|---|---|---|---|---|---|
+| requests_6644 | ENV_BLOCKED_LOCAL (box only; free on Kaggle) | yes | 1 | yes | box venv: requests 2.32.4; agent: print `module.__file__` when a repro does not change, use `PYTHONPATH=src` |
+| fastapi_14616 | WRONG_SEMANTICS + `write_file` dropped-arg loop | yes | 3 | yes | no identical resend after a tool error; check marker/type fixes through the public API |
+| fastapi_9753 | WRONG_LOCATION (sibling `inspect.unwrap` site) | yes | 5 | yes | after an edit, grep every occurrence of the edited expression |
+| fastapi_14419 | WRONG_SEMANTICS (inherited-scope trap) | yes | 2 | maybe | red-before-green assert of the issue's claim |
+| fastapi_13920 | UNDERSPECIFIED_ISSUE leading to WRONG_LOCATION | yes | 1 | maybe (low) | "support for X" means a repro with X in each framework annotation role |
+| fastapi_14258 | HIDDEN_SPEC (exact message) + HANG | yes | 1 | no | per-command timeout 180 s to 30-60 s (`timeout 20` on python/pytest) |
+| fastapi_14306 | FEATURE_TOO_LARGE + HIDDEN_SPEC (`endpoint_ctx`) | yes | 7 | no | none for the task |
+| fastapi_14448 | WRONG_SEMANTICS (partial, 4/8) | yes | 8 | maybe | make the existing parametrised test red first |
+| fastapi_14479 | HIDDEN_SPEC (the issue contradicts the test) | yes | 4 | no | none |
+| fastapi_14487 | HIDDEN_SPEC (+ sibling docs file) | yes | 1 | no | none (grep the code idiom first) |
+| fastapi_14986 | WRONG_SEMANTICS ("do not store" read as delete) | yes | 5 | maybe | "do not store/cache X" means keep emitting X, stop mutating state |
+| fastapi_15280 | HIDDEN_SPEC (April Fools' joke) | yes | 1 | no | none (py_compile after every edit) |
+| fastapi_15588 | HIDDEN_SPEC (exact message; corrects the old EDIT_TOOL_FAILURE) | yes | 6 | no | none: all 6 patches are behaviourally right |
+| fastapi_15661 | FEATURE_TOO_LARGE + HIDDEN_SPEC API | yes | 16 | no | none |
+| fastapi_15800 | FEATURE_TOO_LARGE | yes | 60 | no | never repeat a no-match search |
+
+**Gold passes in a clean Kaggle-parity env for 15/15** (measured, `gt_fastapi.py`). No box patch of the 90 re-verifies as resolved in that env, except requests_6644: 4/6 resolve in workspace-import mode and 6/6 in Kaggle's site-packages mode. Every other box "fail" agrees with my clean env.
+
+**Time sinks over the 90 box-run traces** (`python3 docs/forty_two/ground_truth/fastapi_tools/sinks_fastapi.py`, measured from the proxy latencies and trace timestamps):
+- Agent time 17,057 s: model calls 89.0%, tool runtime 4.4%.
+- Model calls of 30 s or more: 3,230 s (63 calls, 29 runs). Mostly v0-think (1,567 s) and v12-b1024 (1,165 s).
+- Identical call with an identical reply: 2,407 s (1,188 repeats, 63 runs). Mostly the v5h2/v7 family's search loops; in v12-b1024 the dropped-argument `write_file` resends.
+- Compaction summariser calls: 751 s (35 calls, 30 runs).
+- 180 s command timeouts: 542 s (3 runs, all fastapi_14258).
+
+**Cross-cutting findings:**
+1. **Most of the fastapi suite cannot be collected in the competition env** (measured). 295 of 564 test files in the fastapi_14986 tree import `inline_snapshot` or `dirty_equals`, and neither is in the Kaggle freeze. A "run the related existing tests" step meets `ModuleNotFoundError` about half the time. The agent has to recognise it and copy the asserts into a /tmp script instead.
+2. **Eight of the 15 are infeasible by design** (feasible = no): 14258, 14306, 14479, 14487, 15280, 15588, 15661, 15800. The tests pin exact strings, test-only APIs, or a 200 to 650-line feature. In fastapi_15588 and fastapi_14479, every current patch is right in behaviour and wrong only in wording.
+   - The realistic targets are requests_6644 (box measurement only), 14616, 9753, 14419, 14448, 14986 and, at a stretch, 13920.
+3. **The box mis-scores requests_6644** for every bundle. The box sandbox imports its host venv's requests, which the trace shows at `.../venv/.../site-packages`. Its version is not recorded; that the copy lacks the 2.32.0 fix is inferred, and the version probe is in the JSON.
