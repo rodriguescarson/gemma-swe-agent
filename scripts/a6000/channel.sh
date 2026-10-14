@@ -27,7 +27,10 @@ case "$cmd" in
   send)
     text=${1:?text}; shift || true
     case "$text" in @*) text=$(cat "${text#@}") ;; esac
-    re=""; if [ "${1:-}" = --re ]; then re=${2:?id}; fi
+    re=""; if [ "${1:-}" = --re ]; then re=${2:?id}; shift 2; fi
+    # regression 2026-10-14: `send B-054 "<text>"` sent the bare id and dropped the text; refuse before committing anything
+    if [ $# -gt 0 ]; then echo "send: unexpected argument '${1:0:40}' (usage: send \"<text>\" [--re <id>])" >&2; exit 2; fi
+    if [[ "$text" =~ ^[[:space:]]*[MB]-[0-9]+[[:space:]]*$ ]]; then echo "send: the text is only a message id ('$text'); the text comes first" >&2; exit 2; fi
     sync
     n=$(grep -c "^### $TAG-" "$MINE" || true); id=$(printf '%s-%03d' "$TAG" "$((n + 1))")
     { printf '\n### %s | %s%s\n' "$id" "$(now)" "${re:+ | re: $re}"; printf '%s\n' "$text"; } >> "$MINE"

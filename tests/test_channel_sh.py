@@ -49,6 +49,19 @@ def test_round_trip_send_read_pending_reply_wait_tail(tmp_path):
     log = git(mac, "log", "--oneline", "origin/wip"); assert "channel: M-002 re B-001" in log and "channel: B-001 re M-001" in log
 
 
+def test_send_refuses_a_misordered_call_and_sends_nothing(tmp_path):
+    """Regression 2026-10-14: `send B-054 "<the real text>"` sent M-017 as the bare text "B-054" and silently dropped the
+    real message; the box sat idle for 9 h. A trailing argument other than `--re <id>`, or a text that is only a message
+    id, must fail before anything is committed."""
+    mac, box = _clones(tmp_path)
+    f = mac / "docs/a6000/channel/mac_to_box.md"; before = f.read_text(); head = git(mac, "rev-parse", "HEAD")
+    for args in (["B-054", "the real instructions"], ["B-054", "--re", "B-054"], ["the text", "--re", "B-054", "extra"], ["B-054"]):
+        r = ch(mac, "mac", "send", *args, check=False)
+        assert r.returncode == 2 and "send:" in r.stderr, (args, r.stdout + r.stderr)
+    assert f.read_text() == before and git(mac, "rev-parse", "HEAD") == head and git(box, "ls-remote", "origin", "wip").split()[0] == head.strip()
+    assert ch(mac, "mac", "send", "B-054 read, thank you", "--re", "B-054").stdout.strip() == "M-001 sent"  # an id inside text is fine
+
+
 def test_wait_times_out_cleanly_and_side_detection_defaults_to_mac_here(tmp_path):
     mac, box = _clones(tmp_path)
     r = ch(mac, "mac", "wait", "1", "0", check=False); assert r.returncode == 2 and "no message" in r.stdout
