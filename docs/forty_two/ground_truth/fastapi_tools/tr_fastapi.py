@@ -104,11 +104,25 @@ def analyse(tid, run, box=True):
     trace = json.load(open(tp))
     end, secs = row["t"] if "t" in row else None, row["secs"]
     start = end - secs if end else None
+    start_estimated = False
     proxy, overlap_prev, matched = [], [], set()
     if box:
         pp = ROOT / "eval" / "a6000" / "results" / f"{run}_proxy.jsonl"
-        for line in open(pp):
-            p = json.loads(line)
+        allp = [json.loads(line) for line in open(pp)]
+        if end is None:
+            # some early rows carry no end time t: anchor on the first stamped step and the proxy call that produced it
+            # (a first call starts about 1.5 s after the agent start); flagged as start_estimated
+            ts0 = None
+            for s in trace["steps"]:
+                tcs = s.get("tool_calls") or []
+                ts0 = ((tcs[0].get("extra") or {}).get("timestamp") if tcs else None) or (s.get("extra") or {}).get("timestamp")
+                if s.get("source") == "agent" and ts0:
+                    break
+            near = [p for p in allp if ts0 and abs(p["t"] - ts0) < 1.0]
+            start = (near[0]["t"] - near[0]["latency_s"] - 1.5) if near else (ts0 - 5.0)
+            end = start + secs
+            start_estimated = True
+        for p in allp:
             # a task's first call starts about 1.5 s after its agent start; anything that started earlier belongs to the
             # previous task (still in flight, e.g. a call the previous session's cap cut off)
             if start - 0.1 <= p["t"] - p["latency_s"] and p["t"] <= end + 1:
@@ -211,6 +225,7 @@ def analyse(tid, run, box=True):
         "run": run, "bundle": BUNDLE.get(run, run), "resolved": row.get("resolved"), "exit": row.get("exit"),
         "calls": row.get("calls"), "secs": secs, "err": row.get("err"), "patch_chars": len(patch), "patch_files": pfiles,
         "model_calls": len(proxy) if proxy else None, "model_s": model_s, "tools_s": tools_s,
+        "start_estimated": start_estimated,
         "tail_s": tail if proxy else None,
         "other_s": round(secs - model_s - tools_s - tail, 1) if proxy else None,
         "tool_s_by_kind": {k: round(v, 1) for k, v in sorted(tool_by_kind.items(), key=lambda kv: -kv[1])},
