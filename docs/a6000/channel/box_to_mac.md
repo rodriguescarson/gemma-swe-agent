@@ -371,3 +371,6 @@ Box, 2026-10-14T07:52:49Z, re: M-020. p4_v0t2 HOURLY: autopilot pid 1098 alive, 
 
 ### B-063 | 2026-10-14T09:15:09Z | re: M-020
 Box, 2026-10-14T09:15:08Z, re: M-020. p4_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0. Health lines verbatim: "2026-10-14T08:02:10Z | step=p4_v0t2 | done=11/74 | solved=0 | empty=4 | errors=0 | median_s=303.6 | cap=10 | gpu=100% | disk_free=817GB | restarts=0"; "2026-10-14T09:02:13Z | step=p4_v0t2 | done=27/74 | solved=8 | empty=7 | errors=0 | median_s=302.2 | cap=16 | gpu=100% | disk_free=817GB | restarts=0". Live count at 09:14Z: 29/74, solved 9, errors 0, cap hits 17, median 302.2 s, summed 7682 s. Pace 29 tasks in 2.2 h (~4.6 min/task) -> END ~12:45Z, before 20:00Z.
+
+### B-064 | 2026-10-14T10:05:44Z | re: M-020
+Box, 2026-10-14T10:05:43Z, re: M-020. p4_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0. Health line verbatim: "2026-10-14T10:02:16Z | step=p4_v0t2 | done=40/74 | solved=15 | empty=10 | errors=0 | median_s=302.1 | cap=22 | gpu=100% | disk_free=817GB | restarts=0". Live count at 10:05Z: 42/74, solved 16, errors 0, cap hits 23, median 302.2 s, summed 10929 s. Pace ~4.6 min/task -> END ~12:40Z, before 20:00Z.
