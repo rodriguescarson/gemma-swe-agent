@@ -37,6 +37,13 @@ LEVERS = {
                      "- After your first edit to a module, run its test file once (tests/test_<module>.py, or the file git"
                      " grep -l finds for the module name under tests/), even if the issue's example already passes; a"
                      " failure there in code you changed is yours to fix before you submit.\n"),
+    # rich_3278: tool replies are JSON (encoded once on swegemma 0.2.11), so a file's backslash shows as two; four runs wrote
+    # the reply's form into a raw regex, and v13 has no unescape fallback (it dropped edit_file, which has one).
+    "v13_jsonesc": (RULES_END,
+                    "- Tool replies are JSON, so file text inside them is escaped: one backslash shows as \\\\, a double"
+                    " quote as \\\" and a line break as \\n. In edits and scripts write the file's real characters (one"
+                    " backslash for each \\\\ you see, a plain quote for each \\\"); if an old block is not found, check"
+                    " this first.\n"),
 }
 
 
@@ -93,6 +100,20 @@ def test_no_public_task_specifics_in_the_bundle(name):
     dst = ROOT / "submissions" / name
     assert (dst / "agent.yaml").is_file()
     assert not _leaks(dst)
+
+
+def test_jsonesc_states_the_escapes_the_installed_stack_really_shows():
+    """The model reads tool results as ADK serialises them: swegemma returns a dict (parse_tool_response), ADK's LiteLLM
+    adapter json.dumps it once (ensure_ascii=False). So a file's backslash, double quote and newline appear as the two-character
+    forms the lever names (host-confirmed since the 09-30 wheelhouse: 'tool output is JSON-encoded once')."""
+    from swegemma.tools.base import ok_response, parse_tool_response
+    from google.adk.models.lite_llm import _safe_json_serialize
+    file_text = 'a\\b "q"\nz'                                         # a backslash, two quotes, a newline
+    shown = _safe_json_serialize(parse_tool_response(ok_response(stdout=file_text)))
+    assert '"a\\\\b \\"q\\"\\nz"' in shown                              # i.e. a\\b \"q\"\nz : encoded exactly once
+    added = LEVERS["v13_jsonesc"][1]
+    for real, seen in (("\\", "\\\\"), ('"', '\\"'), ("\n", "\\n")):
+        assert _safe_json_serialize(real)[1:-1] == seen and seen in added, (real, seen)
 
 
 @pytest.mark.parametrize("name", sorted(LEVERS))

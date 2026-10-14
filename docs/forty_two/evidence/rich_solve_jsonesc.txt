@@ -1,0 +1,45 @@
+v13_jsonesc: offline evidence (2026-10-14 IST, Mac, no model). Lever text: tests/test_v13_rich_solve.py LEVERS["v13_jsonesc"].
+
+0. Mechanism (code, installed stack swegemma 0.2.11 / google-adk 1.36.1; pinned by
+   tests/test_v13_rich_solve.py::test_jsonesc_states_the_escapes_the_installed_stack_really_shows)
+   swegemma's tool wrappers return dicts (tools/base.py parse_tool_response); ADK's LiteLLM adapter json.dumps the dict once
+   (lite_llm.py _safe_json_serialize, ensure_ascii=False). So a file's backslash reaches the model as two characters, a double
+   quote as \" and a newline as \n. The host confirmed the same for the scorer after the 09-30 wheelhouse: "Tool output is
+   JSON-encoded once, and edit_file has an unescape fallback" (research/2026-10-04_kaggle_scan.md). v13 dropped edit_file and
+   with it that fallback: its template matches the old block exactly.
+
+1. The three ways to write rich_3278's one-line regex fix, through v13's own template (measured)
+$ .venv/bin/python scripts/forty_two/rich_solve/ev_jsonesc.py $WT $VENV/bin/python
+the line in the file:           (?:\x1b([(@-Z\\-_]|\[[0-?]*[ -/]*[@-~]))
+the same line in a tool reply:  (?:\\x1b([(@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~]))
+(a) both copied from the reply: template exit 1: AssertionError: 0
+(b) both in the file's real characters: template exit 0: edited rich/ansi.py | tests/test_ansi.py with the hidden tests: 23 passed in 0.07s
+(c) old real, new copied from the reply: template exit 0: edited rich/ansi.py | tests/test_ansi.py with the hidden tests: 22 failed, 1 passed, 1 warning in 0.12s
+   (c) is exactly the box failure: the local re-score of p4's patch is also 22 failed, 1 passed (ground_truth/rich_3278.json).
+
+2. Where the rule fires in the recorded traces
+$ .venv/bin/python scripts/forty_two/rich_solve/patch_lines.py rich_3278 'x1b'
+   p4, p4_v7, p4_v7c, p4_v7d: the final diff writes \\x1b (the reply's form) where the file had \x1b; p4_v7c also wrote the
+   reply's \n as two characters inside the raw string. All four: 0 of 16 hidden tests, 6 existing tests broken.
+   p4_b1024 (v13's prompt line): never edited. Of its 9 python experiments (93-290 s), 5 (at 93, 112, 160, 200 and 228 s)
+   carried the regex's \x1b in the reply's doubled form, re-implemented the tokenizer inline, saw nothing match, and spent
+   single turns of 49, 32, 35 and 28 s reasoning about why; its first experiment that stripped the sequences ran at 255 s,
+   47 s before the cap (trace steps 9-19; scripts/forty_two/rich_solve/trace_hits.py rich_3278 'python3' --runs p4_b1024).
+   p4_v0t2: wrote single backslashes (no lever needed there; it failed on a character-class error, see rich_solve_modtests.txt).
+$ .venv/bin/python scripts/forty_two/rich_solve/unescaped_edits.py p4_b1024,p4_v0t2
+   p4_b1024: 21 of 95 successful edit_file calls (22 %) needed the unescape fallback, in 10 tasks (3 of them solved);
+   p4_v0t2: 20 of 101 (20 %), in 12 tasks (5 solved). These are the edits that met escaped text; under v13 they go through a
+   template with no fallback. (LEVERS.md measured that the model over-escapes quotes much less in python heredocs, 3 of 183
+   on p4_b1024, so this is the upper bound of what v13 meets, not a prediction.)
+
+3. Reach (measured: .venv/bin/python scripts/forty_two/rich_solve/reach.py backslash)
+   Gold patches that change a line containing a backslash: 14 of the 74 public tasks, and 13 of those 14 are in the
+   never-solved 42 (the 42 are 57 % of the 74; hypergeometric P(>= 13 of 14) = 0.0019). The one outside the 42 is rich_3063
+   ("Fix escaping trailing backslash"), which p4_b1024 failed after 7 python experiments on backslash reprs. Held-out: 166 of
+   the 1,044 valid tasks in data/heldout1k (16 %). The correlation does not prove the mechanism (string-heavy fixes may be
+   harder for other reasons); section 1 is the measured part.
+
+4. Risk (inferred)
+   The line is 75 Gemma tokens on every call. It could make the model under-escape where a Python string in the file really
+   holds two backslashes; the rule says one backslash per pair shown, which is the exact decoding, so a correct reading is
+   unaffected. No run of the 32 solved tasks is known to depend on writing an escaped form.
