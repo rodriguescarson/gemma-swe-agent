@@ -178,16 +178,18 @@ rich_3043, 3063, 3506, 3521, 4077), mostly capped with only repro files written.
 
 ## 11. Speed levers this implies (to test; built ones are in LEVERS.md)
 
-Built in submissions/v13 (Phase C, tests first):
+Built in submissions/v13 (Phase C, tests first; LEVERS.md):
 1. **Edits through run_command only** (drop edit_file and write_file; the prompt gives one python heredoc pattern that replaces
    exact text, checks it occurs once, compiles the result before writing). Targets row 5. Expected flips: rich_3718 (fix already
    written), fastapi_14616 and fastapi_9753 (solved on L4 4 and 2 times; 153 s and 148 s lost to the loop).
 2. **Per-command timeout 180 -> 60 s** (eval_config.yaml timeout_seconds; not the time budget). Targets row 4: each hang costs
    60 s instead of 180 s. Candidates: rich_3480, rich_4006, fastapi_14258, rich_3052.
-3. **Issue text pinned in the instruction** (`{problem_description}`, HARNESS_README sect. 5.1) so a compaction cannot reduce it
-   to a paraphrase. Targets row 3's information loss, not its seconds (+~134 tokens per call, prefix-cached).
+(Both built, commits and offline evidence in LEVERS.md.)
 
 Considered and not built (why):
+- Issue text pinned in the instruction (`{problem_description}`, HARNESS_README sect. 5.1) so a compaction cannot reduce it to a
+  paraphrase: no measured effect (the re-reads after a compaction are of files, not the issue), and +134 tokens per call (median,
+  540 at p90) bring the compaction threshold earlier. A separate read.
 - Thinking budget 512: up to 41 s per task back on the 42 (31 s on solved), but the long-thinking calls are where edits are
   designed; the 4,096 -> 1,024 step was neutral on 50 ids (19 vs 19). A separate single-variable read, not part of v13.
 - Faster search tools (ripgrep) and async tool execution: tool time is under 0.02 s per non-hung call; search took 2.6 s in total over

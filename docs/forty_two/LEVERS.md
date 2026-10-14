@@ -68,6 +68,8 @@ swegemma's edit engine and through the template run by bash with Python 3.12:
 - rich_3718: p4_b1024 had the right title change written at 85 s and could not apply it (21 malformed calls, 226 s); p4_v0t2
   solved it with no malformed loop; 9 of 12 L4 runs solved it. The cloud dossier (rich_3718) adds that the subtitle sibling is
   also needed; the prompt's sibling rule is unchanged. Expected: yes (maybe on any one run).
+- rich_4075: the cloud dossier (LOG_rich.md) finds b1024 had the right repro and cause by 43 s, then 3 malformed edits and the
+  40-call budget ran out (BudgetExceeded). Expected: maybe-to-yes (a 1-line fix; also UNDERSPECIFIED, 1/12 L4).
 - fastapi_14616 (153 s lost; 4/12 L4) and fastapi_9753 (148 s lost; 2/12 L4): time back, but the cloud dossiers find fix-quality
   causes as well (WRONG_SEMANTICS / WRONG_LOCATION). Expected: maybe.
 - Indirectly every task that edits, through the compile check (no uncompilable patch can be written, fastapi_15280 type).
@@ -109,9 +111,11 @@ re-apply offline (see lever 1, correction 1), so its replayed state lacks them a
 the old limit allowed bought nothing in any reproducible case.
 
 **Which of the 42 it should flip, and why.** Time back on the four hang tasks: rich_3480 and rich_4006 (two hangs each, 6 calls
-in 300 s on b1024; up to ~240 s back), fastapi_14258 (~120 s), rich_3052 (~100 s, inferred). The hang is the bug's own symptom
-(infinite loops); the fix still has to be right. Expected: maybe for each (rich_4006 and rich_3480 touched a gold file in older
-runs; their cloud dossiers, when they land, decide whether the fix is reachable).
+in 300 s on b1024; up to ~240 s back), rich_3052 (~100 s, inferred), fastapi_14258 (~120 s). The hang is the bug's own symptom
+(infinite loops); the fix still has to be right. Expected: maybe for rich_3480, rich_4006 and rich_3052 (rich_4006 and rich_3480
+touched a gold file in older runs; their cloud dossiers had not landed when this was written); no for fastapi_14258, whose cloud
+dossier (LOG_fastapi.md) finds a HIDDEN_SPEC (the test pins an exact 95-character message) and itself recommends this lever for
+the time it wastes (553 s of tool time over the six runs).
 
 **Risk to the 32 tasks we solve sometimes.** None seen in the agent phase (no legitimate command over 58 s). The real risk is
 verification: in the local harness and on the box, timeout_seconds is also the verification pytest limit
@@ -140,5 +144,5 @@ read shows a verification timeout (exit 124 on a non-hanging patch): 90 s.
 
 | lever | files | evidence (offline) | the 42 it should flip | expected | risk to the 32 |
 |---|---|---|---|---|---|
-| 1 edits through run_command | agent.yaml, prompts/system.md | 101 of 478 multi-argument edit/write calls malformed vs 0 of 1,521 run_command (two runs); vLLM parser reproduces the slip; template reproduces 148 of 153 replayable exact edits byte for byte and refuses the other 5 because the file would not compile | rich_3718 yes; fastapi_14616, fastapi_9753 maybe | +1 to +2 | ~3.5 s per edit; 2 solved tasks with intermediate uncompilable edits need a retry |
-| 2 per-command timeout 60 s | eval_config.yaml | no finished command >= 60 s in 15,090; 7 of 8 recorded hangs still running at 60 s | rich_3480, rich_4006, fastapi_14258, rich_3052 maybe | +0 to +2 | verification limit on the box (and on Kaggle if Stage 2 reads it): slowest valid verification 12.6 s |
+| 1 edits through run_command | agent.yaml, prompts/system.md | 101 of 478 multi-argument edit/write calls malformed vs 0 of 1,521 run_command (two runs); vLLM parser reproduces the slip; template reproduces 148 of 153 replayable exact edits byte for byte and refuses the other 5 because the file would not compile | rich_3718 yes; rich_4075, fastapi_14616, fastapi_9753 maybe | +1 to +2 | ~3.5 s per edit; 2 solved tasks with intermediate uncompilable edits need a retry |
+| 2 per-command timeout 60 s | eval_config.yaml | no finished command >= 60 s in 15,090; 7 of 8 recorded hangs still running at 60 s | rich_3480, rich_4006, rich_3052 maybe; fastapi_14258 no (hidden spec) | +0 to +1 | verification limit on the box (and on Kaggle if Stage 2 reads it): slowest valid verification 12.6 s |
