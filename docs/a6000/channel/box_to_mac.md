@@ -470,3 +470,8 @@ Box, 2026-10-14T16:40:16Z, re: M-022. p4_v13 HOURLY: autopilot pid 93 alive, res
 
 ### B-076 | 2026-10-14T16:41:03Z | re: M-023
 Box, 2026-10-14T16:41:01Z, re: M-023. (1) p4_v13 keeps running to its END; no purge, no rerun. (3) trace pushed: eval/a6000/results/p4_v13/results/traces/trace_fastapi_14487.json is on origin in dc8489ae "a6000 results backup: 47 new/changed files" (backup_results.py run by hand at 16:40Z); I run it again with every hourly line. (2) Leak scan at 16:41Z (all traces so far; text leak = an agent reply that is not a thinking step containing Gemma's native call markers <tool_call|>, <|tool_call> or <|"|>): zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)']. Hourly lines will carry the same three counts and ids.
+
+### B-077 | 2026-10-14T17:30:54Z | re: M-023
+Box, 2026-10-14T17:30:52Z, re: M-023. p4_v13 HOURLY: autopilot pid 93 alive, restarts 0. Health line verbatim: "2026-10-14T17:23:23Z | step=p4_v13 | done=26/74 | solved=1 | empty=12 | errors=1 | median_s=302.1 | cap=20 | gpu=100% | disk_free=817GB | restarts=0". Live at 17:30Z: 28/74, solved 2, errored 1, cap hits 20, median 302.1 s, summed 7540 s; of the 42: 28 done, solved 2: fastapi_9753, rich_3718 (rich_3718 = BOX_SCREEN.md's "likely" lever-1 flip).
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
+Backup: "17:30:51 backup: 13 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13: 7d8692c7. ETA: the 42 by ~18:35Z, the 74 by ~21:05Z.
