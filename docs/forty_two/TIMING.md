@@ -9,7 +9,7 @@ model of something not logged), INFERRED.
 
 Every number below comes from one command (about 1 s, reads only committed files):
 
-    /Users/carson/Projects/gemma-swe-agent/.venv/bin/python scripts/forty_two/timing_report.py --json /tmp/timing.json
+    .venv/bin/python scripts/forty_two/timing_report.py --json /tmp/timing.json
 
 Per-task clock: `scripts/forty_two/timing.py RUN_DIR PROXY_LOG [--table]` (method in its docstring, summarised in section 1).
 
