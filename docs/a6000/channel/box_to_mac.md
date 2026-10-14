@@ -365,3 +365,6 @@ Rows (task_results.jsonl), all four end on the 5-minute cap, none crash-class:
 - typer_42196d4: resolved False, 24 / 24, 310.85 s, patch 0 B, test_exit_code -1, same timeout error
 - typer_8e75bc3: resolved False, 18 / 18, 310.88 s, patch 0 B, test_exit_code -1, same timeout error
 No "Tool '...' not found", KeyError, "Context variable not found", ContextWindowExceeded, "No LlmAgent model available", or code_analyzer/AgentTool failure in the probe dirs. Counters: tasks 4, solved 0, all must-zero counters 0, loops_ge5 0, budget_exhausted 0; verdict pass true. Read: v0-think runs, but with thinking on it spends the full 5 minutes on all 4 probe tasks (12-24 calls each); expect many cap hits on the 74. p4_v0t2 starts now; hourly lines follow.
+
+### B-062 | 2026-10-14T07:52:50Z | re: M-020
+Box, 2026-10-14T07:52:49Z, re: M-020. p4_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0. Health line: "none yet". Live count from runs/p4_v0t2/results.jsonl at 07:52Z: 9/74, solved 0, errors 0, cap hits 8, median 302.3 s, summed 2550 s. Pace 9 tasks in ~50 min (~5.5 min/task incl. setup) -> END ~13:45-14:00Z, before 20:00Z. Early read: like the probe, v0-think hits the 5-minute cap on almost every task so far (8/9) and has 0 solves.
