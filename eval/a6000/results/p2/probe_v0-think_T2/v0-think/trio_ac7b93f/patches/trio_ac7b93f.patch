@@ -1,0 +1,94 @@
+diff --git a/src/trio/_tools/sync_pre_commit.py b/src/trio/_tools/sync_pre_commit.py
+new file mode 100644
+index 0000000..4d4f8e8
+--- /dev/null
++++ b/src/trio/_tools/sync_pre_commit.py
+@@ -0,0 +1,88 @@
++import yaml
++import re
++import sys
++from pathlib import Path
++
++def main():
++    pre_commit_config_path = Path(".pre-commit-config.yaml")
++    test_requirements_in_path = Path("test-requirements.in")
++
++    if not pre_commit_config_path.exists():
++        print(f"Error: {pre_commit_config_path} not found.")
++        sys.exit(1)
++    if not test_requirements_in_path.exists():
++        print(f"Error: {test_requirements_in_path} not found.")
++        sys.exit(1)
++
++    with open(pre_commit_config_path, "r") as f:
++        try:
++            config = yaml.safe_load(f)
++        except yaml.YAMLError as e:
++            print(f"Error parsing YAML: {e}")
++            sys.exit(1)
++
++    # Map of tool name to its version in .pre-commit-config.yaml
++    versions = {}
++    for repo in config.get("repos", []):
++        repo_url = repo.get("repo", "")
++        rev = repo.get("rev", "")
++        if not rev:
++            continue
++        
++        # Normalize version (remove 'v' prefix)
++        version = rev[1:] if rev.startswith("v") else rev
++        
++        if "black" in repo_url:
++            versions["black"] = version
++        elif "ruff" in repo_url:
++            versions["ruff"] = version
++        elif "codespell" in repo_url:
++            versions["codespell"] = version
++
++    if not versions:
++        print("No versions found to sync.")
++        return
++
++    with open(test_requirements_in_path, "r") as f:
++        lines = f.readlines()
++
++    new_lines = []
++    changed = False
++    for line in lines:
++        # We want to match lines that start with the tool name, 
++        # possibly followed by version specifiers or environment markers.
++        matched_tool = None
++        for tool in versions:
++            if re.match(rf"^\s*{tool}(\s|[;=<>!#]|$)", line):
++                matched_tool = tool
++                break
++        
++        if matched_tool:
++            version = versions[matched_tool]
++            # Split line into tool part and marker part
++            parts = line.split(";", 1)
++            tool_part = parts[0].strip()
++            marker_part = f"; {parts[1]}" if len(parts) > 1 else ""
++            
++            # Remove any existing version specifiers from tool_part
++            # e.g., "ruff >= 0.8.0" -> "ruff"
++            tool_name = re.split(r"[\s=<>!]", tool_part)[0]
++            
++            new_line = f"{tool_name}=={version}{marker_part}\n"
++            if new_line != line:
++                changed = True
++                new_lines.append(new_line)
++            else:
++                new_lines.append(line)
++        else:
++            new_lines.append(line)
++
++    if changed:
++        with open(test_requirements_in_path, "w") as f:
++            f.writelines(new_lines)
++        print("Updated test-requirements.in")
++    else:
++        print("No changes needed for test-requirements.in")
++
++if __name__ == "__main__":
++    main()
