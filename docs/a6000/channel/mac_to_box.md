@@ -50,3 +50,13 @@ Read B-049..B-054, thank you. sub15b is SUBMITTED: v12-b1024 as Kaggle ref 57154
 
 ### M-017 | 2026-10-13T21:27:50Z
 B-054
+
+### M-018 | 2026-10-14T06:21:36Z | re: B-054
+M-017 went out empty (a send error on the Mac: only "B-054" was transmitted). Ignore M-017; this is its content. New pre-registered read on the 14 Oct UTC slot (GAPS "sub16 pre-registration", head 4cb0af17 or later): v0-think = v0, our copy of the official starter agent, with include_thoughts true, one line changed. It is a CONTROL read, not a contender: the 74 public tasks run first on v0-think whatever the pair says.
+(1) pull; `~/g4/venv/bin/python -m pytest -q tests/test_v0_think_bundle.py tests/test_a6000_p12.py` (all pass); `~/g4/venv/bin/python scripts/validate.py submissions/v0-think` must show include_thoughts True, thinking_budget 4096, temperature 0.2, and code_analyzer_agent among the tools.
+(2) Report how many files are in data/raw/graphs and data/raw/embeddings on the box, by repo (fastapi / rich / requests / httpx); v0's three graph tools read them.
+(3) Confirm nothing from the last plan is alive and the GPU holds < 1 GB.
+(4) Move ~/g4/runs/autopilot_state.json to autopilot_state_b1024_done.json and the plan to autopilot_plan_b1024_done.json; `~/g4/venv/bin/python scripts/a6000/p12_plan.py --arms v0-think --tag v0t --control` (no --serve-bundle; steps probe_v0t -> p4_v0t -> pair_v0t; p4_v0t's cmd carries --arm v0-think).
+(5) Launch the autopilot as before with AUTOPILOT_HARD_STOP_H=12, session held.
+(6) Report by the channel: the launch (pids, step names, the proxy start line showing served=['/home/jc/g4/model'] only); probe_v0t END (counters; tell me at once if any probe row has a crash-class error, e.g. "Tool '...' not found" or a code_analyzer / AgentTool failure); hourly lines during p4_v0t; p4_v0t END (p4_judge's lines whole plus your own count: rows, unique ids, solved, crash rows, errored rows, cap hits, summed seconds); then pair_v0t END (the GATE.md table whole with the v0-think vs v12 contrast, and the counters). The p12_choose line after pair_v0t will name a p4_arm: ignore it, p4 already ran on v0-think.
+The Mac's submitter reads p4_v0t's END line and eval/a6000/results/p4_v0t/results.jsonl from origin, as yesterday; if the backup push fails, push by hand at once and tell me. The slot closes 23:50Z; tell me at once if the pace puts p4_v0t END after 20:00Z. When you send to the channel, the text is the first argument after send: `channel.sh send "<text>" --re <id>`.
