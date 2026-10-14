@@ -1,0 +1,46 @@
+v13_modtests: offline evidence (2026-10-14 IST, Mac, no model). Lever text: tests/test_v13_rich_solve.py LEVERS["v13_modtests"].
+
+1. What one run of the edited module's own test file would have shown (measured)
+
+$ python scripts/forty_two/rich_solve/ev_modtests.py $WT $VENV/bin/python      # setup in the script's docstring
+rich_3777 p4_b1024: existing tests with the run's patch -> 95 failed, 3 passed in 2.07s
+    first error line: E       AttributeError: property 'is_interactive' of 'Console' object has no setter
+    with the hidden test_patch (the score) -> 96 failed, 3 passed in 2.21s
+rich_3278 p4_v0t2: existing tests with the run's patch -> 3 failed, 4 passed in 0.10s
+    first error line: E       AssertionError: assert [<text 'Hello...7, Style())]>] == [<text 'Hello... blue=0))))]>]
+    with the hidden test_patch (the score) -> 3 failed, 20 passed in 0.06s
+rich_3180 p4_v7d: existing tests with the run's patch -> 4 failed, 102 passed in 0.29s
+    first error line: E       AssertionError: assert [<text '1234 ... '345678' []>] == [<text '1234 ...<text '8' []>]
+    with the hidden test_patch (the score) -> 7 failed, 107 passed in 0.24s
+
+The existing tests run without the hidden test_patch, i.e. what the agent itself could have run. In all three runs the
+regression is visible there; in rich_3278 (p4_v0t2) and rich_3180 (p4_v7d) it is the ONLY reason the run failed: the hidden
+FAIL_TO_PASS tests passed (16/16 and 4/4, docs/forty_two/ground_truth/<id>.json box_runs_rescored_locally).
+
+2. Where the rule fires in the recorded traces
+
+$ python scripts/forty_two/rich_solve/scan_runs.py . p4_b1024 rich_3777
+p4_b1024 rich_3777 NEVER - 39 296 {'calls': 39, 'first_edit': 17, 'last_edit': 37, 'warn': 30, 'exceeded': None, 'n_tests': 0, ...}
+$ python scripts/forty_two/rich_solve/trace_hits.py rich_3777 'is_interactive' --runs p4_b1024,p4_v0t2
+p4_b1024: step 5 call 3 t=18.0s run_command grep "def is_interactive" rich/console.py      -> exit 1 (the name exists as an
+          attribute assigned in Console.__init__, not as a def)
+          step 19 call 17 t=159.7s edit_file: adds a @property is_interactive (the edit the 95 failures come from)
+p4_v0t2:  step 19 call 17 t=77.2s  grep "is_interactive" rich/console.py   -> finds the attribute and edits it in place (solved)
+- rich_3777 p4_b1024: first edit at call 17 (159.7 s); it then kept editing rich/live.py and rich/progress.py to call 39 and
+  submitted at 286.8 s having run 0 tests. Under the rule, call 18 runs tests/test_console.py (2.1 s on the Mac) and returns 95
+  failures that all name the property it just added, with about 130 s of the 300 s budget left (inferred from the
+  trace times; the A6000 is slower than the L4, so Kaggle would leave more).
+- rich_3278 p4_v0t2: 8 calls, edits at calls 3-7, 0 test runs, time cap. rich_3180 p4_v7d: 67 calls, 0 test runs.
+
+3. How often the current line runs a test (pytest or unittest command) after its last edit (p4_b1024, all 74 tasks;
+   python scripts/forty_two/rich_solve/scan_runs.py . p4_b1024,p4_v0t2, aggregated)
+   solved (28): 5 ran a test after the last edit, 23 did not;  failed with an edit (24): 4 did, 20 did not.
+   p4_v0t2: solved (26): 7 of 25 with an edit;  failed with an edit (35): 4 of 35.
+   So the gate is mostly absent today; the rule adds one call (about 5-8 s of model time plus a sub-second test run on rich).
+
+4. Risk (inferred, not measured)
+- A module whose test file already fails at base can send the model after failures it did not cause; the rule limits it to
+  "a failure there in code you changed". Known example: at rich_3278's base the full suite has 55 failures in 13 files (test_table
+  16, test_inspect 15, test_markdown 5; docs/forty_two/tasks/rich_3278.md), so an edit to rich/table.py would meet 16 of them.
+- fastapi test files are per feature, not per module; the rule's second form (git grep -l the module name under tests/) can
+  return many files. The step-4 limits (60 s timeout in the command, never the whole suite) still apply.
