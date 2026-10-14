@@ -53,6 +53,12 @@ LEVERS = {
                       " joined two at a time, in any order, with an optional underscore (for a title Alpha beta gamma:"
                       " (alpha|beta|gamma)_?(alpha|beta|gamma)) over the *.py files; a hit names the code the title is"
                       " about."),
+    # rich_4075: p4_b1024 named the faulty line with call 11 and its fix passes the hidden test, but it kept reading through
+    # the harness's budget warning (call 31) to call 40 and never edited; 9 of 74 p4_b1024 runs reached that warning with no
+    # edit, 0 of them solved.
+    "v13_warnedit": (RULES_END,
+                     "- If a tool reply carries a budget_warning and you have not edited the source yet, make your best edit"
+                     " with the very next call, then check it and submit; do not read anything else first.\n"),
 }
 
 
@@ -136,6 +142,18 @@ def test_titlegrep_example_pattern_finds_joined_names_and_not_single_words():
         assert rx.search(hit), hit
     for miss in ("alpha = beta", "def gamma():", "Beta and gamma"):
         assert not rx.search(miss), miss
+
+
+def test_warnedit_names_the_key_the_harness_adds_to_tool_replies():
+    """swegemma adds 'budget_warning' to every tool reply once 10 or fewer calls remain (budget >= 20)."""
+    import json
+    from types import SimpleNamespace
+    from swegemma.tools.base import _attach_low_budget_warning, ok_response
+    ctx = SimpleNamespace(budget=SimpleNamespace(tool_calls=40), tool_calls_used=31)
+    reply = json.loads(_attach_low_budget_warning(ctx, ok_response(stdout="x")))
+    assert "budget_warning" in reply and "budget_warning" in LEVERS["v13_warnedit"][1]
+    ctx.tool_calls_used = 29
+    assert "budget_warning" not in json.loads(_attach_low_budget_warning(ctx, ok_response(stdout="x")))
 
 
 @pytest.mark.parametrize("name", sorted(LEVERS))
