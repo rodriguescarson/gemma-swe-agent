@@ -846,3 +846,4 @@ not run (no capture)
 - 2026-10-14T06:30:42Z | step=p4_v0t | EVENT step exited rc=1; restart 3/3
 - 2026-10-14T06:31:18Z | step=p4_v0t | EVENT started pid 4234 (restarts so far 3; hard stop in 11.9 h)
 - 2026-10-14T06:31:48Z | step=p4_v0t | EVENT step exited rc=1; restart 4/3
+- 2026-10-14T06:31:51Z | step=p4_v0t | END failed: done=0/74 solved=0
