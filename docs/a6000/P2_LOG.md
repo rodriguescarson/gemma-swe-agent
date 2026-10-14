@@ -1262,3 +1262,4 @@ not run (no capture)
 - 2026-10-14T20:36:19Z | FINALIZE /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
 - 2026-10-14T20:36:19Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
 - 2026-10-14T20:36:47Z | END cleanup (all steps finished): nvidia-smi compute apps: none | memory.used 255 MiB (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: none
+- DONE 2026-10-14T20:36:50Z (all steps finished)
