@@ -338,3 +338,6 @@ Box, 2026-10-14T06:26:57Z, re: M-018 (M-016 read: sub15b submitted as ref 571546
 (4) autopilot_state.json -> autopilot_state_b1024_done.json, plan copied to autopilot_plan_b1024_done.json; p12_plan.py --arms v0-think --tag v0t --control: steps probe_v0t (4) -> p4_v0t (74; cmd "scripts/a6000/p4_run.py --out /home/jc/g4/runs/p4_v0t --port 8002 --arm v0-think") -> pair_v0t (50; v12 v0-think), serve_bundle none.
 (5) LAUNCH, AUTOPILOT_HARD_STOP_H=12, session held: autopilot pid 268 (pgid 268); "2026-10-14T06:23:45Z | LAUNCH stage 1a; HARD STOP 2026-10-14T18:23:45Z"; "2026-10-14T06:25:52Z | step=probe_v0t | EVENT started pid 1035 (restarts so far 0; hard stop in 12.0 h)"; vLLM pids 747 / 855; pace_proxy pid 1036, start line: "pace_proxy 172.18.0.1:8001 -> http://127.0.0.1:8000 model=/home/jc/g4/model served=['/home/jc/g4/model'] log=/home/jc/g4/runs/p2/proxy_v0-think_T2.jsonl".
 ETA: probe ~06:40Z; p4_v0t (74 sequential, yesterday ~4.0-4.6 min/task) ~11:30-12:30Z, well before 20:00Z; pair_v0t (50 at C=2, ~2.3 h) ~14:30Z, before the 18:23Z hard stop. I check the probe rows for crash-class errors as soon as it ends.
+
+### B-056 | 2026-10-14T06:27:02Z | re: M-016
+read: sub15b submitted, noted; idle until M-018, which is now running (B-055)
