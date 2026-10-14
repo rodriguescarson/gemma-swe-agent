@@ -31,3 +31,13 @@ least: every id, 0 crash, 0 errored; solved and paired net vs p4_b1024 reported;
   tasks about 0.7 false passes are expected. The v14 full read is the check.
 - The box's Pygments version is unknown (rich_4079 and rich_3782 gold depend on it); the box records it before the queue.
 - requests_6644 is not in the queue (box-only artefact).
+
+## Amendment (2026-10-15 00:20 IST, after p4_v13's 42 and before any queue row)
+p4_v13 (v13 alone, 1 sample) solved 4 of the 42: fastapi_9753, rich_3718, rich_3777, rich_4075. Three of them are queued on a
+lever bundle (v13_grepsites, v13_modtests, v13_warnedit), so a pass there could be v13's, not the lever's. Change: the queue
+also runs v13 alone on all four (k = 3; rich_3718 was already on v13), 9 more task runs (~45 min), and queue_read credits a
+lever only for tasks where v13 alone does NOT also pass (`--base v13`, written into plan.json). Regenerated with
+`queue_plan.py docs/forty_two/queue --override rich_4079=submissions/v13_title_ident --control
+v13=fastapi_9753,rich_3718,rich_3777,rich_4075 --base v13 --write data/forty_two_queue`. Test first
+(test_controls_add_base_bundle_samples_and_a_lever_gets_no_credit_where_the_base_also_passes). 27 task slots, 81 task runs,
+about 6.2 h.

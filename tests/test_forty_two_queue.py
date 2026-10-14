@@ -45,3 +45,22 @@ def test_missing_samples_or_an_errored_row_make_it_incomplete_not_a_fail(tmp_pat
     out = subprocess.run([sys.executable, str(ROOT / "scripts" / "forty_two" / "queue_read.py"), str(tmp_path), "--groups-json",
                           json.dumps(groups)], capture_output=True, text=True).stdout
     assert "t1" in out and "INCOMPLETE" in out and "v13_a" in out
+
+
+def test_controls_add_base_bundle_samples_and_a_lever_gets_no_credit_where_the_base_also_passes(tmp_path):
+    # amendment 2026-10-15 00:15 IST, before any queue row: v13 alone solved fastapi_9753, rich_3718, rich_3777, rich_4075 once
+    # in p4_v13, so the queue also runs v13 on them (k=3) and a lever's pass on a task the base also passes is not credited
+    q = tmp_path / "queue"; q.mkdir()
+    for i, b in [("t1", "submissions/v13_a"), ("t2", "submissions/v13_a")]:
+        (q / f"{i}.json").write_text(json.dumps({"id": i, "bundle": b, "k": 3}))
+    p = queue_plan.plan(q, controls={"v13": ["t1"]})
+    assert p["groups"] == {"v13": ["t1"], "v13_a": ["t1", "t2"]}
+    res = tmp_path / "res"
+    for s in (1, 2, 3):
+        _res(res / f"q_v13_a_s{s}", [{"id": "t1", "resolved": True, "err": ""}, {"id": "t2", "resolved": s > 1, "err": ""}])
+        _res(res / f"q_v13_s{s}", [{"id": "t1", "resolved": s != 2, "err": ""}])
+    r = queue_read.read(res, p["groups"], k=3, base="v13")
+    assert r["credited"]["v13_a"] == ["t2"] and r["levers"]["v13_a"] == "ACCEPT"
+    p2 = {"v13": ["t1"], "v13_a": ["t1"]}
+    r2 = queue_read.read(res, p2, k=3, base="v13")
+    assert r2["credited"]["v13_a"] == [] and r2["levers"]["v13_a"] == "REJECT"
