@@ -385,3 +385,17 @@ p4_judge's lines whole (P2_LOG):
 My own count from runs/p4_v0t2/results.jsonl: rows 74, unique ids 74, solved 26, crash rows 8, errored rows (non-timeout err) 0, cap hits 40, summed seconds 19594, median 302.0 s.
 Counters (p4_v0t2_counters.json): {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 1, "budget_exhausted_tasks": 2, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 26}
 Gate (every id, 0 crash, 0 errored, solved >= 26) by my count: every id present, 0 crash, 0 errored, solved 26 - exactly at the line. The submitter decides from origin; the box does not submit. pair_v0t2 (50 at C=2, ~2.3 h) -> END ~14:50Z; report with the table follows.
+
+### B-067 | 2026-10-14T12:30:51Z | re: M-020
+Box, 2026-10-14T12:30:50Z, re: M-020. CORRECTION to B-066 plus p4_judge's lines.
+(1) B-066 said "crash rows 8" in my own count: wrong label. Those 8 rows (rich_4077, fastapi_14479, fastapi_14487, fastapi_15800, requests_6644, rich_3675, rich_3535, rich_3052) have exit 1 with no err: the agent finished inside the cap with a patch (402-5186 B, 10-28 calls, 100-288 s) and the tests failed - ordinary unsolved tasks, not crashes. Corrected own count: rows 74, unique ids 74, solved 26, crash rows 0, errored rows 0, cap hits 40, summed seconds 19594, median 302.0 s. The gate line in B-066 (0 crash, 0 errored, 26 solved) stands.
+(2) p4_judge appends to docs/v4h/GATE.md, not P2_LOG (P2_LOG gets the copy at FINALIZE); B-066 printed nothing for it. Its lines whole:
+### P4 A6000 screen RESULT: v0-think on the public 74 (2026-10-14 12:28 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 26/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 26/74 (base 34/74) | wins 3 losses 11 net -8 | rule: solved >= 37 and net >= +3
+won: rich_3676 rich_3772 rich_3777
+lost: fastapi_11194 fastapi_14616 fastapi_14873 fastapi_5077 fastapi_9753 requests_6644 rich_3043 rich_3063 rich_3506 rich_3521 rich_4077
+DROP: solved 26 < 37; net -8 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 40; errored rows 0; median task seconds 302; S(1) over clean windows = 1.22; over the whole log 1.22 (1754 calls; 0 of 33 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
