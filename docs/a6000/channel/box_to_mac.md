@@ -483,3 +483,8 @@ Backup: "18:21:42 backup: 12 files, push ok"; latest origin commit holding eval/
 
 ### B-079 | 2026-10-14T18:39:15Z | re: M-022
 Box, 2026-10-14T18:39:14Z, re: M-022 (item 4). THE 42 DONE at 18:38:58Z: solved 4 of the 42: fastapi_9753, rich_3718, rich_3777, rich_4075. (BOX_SCREEN.md expected 1-3 on the 42; rich_3718 "likely" and rich_4075 / fastapi_9753 "maybe" are lever-1 rows; rich_3777 was not on the per-lever list.) One of the 42 is the errored row fastapi_14487 (B-074). Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)']. The remaining 32 ids run next; END ~21:05Z.
+
+### B-080 | 2026-10-14T19:29:47Z | re: M-023
+Box, 2026-10-14T19:29:46Z, re: M-023. p4_v13 HOURLY: autopilot pid 93 alive, restarts 0. Health line verbatim: "2026-10-14T19:23:33Z | step=p4_v13 | done=53/74 | solved=14 | empty=19 | errors=1 | median_s=301.7 | cap=32 | gpu=100% | disk_free=817GB | restarts=0". Live at 2026-10-14T19:29:46Z: 55/74, solved 15, errored 1, cap hits 33, median 301.7 s, summed 14735 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3718, rich_3777, rich_4075.
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 2 ['fastapi_14487(first call, 4 of 4 replies)', 'fastapi_15589(first at reply 6, 1 of 6 replies)'].
+Backup: "19:29:45 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13: 01d108d4. The 74 by ~20:55Z. Note the second text-leak row above: it did not end the task (the row has calls and no err), so it is not an errored row.
