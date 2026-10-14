@@ -1830,3 +1830,44 @@ won: rich_3676 rich_3772 rich_3777
 lost: fastapi_11194 fastapi_14616 fastapi_14873 fastapi_5077 fastapi_9753 requests_6644 rich_3043 rich_3063 rich_3506 rich_3521 rich_4077
 DROP: solved 26 < 37; net -8 < +3`
 - helper reachability: 0/74 tasks with a can't-open; cap hits 40; errored rows 0; median task seconds 302; S(1) over clean windows = 1.22; over the whole log 1.22 (1754 calls; 0 of 33 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
+
+### P2 think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think) RESULT (2026-10-14 14:59 UTC)
+##### all items
+**think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think): 50 ids, arms v12, v0-think, v4h2, v7c, v7d, v5h2-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v0-think | 50 | 20 | 0.276-0.538 | 8 | 0 | 20 | 414 | 3 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v0-think vs v12 | 50 | 3 | 2 | 1.000 | -0.02 | NO EVIDENCE | 24 (1/1) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
+
+##### without contended items (v6p/arrow_0fe5f06, v6p-think/arrow_06fe693; in flight while the 21:48 supervisor restart had two race runners alive (the old runner pid 21342 and the duplicate 26870 / 28071 on the same queue))
+**think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think) without contended items: 50 ids, arms v12, v0-think, v4h2, v7c, v7d, v5h2-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v0-think | 50 | 20 | 0.276-0.538 | 8 | 0 | 20 | 414 | 3 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v0-think vs v12 | 50 | 3 | 2 | 1.000 | -0.02 | NO EVIDENCE | 24 (1/1) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+| v5h2-think vs v12 | 50 | 3 | 6 | 0.508 | +0.22 | UNRESOLVED | 16 (2/0) |
