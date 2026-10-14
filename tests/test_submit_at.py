@@ -164,3 +164,44 @@ def test_kaggle_17_listing_without_ref_column_submits_once(tmp_path):
 
 def test_kaggle_17_listing_still_detects_the_tag(tmp_path):
     assert _run17(tmp_path, ["sub11: v4h2g"], "sub11: v4h2g") == []
+
+
+def _fake_kaggle_pending(tmp, flips_after):
+    """The listing shows sub15b as SubmissionStatus.PENDING for the first `flips_after` listings, then COMPLETE."""
+    calls = tmp / "calls.txt"; n = tmp / "n"; n.write_text("0"); fake = tmp / "kaggle"
+    fake.write_text(f"""#!/bin/bash
+echo "$@" >> {calls}
+if [ "$2" = submissions ]; then
+  c=$(( $(cat {n}) + 1 )); echo $c > {n}
+  st=SubmissionStatus.COMPLETE; [ $c -le {flips_after} ] && st=SubmissionStatus.PENDING
+  echo 'ref,fileName,date,description,status,publicScore,privateScore'
+  echo "57154639,submission.zip,d,\\"sub15b: v12-b1024, box 74 public: solved 28/74\\",$st,,"
+  exit 0
+fi
+echo "Successfully submitted"
+""")
+    fake.chmod(0o755)
+    return fake, calls
+
+
+def test_waits_while_another_submission_is_still_scoring(tmp_path):
+    # regression 2026-10-14: sub16 got six 400s ("Your team already has 1 pending submissions; please wait for one to
+    # finish scoring") because sub15b was still scoring; the CLI hides that body. Wait on the listing instead.
+    fake, calls = _fake_kaggle_pending(tmp_path, flips_after=3)
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0",
+               SKIP_GPU_GUARD="1", PENDING_POLL="1")
+    subprocess.run(["bash", str(SCRIPT), "k", "0000", "sub16: v0-think"], env=env, check=True, timeout=60)
+    sub = [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
+    log = (tmp_path / "log.txt").read_text()
+    assert len(sub) == 1 and "still scoring" in log and "attempt 1: Successfully" in log
+
+
+def test_gives_up_without_submitting_if_still_scoring_at_the_deadline(tmp_path):
+    fake, calls = _fake_kaggle_pending(tmp_path, flips_after=10**6)
+    deadline = int(datetime.datetime.now(datetime.timezone.utc).timestamp()) + 3
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0",
+               SKIP_GPU_GUARD="1", PENDING_POLL="1", PENDING_DEADLINE_EPOCH=str(deadline))
+    p = subprocess.run(["bash", str(SCRIPT), "k", "0000", "sub16: v0-think"], env=env, timeout=60)
+    assert p.returncode == 4
+    assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
+    assert "still scoring at the pending deadline" in (tmp_path / "log.txt").read_text()

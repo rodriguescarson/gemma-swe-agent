@@ -46,10 +46,24 @@ if [ "${SKIP_GPU_GUARD:-0}" != 1 ]; then
     echo "$(date -u) [$(hostname -s)] waiting: own GPU kernels busy: $busy" >> "$LOG"; sleep 600
   done
 fi
-for i in 1 2 3 4 5 6; do
+# 2026-10-14: Kaggle allows ONE pending submission per team; sub16 got six 400s while sub15b was scoring (the body says
+# "Your team already has 1 pending submissions; please wait for one to finish scoring", the CLI prints only "Bad
+# Request"). Wait on the listing while any submission is PENDING (PENDING_POLL s, default 600), up to
+# PENDING_DEADLINE_EPOCH (0 = no deadline); a wait does not use up an attempt.
+pending() { "$KAGGLE" competitions submissions $COMP -v 2>/dev/null | grep -qiE ',(SubmissionStatus\.)?PENDING(,|$)'; }
+POLL_P=${PENDING_POLL:-600}; PDEAD=${PENDING_DEADLINE_EPOCH:-0}; waited=0; i=0
+while [ $i -lt 6 ]; do
   already; st=$?
   if [ $st -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG already on Kaggle, skipping" >> "$LOG"; break; fi
-  if [ $st -eq 2 ]; then echo "$(date -u) [$(hostname -s)] listing failed (network?), not submitting blind; retry $i" >> "$LOG"; sleep 120; continue; fi
+  if [ $st -eq 2 ]; then i=$((i + 1)); echo "$(date -u) [$(hostname -s)] listing failed (network?), not submitting blind; retry $i" >> "$LOG"; sleep 120; continue; fi
+  if pending; then
+    if [ "$PDEAD" -gt 0 ] && [ "$(date -u +%s)" -ge "$PDEAD" ]; then
+      echo "$(date -u) [$(hostname -s)] another submission still scoring at the pending deadline; not submitting" >> "$LOG"; exit 4; fi
+    [ $waited -eq 0 ] && echo "$(date -u) [$(hostname -s)] waiting: another submission is still scoring (pending); checking every ${POLL_P}s" >> "$LOG"
+    waited=1; sleep "$POLL_P"; continue
+  fi
+  [ $waited -eq 1 ] && { echo "$(date -u) [$(hostname -s)] no submission pending any more; submitting" >> "$LOG"; waited=0; }
+  i=$((i + 1))
   out=$("$KAGGLE" competitions submit $COMP -k "carsonrodrigues/$KERNEL" -v "${KERNEL_VERSION:-1}" -f submission.zip -m "$MSG" 2>&1 | tr "\n" " ")
   echo "$(date -u) [$(hostname -s)] attempt $i: $out" >> "$LOG"
   echo "$out" | grep -qi "success" && break
