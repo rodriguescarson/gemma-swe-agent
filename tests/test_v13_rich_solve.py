@@ -20,6 +20,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "submissions" / "v13"
 RULES_END = "if less than 90 seconds remain, submit what you have.\n"     # last line of v13's Rules list
+STEP1_END = "Do not read files that are not in the hits."                   # last sentence of v13's step 1 (Locate)
 MAX_TOKENS = 90
 
 # bundle -> (anchor in v13's prompt, text inserted right after it)
@@ -44,6 +45,14 @@ LEVERS = {
                     " quote as \\\" and a line break as \\n. In edits and scripts write the file's real characters (one"
                     " backslash for each \\\\ you see, a plain quote for each \\\"); if an old block is not found, check"
                     " this first.\n"),
+    # rich_4079: a three-word title with no identifier; 4 of 6 runs searched the second word's module first. Joining the
+    # title terms two at a time hits one file, the gold one (measured on 40 title-only public tasks: 9 hits, gold first
+    # in 6, in the top 3 in 8).
+    "v13_titlegrep": (STEP1_END,
+                      " If the issue names no identifier or error text, first git grep -n -i -E the title's main terms"
+                      " joined two at a time, in any order, with an optional underscore (for a title Alpha beta gamma:"
+                      " (alpha|beta|gamma)_?(alpha|beta|gamma)) over the *.py files; a hit names the code the title is"
+                      " about."),
 }
 
 
@@ -114,6 +123,19 @@ def test_jsonesc_states_the_escapes_the_installed_stack_really_shows():
     added = LEVERS["v13_jsonesc"][1]
     for real, seen in (("\\", "\\\\"), ('"', '\\"'), ("\n", "\\n")):
         assert _safe_json_serialize(real)[1:-1] == seen and seen in added, (real, seen)
+
+
+def test_titlegrep_example_pattern_finds_joined_names_and_not_single_words():
+    """The pattern the line spells out, used as git grep -i -E would, matches the joined forms in any order and case and
+    leaves lines that hold only one of the words."""
+    import re
+    added = LEVERS["v13_titlegrep"][1]
+    pat = re.search(r"\((\w+(?:\|\w+)+)\)_\?\((\w+(?:\|\w+)+)\)", added).group(0)
+    rx = re.compile(pat, re.I)
+    for hit in ("alpha_beta = 1", "def gamma_alpha():", "class BetaGamma:", "self.alphabeta"):
+        assert rx.search(hit), hit
+    for miss in ("alpha = beta", "def gamma():", "Beta and gamma"):
+        assert not rx.search(miss), miss
 
 
 @pytest.mark.parametrize("name", sorted(LEVERS))
