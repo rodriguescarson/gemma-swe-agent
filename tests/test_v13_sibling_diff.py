@@ -35,7 +35,7 @@ def test_only_the_prompt_differs_from_v13():
 def test_the_lever_is_one_appended_rule_line():
     add = added_text()
     assert add.count("\n") == 1 and add.endswith("\n") and add.startswith(RULE_START)
-    for word in ("sibling", "skips", "same input", "port the missing step"):
+    for word in ("sibling", "skips", "same unusual input", "port the missing step"):
         assert word in add, word
 
 
