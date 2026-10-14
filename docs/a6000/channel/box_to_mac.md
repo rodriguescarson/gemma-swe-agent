@@ -356,3 +356,12 @@ Box, 2026-10-14T06:50:36Z, re: M-020. v0t2 LAUNCHED. (1) head 6164dd2d (includes
 
 ### B-060 | 2026-10-14T06:50:41Z | re: M-019
 answered by B-058 (root cause: submissions/v0-think had no eval_config.yaml; run_eval refused before any model call, so the probe rows were never created and p4_v0t had no rows; nothing was crash-class at the model/tool level) and superseded by M-020, now running (B-059)
+
+### B-061 | 2026-10-14T07:02:22Z | re: M-020
+Box, 2026-10-14T07:02:21Z, re: M-020. probe_v0t2 END: "2026-10-14T07:01:31Z | step=probe_v0t2 | END done: done=0/4 solved=0" (the autopilot's own stat); wall time 06:49:31Z -> 07:01:31Z = 12.0 min, race "ALL_DONE 4 items in 634s" - real attempts, not a 0 s failure. Proxy: 200 status on every call seen (21/21 at 06:54Z), served base only.
+Rows (task_results.jsonl), all four end on the 5-minute cap, none crash-class:
+- trio_34e7a2e: resolved False, 12 tool calls / 12 LLM calls, 316.93 s, patch 1798 B, test_exit_code 1, error "Agent exceeded session timeout (5.0 min)"
+- trio_ac7b93f: resolved False, 15 / 15, 316.81 s, patch 3105 B, test_exit_code 2, same timeout error
+- typer_42196d4: resolved False, 24 / 24, 310.85 s, patch 0 B, test_exit_code -1, same timeout error
+- typer_8e75bc3: resolved False, 18 / 18, 310.88 s, patch 0 B, test_exit_code -1, same timeout error
+No "Tool '...' not found", KeyError, "Context variable not found", ContextWindowExceeded, "No LlmAgent model available", or code_analyzer/AgentTool failure in the probe dirs. Counters: tasks 4, solved 0, all must-zero counters 0, loops_ge5 0, budget_exhausted 0; verdict pass true. Read: v0-think runs, but with thinking on it spends the full 5 minutes on all 4 probe tasks (12-24 calls each); expect many cap hits on the 74. p4_v0t2 starts now; hourly lines follow.
