@@ -3,7 +3,10 @@
 near-starter agent with thinking on (forum 746250: thoughts carried 48-51/129 public, hidden 35/129); our own thinking-on agent
 v12 scored 0.15, and the starter has never been read on our side with thoughts carried. One change: include_thoughts false ->
 true in configs/sampling.yaml (shared by the root agent and code_analyzer). The 4,096 budget, temperature 0.2 and every prompt
-stay as v0. Written before the bundle was built."""
+stay as v0. Written before the bundle was built.
+Amendment (2026-10-14 12:25 IST, before any v0-think row existed; GAPS "sub16 amendment"): v0 ships no eval_config.yaml, so the
+scorer would give it its defaults (60 min / 100 calls / 500 turns) under the 12 h sequential limit, and our box tooling refused
+to run it at all (B-058). v0-think carries v12's eval_config.yaml byte for byte: the same budget as our line."""
 import filecmp, os, subprocess, sys
 from pathlib import Path
 
@@ -21,8 +24,11 @@ def all_files(d):
     return {str(p.relative_to(d)) for p in Path(d).rglob("*") if p.is_file()}
 
 
-def test_differs_from_v0_only_in_include_thoughts():
-    assert all_files(DST) == all_files(SRC)
+def test_differs_from_v0_only_in_include_thoughts_and_v12s_budget():
+    assert all_files(DST) == all_files(SRC) | {"eval_config.yaml"} and "eval_config.yaml" not in all_files(SRC)
+    v12 = ROOT / "submissions" / "v12" / "eval_config.yaml"
+    assert filecmp.cmp(DST / "eval_config.yaml", v12, shallow=False)
+    assert "max_time_minutes: 5" in v12.read_text() and "max_tool_calls: 40" in v12.read_text()
     for rel in sorted(all_files(SRC)):
         same = filecmp.cmp(SRC / rel, DST / rel, shallow=False)
         assert same == (rel != "configs/sampling.yaml"), rel
