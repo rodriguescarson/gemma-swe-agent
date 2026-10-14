@@ -17,14 +17,14 @@ Per-task clock: `scripts/forty_two/timing.py RUN_DIR PROXY_LOG [--table]` (metho
 
 | # | where the time goes / is lost | seconds on the 42 | tasks | what it is | label |
 |---|---|---|---|---|---|
-| 1 | model decode | 173 s per task (7,266 s) of 228 model s | 42 | ~75 % of output tokens are thinking (char-share estimate); 25 calls per task at 9.1 s each | MEASURED (thinking split ESTIMATE) |
+| 1 | model decode | 173 s per task (7,266 s) of 228 model s | 42 | ~75 % of output tokens are thinking (char-share estimate); 25 calls per task at 9.2 s each | MEASURED (thinking split ESTIMATE) |
 | 2 | locating: search + read calls | 116 s per task (17.4 calls) vs 58 s (9.4 calls) on the 28 solved | 42 | the 42 search twice as long; 21 of 42 never make a source edit; solved tasks first edit at call 10 / 114 s (median) | MEASURED |
 | 3 | compaction summaries + re-reads they cause | 848 s (30 summaries, 28 s each) + 446 s (82 re-reads of files already read) | 26 | ADK summarises the history at 14,336 prompt tokens with one extra unbounded thinking call; the summary sees no tool output and no verbatim issue | MEASURED + ADK source |
 | 4 | commands hung until the per-command timeout | 749 s | 4 (fastapi_14258 181, rich_3052 161, rich_3480 209, rich_4006 198) | infinite-loop repros; 180 s timeout (or the cap) ends them | MEASURED |
 | 5 | malformed edit_file / write_file calls | 560 s (883 s on all 74) | 5 (rich_3718 226, fastapi_14616 153, fastapi_9753 148, rich_4075 20, fastapi_14258 13) | 84 of 228 edit/write calls (37 %) lose an argument; 0 of 852 run_command calls do | MEASURED + vLLM parser source |
 | 6 | box slower than the L4 model | 1,612 s (38 s per task) | 42 | the pace proxy holds calls to the L4 time but cannot speed up a slower A6000 | MEASURED, box only |
-| 7 | repeated identical calls | 924 s (22 s per task) | 32 | overlaps rows 5 and 3 | MEASURED |
-| 8 | everything else: tools, prefill, harness | tools 0.06 s per non-hung call, prefill 14 s per task, harness gaps 0.2 s per task | 42 | search 2.6 s and targeted pytest 1.9 s in total over the 42 | MEASURED |
+| 7 | repeated identical calls | 941 s (22 s per task) | 26 | overlaps rows 5 and 3 | MEASURED |
+| 8 | everything else: tools, prefill, harness | tools under 0.02 s per non-hung call (18 of 768 tool-seconds over 1,022 calls), prefill 14 s per task, harness gaps 0.2 s per task | 42 | search 2.6 s and targeted pytest 1.9 s in total over the 42 | MEASURED |
 
 Top three findings by seconds that a bundle can recover:
 1. **Malformed multi-argument edits (560 s on 5 of the 42, 883 s on 11 of 74).** The model sometimes closes a string argument
@@ -69,7 +69,7 @@ tools or async tool execution cannot buy back time (section 11).
 | p4 (v5h2, thinking off) | the 42 | 42 | 4 | 159 | 147 | 98 | 24 | 19 | 0 % | 4 (13) | 7 | 1 | 51.5 |
 
 Reading: with thinking on, the 42 are a time problem in a way they were not with thinking off (30 vs 4-7 capped). A
-thinking-on call costs 9.1 s (b1024) against ~3 s off; the thinking-off pipelines made twice the calls and still finished early,
+thinking-on call costs 9.2 s (b1024) against ~3 s off; the thinking-off pipelines made twice the calls and still finished early,
 but never solved these 42 either (they failed on fix quality, eval/diagnosis.md).
 
 ## 3. The 42 on p4_b1024, task by task
@@ -80,7 +80,7 @@ re-reads after compaction, command timeouts) is section 3 of the report. Final s
 - **Capped with an empty patch, few long calls:** fastapi_14448, rich_3180, rich_3278, rich_3471, rich_3718, rich_3782, rich_3930,
   rich_3934, rich_3935, rich_3938, rich_3953 made 13-34 calls in 300 s. Their expensive calls are `python3 - <<EOF` experiment
   scripts and edits with ~1,000-1,300 output tokens (35-45 s each): thinking hits the 1,024 budget, then a long script follows.
-  In the thinking-off runs the same tasks touched a gold file.
+  Most of them touched a gold file in the thinking-off runs (section 10 of the report).
 - **Hung or malformed:** rich_3480, rich_4006 (two hung repros each, 6 calls in 300 s), fastapi_14258, rich_3052 (hung repro),
   rich_3718, fastapi_14616, fastapi_9753 (malformed-edit loops).
 
@@ -134,9 +134,12 @@ swallow, and 0 of 1,521 thinking-on run_command calls (many of them long heredoc
 | 60-170 s | 0 | 1 |
 | >= 170 s | 0 | 15 |
 
-The longest legitimate command was `pytest tests/` on rich at 7.5 s (L4). Gold-patch verification on Kaggle L4 takes at most
-12.6 s for all 129 public tasks (eval/kaggle/oracle_all; research/time_model.md sect. 1.2); on the box, verification of a
-non-hanging patch at most 6.9 s.
+Apart from those two, the longest finished command was `pytest tests/` on rich at 7.5 s (L4). Gold-patch verification on Kaggle
+L4 takes at most 12.6 s on the 74 valid public tasks (eval/kaggle/oracle_all/results.jsonl; the other 55 of the 129 fail even
+with the gold patch there, and some of those runs take up to 77 s, all requests tasks); on the box, verification of a
+non-hanging agent patch takes at most 6.9 s. research/harness_runtime.md sect. 7.4 notes that timeout_seconds is also the
+verification timeout in the local harness (so on the box), and its item 10 says to keep it >= 60 s; whether Kaggle's Stage 2
+metric reads it is UNVERIFIED (research/gap_5.md sect. 9).
 
 ## 8. Thinking volume (p4_b1024)
 
@@ -187,10 +190,10 @@ Built in submissions/v13 (Phase C, tests first):
 Considered and not built (why):
 - Thinking budget 512: up to 41 s per task back on the 42 (31 s on solved), but the long-thinking calls are where edits are
   designed; the 4,096 -> 1,024 step was neutral on 50 ids (19 vs 19). A separate single-variable read, not part of v13.
-- Faster search tools (ripgrep) and async tool execution: tool time is 0.06 s per non-hung call; search took 2.6 s in total over
+- Faster search tools (ripgrep) and async tool execution: tool time is under 0.02 s per non-hung call; search took 2.6 s in total over
   the 42 tasks. No trace ever ran `rg`, and whether the container has it is unverified; it would not matter.
 - Parallel tool calls in one turn: the harness would run them, but the model emitted more than one call in 0 of 1,688 turns on
-  p4_b1024 (7 of ~6,000 in v7c/v7d); nothing measured says a prompt line would change that.
+  p4_b1024 (7 of 6,167 in v7c/v7d); nothing measured says a prompt line would change that.
 - Narrower reads to delay compaction: halving read sizes delays the threshold by a few calls but adds read calls at 5.9 s each;
   no measured net.
 - Lower max_tool_calls (to bring the harness's budget warning earlier): solved tasks used up to 33 calls on the box and 40 on L4.
