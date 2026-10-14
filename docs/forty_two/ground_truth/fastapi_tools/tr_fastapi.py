@@ -109,9 +109,11 @@ def analyse(tid, run, box=True):
         pp = ROOT / "eval" / "a6000" / "results" / f"{run}_proxy.jsonl"
         for line in open(pp):
             p = json.loads(line)
-            if start - 1 <= p["t"] - p["latency_s"] and p["t"] <= end + 1:
+            # a task's first call starts about 1.5 s after its agent start; anything that started earlier belongs to the
+            # previous task (still in flight, e.g. a call the previous session's cap cut off)
+            if start - 0.1 <= p["t"] - p["latency_s"] and p["t"] <= end + 1:
                 proxy.append(p)
-            elif p["t"] - p["latency_s"] < start - 1 and p["t"] > start:   # the previous task's call still in flight
+            elif p["t"] - p["latency_s"] < start - 0.1 and p["t"] > start:   # the previous task's call still in flight
                 overlap_prev.append(round(p["t"] - start, 1))
         proxy.sort(key=lambda p: p["t"])
     pstarts = [p["t"] - p["latency_s"] for p in proxy]
