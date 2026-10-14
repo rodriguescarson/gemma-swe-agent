@@ -234,6 +234,8 @@ def run_tests(tree: Tree, py: str, targets, label: str, timeout: int, extra_env=
         junit.unlink()
     env = dict(os.environ, PYTHONSAFEPATH="1", PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
     env.pop("PYTHONPATH", None)
+    # the venv's bin first on PATH, as in the sandbox: tests that shell out to `python` must find this interpreter
+    env["PATH"] = str(Path(py).parent) + os.pathsep + env.get("PATH", "")
     if extra_env:
         env.update(extra_env)
     rc, o, e, secs = sh(bounded(pytest_cmd(py, targets, junit), timeout), cwd=tree.path, env=env, timeout=timeout + 60)
