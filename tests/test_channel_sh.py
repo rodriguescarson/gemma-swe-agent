@@ -62,6 +62,21 @@ def test_send_refuses_a_misordered_call_and_sends_nothing(tmp_path):
     assert ch(mac, "mac", "send", "B-054 read, thank you", "--re", "B-054").stdout.strip() == "M-001 sent"  # an id inside text is fine
 
 
+def test_read_survives_one_concurrent_fetch_failure(tmp_path):
+    """Regression 2026-10-14: the Mac's submitter fetches the same branch every 5 min; twice a channel pull collided with it
+    ("fatal: Cannot rebase onto multiple branches") and the waiter exited without printing the message. One failed sync is
+    retried."""
+    mac, box = _clones(tmp_path)
+    ch(box, "box", "send", "hourly: 42/74")
+    real = shutil.which("git"); bindir = tmp_path / "bin"; bindir.mkdir(); mark = tmp_path / "failed_once"
+    (bindir / "git").write_text(f'#!/bin/bash\ncase " $* " in *" pull "*|*" rebase "*) if [ ! -e "{mark}" ]; then touch "{mark}"; '
+                                f'echo "fatal: Cannot rebase onto multiple branches." >&2; exit 128; fi ;; esac\nexec "{real}" "$@"\n')
+    (bindir / "git").chmod(0o755)
+    r = subprocess.run(["bash", str(mac / "scripts/a6000/channel.sh"), "read"], cwd=mac, capture_output=True, text=True,
+                       env={**ENV, "CHANNEL_SIDE": "mac", "PATH": f"{bindir}:{os.environ['PATH']}"})
+    assert mark.exists() and r.returncode == 0 and "hourly: 42/74" in r.stdout, r.stdout + r.stderr
+
+
 def test_wait_times_out_cleanly_and_side_detection_defaults_to_mac_here(tmp_path):
     mac, box = _clones(tmp_path)
     r = ch(mac, "mac", "wait", "1", "0", check=False); assert r.returncode == 2 and "no message" in r.stdout

@@ -16,7 +16,9 @@ if [ -z "$SIDE" ]; then if grep -qi microsoft /proc/version 2>/dev/null || [ -d 
 if [ "$SIDE" = mac ]; then MINE=$DIR/mac_to_box.md; THEIRS=$DIR/box_to_mac.md; TAG=M; else MINE=$DIR/box_to_mac.md; THEIRS=$DIR/mac_to_box.md; TAG=B; fi
 MARK=$(git rev-parse --git-dir)/channel_read_$SIDE
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
-sync() { git pull -q --rebase --autostash origin "$BR"; }
+# retried: a concurrent fetch of the same branch (the Mac submitter's 5-minute poll) can fail one pull with "Cannot rebase onto
+# multiple branches" (2026-10-14, twice)
+sync() { local i; for i in 1 2 3; do git pull -q --rebase --autostash origin "$BR" && return 0; sleep 3; done; return 1; }
 new_since_mark() {                                   # THEIRS is append-only: print the lines after the last read mark, advance it
   local n=0; [ -f "$MARK" ] && n=$(cat "$MARK")
   tail -n +"$((n + 1))" "$THEIRS"
