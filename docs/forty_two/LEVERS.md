@@ -80,3 +80,65 @@ other quote style when the code contains three single quotes; no whitespace-tole
 used 0 times in the replay, all successes were exact). The model writes python heredocs fluently on this line (177 on
 p4_b1024; 3 of 255 python commands hit a SyntaxError). The harness's ToolErrorPlugin (installed swegemma 0.2.11,
 agent_runner.py:244) turns a call to a dropped tool into an error reply, not a crash.
+
+Two corrections to the replay found while running it: (1) the box's edit engine has an "unescaped" tier that the Mac's
+adk_eval_core 0.1.0 lacks, so 13 successful box edits per run (over-escaped quotes such as `\"\"\"`) could not be re-applied
+offline and their files dropped out of the replay ("state lost"); the template would refuse those as written. Over-escaping is a
+habit of the edit_file argument channel: among argument strings that contain a double quote, 25 of 131 (b1024) and 33 of 132
+(v0t2) edit_file old/new strings carried `\"`, against 3 of 183 python heredoc commands on b1024. (2) The template must run
+under the sandbox's Python 3.12: under macOS's /usr/bin/python3 (3.9) newer syntax fails to compile, so the tests and the replay
+put the venv's interpreter first on PATH.
+
+## Lever 2: per-command timeout 180 -> 60 s (eval_config.yaml timeout_seconds)
+
+**What it changes.** `timeout_seconds: 180` -> `60`. The task budget is unchanged: 5 minutes, 40 tool calls, 150 turns
+(tests/test_v13_bundle.py checks the file differs in that one value and that the harness's EvalConfig reads 60 as
+command_timeout_seconds with budget (5, 40, 150)). This does not touch the 12-hour arithmetic: the cap per task stays 5 minutes.
+
+**Why (MEASURED, TIMING.md sect. 7).** 15,090 run_command calls in 592 traces (six box runs, two Kaggle L4 runs): 15,069
+finished, the longest legitimate ones `find /` 58 s and `curl` 32 s (both on L4, both pointless), then `pytest tests/` 7.5 s.
+Every command at 60 s or more was a hang. On p4_b1024 four of the 42 lost 749 s to hangs: fastapi_14258 181 s, rich_3480 209 s,
+rich_4006 198 s, rich_3052 161 s (the last one still running when the cap fired, so its trace has no observation).
+
+**Offline evidence (docs/forty_two/evidence/hang_replay.txt, `scripts/forty_two/hang_replay.py`).** Each recorded hang re-run on
+the Mac in a copy of the task snapshot brought to the agent's state at that moment (its earlier writes and edits), with the
+task's offline venv, bounded at 60 s: 7 of 8 were still running at the bound (fastapi_14258 x2 runs, rich_3480 x3, rich_4006 x2);
+the v0t2 rich_3480 repro reached 4.7 GB in 28 s (on Kaggle's 4 GB container it would be killed with exit 137, on the box's
+subprocess sandbox it ran to the timeout). The 8th, rich_3052, could not be reproduced: two of the agent's edits did not
+re-apply offline (see lever 1, correction 1), so its replayed state lacks them and it failed fast instead. So the extra 120 s
+the old limit allowed bought nothing in any reproducible case.
+
+**Which of the 42 it should flip, and why.** Time back on the four hang tasks: rich_3480 and rich_4006 (two hangs each, 6 calls
+in 300 s on b1024; up to ~240 s back), fastapi_14258 (~120 s), rich_3052 (~100 s, inferred). The hang is the bug's own symptom
+(infinite loops); the fix still has to be right. Expected: maybe for each (rich_4006 and rich_3480 touched a gold file in older
+runs; their cloud dossiers, when they land, decide whether the fix is reachable).
+
+**Risk to the 32 tasks we solve sometimes.** None seen in the agent phase (no legitimate command over 58 s). The real risk is
+verification: in the local harness and on the box, timeout_seconds is also the verification pytest limit
+(research/harness_runtime.md sect. 7.4, swegemma verification.py). Gold verification takes at most 12.6 s on Kaggle L4 for the 74
+valid public tasks and agent-patch verification at most 6.9 s on the box, so 60 s is 4.7x the slowest; research/harness_runtime.md
+item 10 already set >= 60 s as the floor. Whether Kaggle's Stage 2 metric reads this value is UNVERIFIED (research/gap_5.md
+sect. 9); a hidden repo whose target tests take over 60 s would fail verification if it does. Fallback if the screen or a later
+read shows a verification timeout (exit 124 on a non-hanging patch): 90 s.
+
+## Considered and not built (with the reason)
+
+- **Issue text pinned in the instruction (`{problem_description}`).** Compaction (26 of the 42 tasks) summarises the issue away;
+  the system instruction survives it. Not built: no measured effect (re-reads after compaction are of files, not the issue), and it
+  adds 134 tokens per call (median; 540 at p90), which moves the compaction threshold earlier. Worth a separate read.
+- **Thinking budget 1,024 -> 512.** Up to 41 s per task back on the 42 (31 s on solved) by the L4 model; but the long-thinking
+  calls are where edits are designed, and the 4,096 -> 1,024 step was neutral on 50 ids (19 vs 19). A single-variable read on
+  its own, after v13.
+- **Faster search tools, async tool execution, parallel tool calls.** Tools take under 0.02 s per non-hung call; the model
+  emitted more than one call per turn in 0 of 1,688 b1024 turns.
+- **Narrower reads, lower max_tool_calls, lower temperature.** See TIMING.md sect. 11.
+- **Fix-quality rules from the cloud dossiers** (fail-first repro, sibling sweep of the replaced expression, run the module's test
+  file once, no identical resend). Not timing levers; the prompt already carries the sibling and no-identical-resend rules. Left for
+  the main session once all dossiers have landed.
+
+## Summary
+
+| lever | files | evidence (offline) | the 42 it should flip | expected | risk to the 32 |
+|---|---|---|---|---|---|
+| 1 edits through run_command | agent.yaml, prompts/system.md | 101 of 478 multi-argument edit/write calls malformed vs 0 of 1,521 run_command (two runs); vLLM parser reproduces the slip; template reproduces 148 of 153 replayable exact edits byte for byte and refuses the other 5 because the file would not compile | rich_3718 yes; fastapi_14616, fastapi_9753 maybe | +1 to +2 | ~3.5 s per edit; 2 solved tasks with intermediate uncompilable edits need a retry |
+| 2 per-command timeout 60 s | eval_config.yaml | no finished command >= 60 s in 15,090; 7 of 8 recorded hangs still running at 60 s | rich_3480, rich_4006, fastapi_14258, rich_3052 maybe | +0 to +2 | verification limit on the box (and on Kaggle if Stage 2 reads it): slowest valid verification 12.6 s |
