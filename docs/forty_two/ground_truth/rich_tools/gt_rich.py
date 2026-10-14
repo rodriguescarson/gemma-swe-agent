@@ -40,7 +40,7 @@ import time
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-BOX_RUNS = ["p4", "p4_v7", "p4_v7c", "p4_v7d", "p4_b1024", "p4_v0t2"]
+BOX_RUNS = ["p4", "p4_v7", "p4_v7c", "p4_v7d", "p4_b1024", "p4_v0t2", "p4_v13"]
 RUNS_DIR = "ev" + "al"  # the runs directory of this repo (spelled out in the docs)
 PINS = ["pytest==8.4.2", "Pygments==2.20.0", "markdown-it-py==4.0.0", "mdurl==0.1.2", "typing_extensions==4.15.0",
         "attrs==26.1.0", "iniconfig==2.3.0", "pluggy==1.6.0"]

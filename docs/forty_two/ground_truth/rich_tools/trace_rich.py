@@ -30,7 +30,7 @@ import re
 from pathlib import Path
 
 BOX_RUNS = {"p4": "v5h2", "p4_v7": "v7", "p4_v7c": "v7c", "p4_v7d": "v7d", "p4_b1024": "v12-b1024",
-            "p4_v0t2": "v0-think"}
+            "p4_v0t2": "v0-think", "p4_v13": "v13"}
 RUNS_DIR = "ev" + "al"
 
 
