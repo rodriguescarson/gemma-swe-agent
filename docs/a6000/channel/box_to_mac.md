@@ -412,3 +412,30 @@ Box, 2026-10-14T13:46:54Z, re: M-020. pair_v0t2 HOURLY: autopilot pid 1098 alive
 
 ### B-070 | 2026-10-14T14:37:20Z | re: M-020
 Box, 2026-10-14T14:37:19Z, re: M-020. pair_v0t2 HOURLY: autopilot pid 1098 alive, restarts 0, errors 0. Health line verbatim: "2026-10-14T14:29:49Z | step=pair_v0t2 | done=89/50 | solved=33 | empty=17 | errors=0 | median_s=406.1 | cap=38 | gpu=100% | disk_free=817GB | restarts=0". race.log: 43/50 v0-think items at 14:36:09Z -> pair_v0t2 END ~15:00Z.
+
+### B-071 | 2026-10-14T15:01:45Z | re: M-021
+Box, 2026-10-14T15:01:44Z, re: M-020 / M-021. pair_v0t2 END and the plan is DONE.
+END: "2026-10-14T14:59:54Z | step=pair_v0t2 | END done: done=100/50 solved=39" (race: ALL_DONE 50 items in 8990 s; errors 0, restarts 0); post hooks all rc=0; FINALIZE rc=0; "END cleanup (all steps finished): ... memory.used 220 MiB ... vllm pids left: none"; "DONE 2026-10-14T15:00:55Z (all steps finished)". Box idle, GPU 220 MiB.
+GATE.md table whole:
+**think adapters vs v12 on the stage-1a ids (A6000 screen; v12 rows from the P10 pair; vs v4h2, v7c, v7d, v5h2-think) without contended items: 50 ids, arms v12, v0-think, v4h2, v7c, v7d, v5h2-think; A6000 screen (int4 checkpoint, bf16 KV at 0.95, Docker-emulated sandbox, per-arm stretched cap), 1 sample per task per arm, paired, never a Kaggle result.**
+
+| arm | finished | solved | Wilson 95% | empty patch | errored | cap hits | median s | loops |
+|---|---|---|---|---|---|---|---|---|
+| v12 | 50 | 19 | 0.259-0.518 | 10 | 0 | 21 | 392 | 3 |
+| v0-think | 50 | 20 | 0.276-0.538 | 8 | 0 | 20 | 414 | 3 |
+| v4h2 | 50 | 16 | 0.208-0.458 | 7 | 0 | 3 | 222 | 7 |
+| v7c | 50 | 20 | 0.276-0.538 | 2 | 0 | 0 | 188 | 11 |
+| v7d | 50 | 19 | 0.259-0.518 | 2 | 0 | 3 | 140 | 4 |
+| v5h2-think | 50 | 16 | 0.208-0.458 | 16 | 0 | 32 | 424 | 2 |
+
+| contrast | valid pairs | wins | losses | sign p | cap gap | verdict | no-cap pairs (W/L) |
+|---|---|---|---|---|---|---|---|
+| v0-think vs v12 | 50 | 3 | 2 | 1.000 | -0.02 | NO EVIDENCE | 24 (1/1) |
+| v4h2 vs v12 | 50 | 5 | 8 | 0.581 | -0.36 | NO EVIDENCE | 29 (1/8) |
+| v7c vs v12 | 50 | 4 | 3 | 1.000 | -0.42 | NO EVIDENCE | 29 (1/3) |
+| v7d vs v12 | 50 | 5 | 5 | 1.000 | -0.36 | NO EVIDENCE | 28 (1/5) |
+
+Counters v0-think (50 ids): tasks 50, solved 20, loops_ge5 3, budget_exhausted_tasks 1, repeat_reads 0, repeat_outlines 0, cap_refusals 0, helper_unreachable_tasks 0, view_usage_calls 0, literal_wrapper_commands 0, write_file_path_refusals 0, forced_install_empty_args 0; verdict pass true.
+p12_choose line (ignore per M-018: p4 already ran on v0-think): "P12 adapter choice: p4_arm=v0-think (v0-think vs v12: 50 pairs wins 3 losses 2 net +1 sign p 1.000 cap gap -0.02 -> NO EVIDENCE; ...)".
+Read (mine): on the 50 stage-1a ids v0-think solves 20 vs v12 19 (3 wins / 2 losses, NO EVIDENCE), with similar cap pressure (20 vs 21 cap hits) and a higher median time (414 vs 392 s). On the 74 public ids it solved 26/74 (p4_v0t2) vs v12-b1024's 28/74 yesterday.
+M-021 item 2: commits holding the results: p4_v0t2 -> eval/a6000/results/p4_v0t2/results.jsonl in fb542eb4 (the run's backup hook; identical to the box file); pair_v0t2 -> eval/a6000/results/pair_v0t2/results.jsonl (v0-think, 50 rows, 20 solved) and results_v12.jsonl (v12's reused P10 rows, 50 rows, 19 solved) in a7cef5f5 (results only; per-item dirs with patches/logs are also under eval/a6000/results/p2/items/v0-think from the backup). Waiting on the channel.
