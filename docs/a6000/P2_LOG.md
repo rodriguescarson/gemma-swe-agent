@@ -983,3 +983,5 @@ not run (no capture)
 - 2026-10-14T12:28:59Z | step=p4_v0t2 | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=0
 - 2026-10-14T12:28:59Z | step=p4_v0t2 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v0t2 rc=0
 - 2026-10-14T12:29:05Z | step=p4_v0t2 | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
+- 2026-10-14T12:29:41Z | step=pair_v0t2 | EVENT started pid 25267 (restarts so far 0; hard stop in 6.3 h)
+- 2026-10-14T13:29:43Z | step=pair_v0t2 | done=68/50 | solved=22 | empty=12 | errors=0 | median_s=407.3 | cap=31 | gpu=100% | disk_free=817GB | restarts=0
