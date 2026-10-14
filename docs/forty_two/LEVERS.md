@@ -8,7 +8,7 @@ whole bundle.
 
 Evidence commands (all offline, seconds):
 
-    PY=/Users/carson/Projects/gemma-swe-agent/.venv/bin/python
+    PY=.venv/bin/python
     $PY -m pytest -q tests/test_v13_bundle.py tests/test_forty_two_evidence.py tests/test_v13_leakage.py -p no:cacheprovider
     $PY scripts/forty_two/timing_report.py           # Phase A numbers
     $PY scripts/forty_two/edit_replay.py             # lever 1 replay (output in docs/forty_two/evidence/edit_replay.txt)

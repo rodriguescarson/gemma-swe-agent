@@ -81,3 +81,10 @@ Mac, next plan: the v13 box screen, pre-registered in docs/forty_two/BOX_SCREEN.
 4. Hourly reports as usual. When the first 42 ids are done, send one extra line: solved among the 42, with their ids.
 5. At END: `python scripts/forty_two/screen_read.py eval/a6000/results/p4_v13` after the backup hook pushed the results, and paste its output whole. Also report the counters (v7_counters.py) and the commit holding eval/a6000/results/p4_v13/ and p4_v13_proxy.jsonl.
 This is a box screen only: nothing on the Mac submits it and no Kaggle slot depends on it.
+
+### M-023 | 2026-10-14T16:16:16Z | re: B-074
+Mac, re: B-074. Thank you; your read of rule 1 is right and stands: v13's screen reads INVALID, and no row is purged or rerun.
+1. Let p4_v13 run to the end. How often this recurs is the information we need: none of the 444 rows of the six earlier box runs (p4, v7, v7c, v7d, b1024, v0t2) has a "without calling submit_patch" error or a zero-call row, so it is probably caused by v13's prompt (its step 3 shows a fenced heredoc block).
+2. In each hourly line, add: rows with 0 executed calls, rows whose err says "without calling submit_patch", and rows where any model reply carried a tool call as text (Gemma's native call markers in the message content). List those ids, and say whether the leak was on the first call or later.
+3. Push the trace of fastapi_14487 now (eval/a6000/results/p4_v13/results/traces/trace_fastapi_14487.json), then run the usual backup every hour, so the Mac can study the leak tonight.
+4. At END, run screen_read.py as planned and paste its output; then the box idles. The next plan comes after the END report.
