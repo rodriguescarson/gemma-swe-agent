@@ -6,7 +6,11 @@ Lever 1 (edits through run_command): on p4_b1024 84 of 228 edit_file/write_file 
 the first code string with a backtick or quote instead of the <|"|> delimiter and vLLM's gemma4 parser swallowed the next
 argument), 883 s over 11 tasks; 0 of 1,521 thinking-on run_command calls were malformed. v13 drops edit_file and write_file and
 step 3 of the prompt gives one python heredoc that replaces an exact block, refuses a missing or repeated block, and refuses a
-result that does not compile, all before writing."""
+result that does not compile, all before writing.
+Lever 2 (per-command timeout 180 -> 60 s): of 15,090 recorded commands (six box runs + two L4 runs) none that finished took 60 s
+or more; every one at 60 s or more was a hang, and on p4_b1024 four of the 42 lost 161-209 s each to one. eval_config.yaml's
+timeout_seconds only (the per-command limit, also the local harness's verification limit); the 5-minute / 40-call / 150-turn
+budget is unchanged."""
 import filecmp, os, re, subprocess, sys
 from pathlib import Path
 
@@ -14,7 +18,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC, DST = ROOT / "submissions" / "v12-b1024", ROOT / "submissions" / "v13"
-LEVER_FILES = {"agent.yaml", "prompts/system.md"}          # files a lever has changed so far
+LEVER_FILES = {"agent.yaml", "prompts/system.md", "eval_config.yaml"}          # files a lever has changed so far
 
 
 def all_files(d):
@@ -110,6 +114,31 @@ def test_lever1_template_keeps_the_bytes_it_does_not_touch(tmp_path):
     r = _run(fill(edit_template(), "m.py", "Y = 2", "Y = 3"), tmp_path)
     assert r.returncode == 0, r.stderr
     assert (tmp_path / "m.py").read_bytes() == src.replace(b"Y = 2", b"Y = 3")
+
+
+def _budget(d):
+    return dict(re.findall(r"^  (\w+): (\d+)$", (d / "eval_config.yaml").read_text(), re.M))
+
+
+def test_lever2_per_command_timeout_is_60_s_and_the_task_budget_is_unchanged():
+    old, new = _budget(SRC), _budget(DST)
+    assert old["timeout_seconds"] == "180" and new["timeout_seconds"] == "60"
+    assert {k: v for k, v in new.items() if k != "timeout_seconds"} == {k: v for k, v in old.items() if k != "timeout_seconds"}
+    assert new == {"timeout_seconds": "60", "max_tool_calls": "40", "max_time_minutes": "5", "max_turns": "150"}
+    assert (DST / "eval_config.yaml").read_text() == (SRC / "eval_config.yaml").read_text().replace("timeout_seconds: 180", "timeout_seconds: 60")
+
+
+def test_lever2_the_harness_reads_the_new_timeout_as_the_per_command_limit():
+    """The box path: make_eval_kernel.read_budget (what run_eval.py passes as **budget) -> swegemma EvalConfig."""
+    from unittest.mock import MagicMock
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from make_eval_kernel import read_budget
+    from swegemma.config import EvalConfig
+    budget, src = read_budget(str(DST))
+    assert src == "eval_config.yaml"
+    cfg = EvalConfig(tasks_path=None, snapshots_dir=None, results_dir=None, submission_dir=DST, models=MagicMock(), **budget)
+    assert cfg.harness.command_timeout_seconds == 60
+    assert (cfg.budget.time_minutes, cfg.budget.tool_calls, cfg.budget.turns) == (5, 40, 150)
 
 
 def test_validator_passes():
