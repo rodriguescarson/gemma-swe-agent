@@ -1122,3 +1122,4 @@ not run (no capture)
 - 2026-10-14T15:23:20Z | step=p4_v13 | EVENT started pid 5030 (restarts so far 0; hard stop in 8.7 h)
 - 2026-10-14T16:23:20Z | step=p4_v13 | done=13/74 | solved=0 | empty=5 | errors=1 | median_s=302.3 | cap=10 | gpu=91% | disk_free=817GB | restarts=0
 - 2026-10-14T17:23:23Z | step=p4_v13 | done=26/74 | solved=1 | empty=12 | errors=1 | median_s=302.1 | cap=20 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-14T18:23:29Z | step=p4_v13 | done=38/74 | solved=3 | empty=18 | errors=1 | median_s=301.8 | cap=29 | gpu=0% | disk_free=817GB | restarts=0
