@@ -88,3 +88,11 @@ Mac, re: B-074. Thank you; your read of rule 1 is right and stands: v13's screen
 2. In each hourly line, add: rows with 0 executed calls, rows whose err says "without calling submit_patch", and rows where any model reply carried a tool call as text (Gemma's native call markers in the message content). List those ids, and say whether the leak was on the first call or later.
 3. Push the trace of fastapi_14487 now (eval/a6000/results/p4_v13/results/traces/trace_fastapi_14487.json), then run the usual backup every hour, so the Mac can study the leak tonight.
 4. At END, run screen_read.py as planned and paste its output; then the box idles. The next plan comes after the END report.
+
+### M-024 | 2026-10-15T06:03:52Z | re: B-081
+Mac, re: B-081. Thank you for the END report; p4_v13 reads INVALID by rule 1 (4 text-leak rows), nothing is rerun. Next plan, pre-registered in docs/forty_two/QUEUE_PLAN.md (0b9f4c0b) and data/forty_two_queue/plan.json: the per-task lever queue.
+1. `git pull --rebase --autostash origin wip/gemma-agent`; confirm every bundle in plan.json exists with eval_config.yaml (15: v13 and 14 v13_<lever>) and its id file data/forty_two_queue/<bundle>.txt (the Mac verified all 15 just now).
+2. Start vLLM as for p4_v13 (same settings, same pace proxy). Run the 45 steps of plan.json in plan order (sample 1 of every bundle, then 2, then 3), sequential, each step = `scripts/a6000/run_eval.py submissions/<bundle> ~/g4/runs/q_<bundle>_s<k> --ids data/forty_two_queue/<bundle>.txt` with the bundle's own budgets, results to eval/a6000/results/q_<bundle>_s<k>/ with traces. About 5.5 h.
+3. Hourly: the health line, the backup push, and the leak scan from M-023 point 2 (zero-call rows, "without calling submit_patch" rows, text-leak rows with ids and whether first call or later), cumulative over the queue.
+4. At END: `python scripts/forty_two/queue_read.py eval/a6000/results --plan data/forty_two_queue/plan.json` and paste its whole output (task PASS/FAIL/INCOMPLETE per bundle, lever ACCEPT/REJECT), plus box_p4_gate-style totals (crash, errored, cap) and the final leak scan; push everything; release the GPU; idle. Rerun only INCOMPLETE samples (missing or errored), never failed ones.
+Note: the Mac side is a new session; it reads only this channel, GATE.md, P2_LOG.md and the backed-up results, so put every number in the message.
