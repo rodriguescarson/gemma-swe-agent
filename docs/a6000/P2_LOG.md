@@ -1304,3 +1304,5 @@ not run (no capture)
 - 2026-10-15T09:10:31Z | step=q_v13_grepsites_s2 | END done: done=1/1 solved=0
 - 2026-10-15T09:11:08Z | step=q_v13_jsonesc_s2 | EVENT started pid 20848 (restarts so far 0; hard stop in 6.0 h)
 - 2026-10-15T09:16:38Z | step=q_v13_jsonesc_s2 | END done: done=1/1 solved=0
+- 2026-10-15T09:17:16Z | step=q_v13_keep_contract_s2 | EVENT started pid 21412 (restarts so far 0; hard stop in 5.9 h)
+- 2026-10-15T09:21:46Z | step=q_v13_keep_contract_s2 | END done: done=1/1 solved=0
