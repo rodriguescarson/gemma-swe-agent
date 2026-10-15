@@ -1268,3 +1268,5 @@ not run (no capture)
 - 2026-10-15T06:27:42Z | step=q_v13_s1 | END done: done=4/4 solved=2
 - 2026-10-15T06:28:20Z | step=q_v13_edge_sweep_s1 | EVENT started pid 3150 (restarts so far 0; hard stop in 8.7 h)
 - 2026-10-15T06:33:50Z | step=q_v13_edge_sweep_s1 | END done: done=1/1 solved=0
+- 2026-10-15T06:34:28Z | step=q_v13_flagvals_s1 | EVENT started pid 3686 (restarts so far 0; hard stop in 8.6 h)
+- 2026-10-15T06:37:58Z | step=q_v13_flagvals_s1 | END done: done=1/1 solved=1
