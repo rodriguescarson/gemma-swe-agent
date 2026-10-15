@@ -1346,3 +1346,5 @@ not run (no capture)
 - 2026-10-15T12:53:55Z | step=q_v13_repro_timeout_s3 | END done: done=1/1 solved=1
 - 2026-10-15T12:54:33Z | step=q_v13_sibling_diff_s3 | EVENT started pid 13410 (restarts so far 0; hard stop in 2.2 h)
 - 2026-10-15T13:00:03Z | step=q_v13_sibling_diff_s3 | END done: done=1/1 solved=0
+- 2026-10-15T13:00:40Z | step=q_v13_title_ident_s3 | EVENT started pid 14146 (restarts so far 0; hard stop in 2.1 h)
+- 2026-10-15T13:11:10Z | step=q_v13_title_ident_s3 | END done: done=2/2 solved=0
