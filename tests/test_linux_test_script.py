@@ -106,3 +106,12 @@ def test_read_only_inputs_are_bind_mounted_in_both_container_commands():
     assert 'RO_MOUNTS+=(-v "$PWD/eval/$d:/tmp/g4/eval/$d:ro")' in t and "for d in golden kaggle collect; do" in t
     block = t.split("read -r -d '' STAGE_SCRIPT <<'SH' || true\n", 1)[1].split("\nSH\n", 1)[0]
     assert '[ -e /tmp/g4/data ] || ln -s /g4/data /tmp/g4/data' in block
+
+
+def test_full_mode_takes_a_tests_subset():
+    """TESTS="tests/a.py::x tests/b.py" scripts/linux_test.sh runs only those in the real container environment (the 27
+    Linux-only failures of 2026-10-15 took 17 min per full iteration); unset = the whole tests/ tree, as before."""
+    t = S.read_text()
+    full = t[t.index('bash -c "$V10_SCRIPT"'):]
+    assert '-e "TESTS=${TESTS:-}"' in full
+    assert "python -m pytest -q -p no:cacheprovider ${TESTS:-tests} -k 'not shellcheck and not official_compiler'" in full

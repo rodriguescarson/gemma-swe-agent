@@ -12,8 +12,9 @@ dataset = sys.argv[sys.argv.index("--adapters-dataset") + 1] if "--adapters-data
 src = args[0]; name = os.path.basename(src.rstrip('/'))
 slug = args[1] if len(args) > 1 else f"g4agent-{name}"
 files, weights = {}, []
-for root, _, fs in os.walk(src):
-    for f in fs:
+for root, dirs, fs in os.walk(src):
+    dirs.sort()                              # filesystem order differs (APFS vs ext4): sorted = identical bytes everywhere
+    for f in sorted(fs):
         p = os.path.join(root, f); rel = os.path.relpath(p, src)
         if rel.startswith('.') or f == '.DS_Store' or '__pycache__' in rel or f.endswith('.pyc') or f.startswith('._'): continue
         if dataset and f.endswith('.safetensors'):

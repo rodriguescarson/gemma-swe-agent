@@ -72,19 +72,19 @@ SH
     "python:${PY}-slim" bash -c "$V10_SCRIPT"
 fi
 
-# Whole suite. The harness wheels are installed because the v10 tests import swegemma/ADK (without them 150+ tests
+# Whole suite (TESTS="tests/a.py::x tests/b.py" = that subset, same container environment). The harness wheels are installed because the v10 tests import swegemma/ADK (without them 150+ tests
 # failed with ModuleNotFoundError), and the exit code is pytest's: the old '| tail -5' always exited 0 (integrator,
 # 2026-09-28: a run with 152 failures reported success).
 # The steps follow the container command (a heredoc inside the command substitution), not a heredoc above it, so
 # the static test that slices from the last container command (tests/test_v10_integration.py) still sees the wheel
 # install and the exit line. Shared staging first (STAGE_SCRIPT above), then the whole suite.
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -e "TESTS=${TESTS:-}" -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
 $(cat <<'SH'
 pip -q install pytest pyarrow >/dev/null 2>&1
 pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'
 pip -q install peft==0.21.0 >/dev/null 2>&1 || echo 'WARN peft not installed: train/qlora tests will fail'   # the Mac venv pin
 git config --global user.email a@b; git config --global user.name a
-PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider ${TESTS:-tests} -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
 rc=$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc
 SH
 )"

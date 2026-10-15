@@ -109,8 +109,9 @@ def read_budget(bundle, overrides=None, use_yaml=True):
 
 def bundle_files(bundle):
     files = {}
-    for root, _, fs in os.walk(bundle):
-        for f in fs:
+    for root, dirs, fs in os.walk(bundle):
+        dirs.sort()                          # filesystem order differs (APFS vs ext4): sorted = identical bytes everywhere
+        for f in sorted(fs):
             rel = os.path.relpath(os.path.join(root, f), bundle)
             if rel.startswith(".") or "__pycache__" in rel or f.endswith(".pyc") or f.startswith("._") or f == ".DS_Store":
                 continue
