@@ -1340,3 +1340,5 @@ not run (no capture)
 - 2026-10-15T11:54:30Z | step=q_v13_lost_search_s3 | END done: done=1/1 solved=0
 - 2026-10-15T11:55:08Z | step=q_v13_modtests_s3 | EVENT started pid 7292 (restarts so far 0; hard stop in 3.2 h)
 - 2026-10-15T12:00:38Z | step=q_v13_modtests_s3 | END done: done=1/1 solved=1
+- 2026-10-15T12:01:15Z | step=q_v13_redfirst_s3 | EVENT started pid 7968 (restarts so far 0; hard stop in 3.1 h)
+- 2026-10-15T12:48:15Z | step=q_v13_redfirst_s3 | END done: done=9/9 solved=0
