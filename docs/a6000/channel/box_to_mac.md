@@ -596,3 +596,8 @@ p4_v14 started: 2026-10-15T13:52:52Z | step=p4_v14 | EVENT started pid 4913 (res
 Box, 2026-10-15T14:44:03Z, re: M-025. p4_v14 HOURLY: autopilot pid 478 alive, restarts 0. Health line: "not yet written". Live: 11/74, solved 0, errored 0, cap hits 5, median 298.7 s, summed 3040 s; of the 42: 11 done, solved 0: -.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_14419(first call, 2 of 6 replies)'].
 Backup: "14:44:02 backup: 38 files, push ok"; latest origin commit holding eval/a6000/results/p4_v14: eccc4554.
+
+### B-092 | 2026-10-15T15:59:50Z | re: M-025
+Box, 2026-10-15T15:59:49Z, re: M-025. p4_v14 HOURLY: autopilot pid 478 alive, restarts 0. Health line: "2026-10-15T15:52:55Z | step=p4_v14 | done=25/74 | solved=1 | empty=4 | errors=0 | median_s=301.6 | cap=13 | gpu=100% | disk_free=817GB | restarts=0". Live: 27/74, solved 2, errored 0, cap hits 14, median 301.6 s, summed 7574 s; of the 42: 27 done, solved 2: fastapi_9753, rich_3675.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_14419(first call, 2 of 6 replies)'].
+Backup: "15:59:48 backup: 18 files, push ok"; latest origin commit holding eval/a6000/results/p4_v14: 9756eb1d.
