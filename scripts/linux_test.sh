@@ -13,6 +13,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="${PY:-3.12}"
+# Free-disk guard (2026-10-15: the Docker VM grew 11 GB in 5 min and took the Mac to 0 GB free twice in one afternoon). The
+# container needs ~10 GB (pip cache, torch site-packages, the 1.7 GB staged copy, per-test workspace copies). MIN_FREE_GB=0 disables.
+MIN_FREE_GB=${MIN_FREE_GB:-12}
+free_gb=$(python3 -c 'import shutil; print(shutil.disk_usage(".").free // 2**30)')
+if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
+  echo "linux_test.sh: only ${free_gb} GB free on this disk (MIN_FREE_GB=${MIN_FREE_GB}); not starting the container" >&2; exit 3
+fi
+# The task workspaces (~/.cache/g4/ws, 24 GB on 2026-10-15) are bind-mounted from the Mac, never rebuilt inside the VM: the
+# full suite had written 12 GB of them by 32% and filled the disk. kpar venvs are platform-specific and stay in the container.
+G4_WS="${G4_WS:-$HOME/.cache/g4/ws}"; mkdir -p "$G4_WS"
 case "$PY" in
   3.12|3.13) ;;
   *) echo "linux_test.sh: PY must be 3.12 or 3.13, not $PY" >&2; exit 2 ;;
@@ -52,7 +62,7 @@ exit $rc
 SH
   V10_SCRIPT="$STAGE_SCRIPT"$'\n'"$V10_SCRIPT"            # staging first (shared block above), then the v10 steps
   exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
-    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp \
+    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws -w /tmp \
     "python:${PY}-slim" bash -c "$V10_SCRIPT"
 fi
 
@@ -62,7 +72,7 @@ fi
 # The steps follow the container command (a heredoc inside the command substitution), not a heredoc above it, so
 # the static test that slices from the last container command (tests/test_v10_integration.py) still sees the wheel
 # install and the exit line. Shared staging first (STAGE_SCRIPT above), then the whole suite.
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
 $(cat <<'SH'
 pip -q install pytest pyarrow >/dev/null 2>&1
 pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'

@@ -1,7 +1,7 @@
 """scripts/linux_test.sh must never copy data/ (40 GB) into the container: on 2026-10-15 the whole-suite branch's
 `cp -r /g4 /tmp/g4` filled the Docker VM (read-only file system, daemon down) and ship.sh refused v13. The V10_ONLY branch
 already stages with tar excludes + symlinks; both branches must. Written before the fix."""
-import pathlib, re, shutil, subprocess
+import os, pathlib, re, shutil, subprocess
 
 S = pathlib.Path(__file__).resolve().parents[1] / "scripts" / "linux_test.sh"
 
@@ -48,3 +48,26 @@ def test_staging_keeps_eval_scripts_and_links_the_big_inputs(tmp_path):
         assert (dst / "eval" / big).is_symlink(), big
     assert not list((dst / "tests").glob("__pycache__"))
     shutil.rmtree(dst)        # ~1.5 GB per copy; pytest keeps the last 3 basetemps, which emptied the disk on 2026-10-15
+
+
+def test_both_container_commands_mount_the_workspace_cache_but_not_kpar():
+    """Regression (2026-10-15, Linux iteration 1): the full suite rebuilt ~/.cache/g4/ws inside the Docker VM (12 GB by 32%
+    of the suite; the Mac's copy is 24 GB) and took the Mac to 0 GB free. The workspaces are bind-mounted from the Mac.
+    kpar venvs are platform-specific (Mac binaries) and must stay inside the container."""
+    t = S.read_text()
+    assert 'G4_WS="${G4_WS:-$HOME/.cache/g4/ws}"' in t
+    lines = t.splitlines(); cmds = []
+    for i, l in enumerate(lines):                 # a command = its line plus the backslash continuations
+        if re.match(r"\s*(exec )?docker run ", l):
+            c = l
+            while c.rstrip().endswith("\\"): i += 1; c += lines[i]
+            cmds.append(c)
+    assert len(cmds) == 2 and all('-v "$G4_WS":/root/.cache/g4/ws' in c for c in cmds), cmds
+    assert "kpar" not in "".join(cmds)
+
+
+def test_refuses_to_start_when_the_disk_is_low(tmp_path):
+    """The Docker VM grew 11 GB in 5 minutes twice on 2026-10-15; the guard runs before any container starts."""
+    r = subprocess.run(["bash", str(S)], env=dict(os.environ, MIN_FREE_GB="100000"), capture_output=True, text=True,
+                       timeout=60, cwd=str(S.parents[1]))
+    assert r.returncode == 3 and "GB free" in r.stderr and "MIN_FREE_GB" in r.stderr, (r.returncode, r.stderr[-500:])
