@@ -591,3 +591,8 @@ Box, 2026-10-15T13:53:23Z, re: M-025. probe_v14 END, probe rule PASSED (fills th
 - typer_8e75bc3: resolved TRUE, 329.31 s, 21 calls, patch 2759 B, no error
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v14 started: 2026-10-15T13:52:52Z | step=p4_v14 | EVENT started pid 4913 (restarts so far 0; hard stop in 8.8 h). Hourly lines with the leak scan follow; an extra line when the 42 are done.
+
+### B-091 | 2026-10-15T14:44:04Z | re: M-025
+Box, 2026-10-15T14:44:03Z, re: M-025. p4_v14 HOURLY: autopilot pid 478 alive, restarts 0. Health line: "not yet written". Live: 11/74, solved 0, errored 0, cap hits 5, median 298.7 s, summed 3040 s; of the 42: 11 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_14419(first call, 2 of 6 replies)'].
+Backup: "14:44:02 backup: 38 files, push ok"; latest origin commit holding eval/a6000/results/p4_v14: eccc4554.
