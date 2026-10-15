@@ -1330,3 +1330,5 @@ not run (no capture)
 - 2026-10-15T11:26:46Z | step=q_v13_edge_sweep_s3 | END done: done=1/1 solved=0
 - 2026-10-15T11:27:24Z | step=q_v13_flagvals_s3 | EVENT started pid 3917 (restarts so far 0; hard stop in 3.7 h)
 - 2026-10-15T11:30:54Z | step=q_v13_flagvals_s3 | END done: done=1/1 solved=1
+- 2026-10-15T11:31:31Z | step=q_v13_grepsites_s3 | EVENT started pid 4473 (restarts so far 0; hard stop in 3.6 h)
+- 2026-10-15T11:37:01Z | step=q_v13_grepsites_s3 | END done: done=1/1 solved=0
