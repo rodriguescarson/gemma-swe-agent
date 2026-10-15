@@ -23,26 +23,32 @@ fi
 # The task workspaces (~/.cache/g4/ws, 24 GB on 2026-10-15) are bind-mounted from the Mac, never rebuilt inside the VM: the
 # full suite had written 12 GB of them by 32% and filled the disk. kpar venvs are platform-specific and stay in the container.
 G4_WS="${G4_WS:-$HOME/.cache/g4/ws}"; mkdir -p "$G4_WS"
+# Read-only inputs bind-mounted at their in-tree paths (real directories, so paths relativise as on the Mac; a symlinked
+# data/ made test_committed_split_equals_recomputation record /tmp/g4/data/... instead of data/...).
+RO_MOUNTS=(-v "$PWD/data:/tmp/g4/data:ro")
+for d in golden kaggle collect; do if [ -d "eval/$d" ]; then RO_MOUNTS+=(-v "$PWD/eval/$d:/tmp/g4/eval/$d:ro"); fi; done
 case "$PY" in
   3.12|3.13) ;;
   *) echo "linux_test.sh: PY must be 3.12 or 3.13, not $PY" >&2; exit 2 ;;
 esac
 
 read -r -d '' STAGE_SCRIPT <<'SH' || true
-apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y git >/dev/null 2>&1
+apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y git procps >/dev/null 2>&1   # procps: pgrep/ps for the A6000 + bounded tests
 mkdir -p /tmp/g4
 (cd /g4 && tar -cf - --exclude=./.venv --exclude=./data --exclude=./eval --exclude=./backups \
    --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4
-ln -s /g4/data /tmp/g4/data
+[ -e /tmp/g4/data ] || ln -s /g4/data /tmp/g4/data
 mkdir -p /tmp/g4/eval
-(cd /g4/eval && tar -cf - --exclude=./collect --exclude=./golden --exclude=./kaggle --exclude=./a6000 --exclude=./runs \
-   --exclude=./race1 --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4/eval
-for d in race1 kaggle golden a6000 collect runs; do if [ -d "/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
+(cd /g4/eval && tar -cf - --exclude=./collect --exclude=./golden --exclude=./kaggle \
+   --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4/eval
+# In Docker the read-only inputs are bind mounts at these paths already (real directories: paths relativise like on the Mac);
+# the symlinks are the fallback when this block runs outside Docker (tests/test_linux_test_script.py, test_v10_2_bundle.py).
+for d in golden kaggle collect; do if [ -d "/g4/eval/$d" ] && [ ! -e "/tmp/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
 cd /tmp/g4 || exit 1
 SH
-# data/ (40 GB on 2026-10-15) is symlinked, never copied: a copy fills the Docker VM and the daemon dies. eval/ is copied
-# minus its big read-only inputs (collect, golden, kaggle, a6000, runs, race1), which are symlinked: its scripts
-# (eval/locate_recall_heldout.py is imported by a test module) and small outputs must be present and writable.
+# data/ (40 GB on 2026-10-15) is never copied: a copy fills the Docker VM and the daemon dies. eval/ is copied minus its big
+# read-only inputs (collect, golden, kaggle): its scripts (eval/locate_recall_heldout.py is imported by a test module) and
+# outputs (eval/runs is written by the pace-proxy test) must be present and writable.
 
 if [ "${V10_ONLY:-0}" = 1 ]; then
   read -r -d '' V10_SCRIPT <<'SH' || true
@@ -62,7 +68,7 @@ exit $rc
 SH
   V10_SCRIPT="$STAGE_SCRIPT"$'\n'"$V10_SCRIPT"            # staging first (shared block above), then the v10 steps
   exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
-    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws -w /tmp \
+    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -w /tmp \
     "python:${PY}-slim" bash -c "$V10_SCRIPT"
 fi
 
@@ -72,10 +78,11 @@ fi
 # The steps follow the container command (a heredoc inside the command substitution), not a heredoc above it, so
 # the static test that slices from the last container command (tests/test_v10_integration.py) still sees the wheel
 # install and the exit line. Shared staging first (STAGE_SCRIPT above), then the whole suite.
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
 $(cat <<'SH'
 pip -q install pytest pyarrow >/dev/null 2>&1
 pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'
+pip -q install peft==0.21.0 >/dev/null 2>&1 || echo 'WARN peft not installed: train/qlora tests will fail'   # the Mac venv pin
 git config --global user.email a@b; git config --global user.name a
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
 rc=$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc

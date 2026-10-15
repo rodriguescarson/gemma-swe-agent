@@ -44,8 +44,10 @@ def test_staging_keeps_eval_scripts_and_links_the_big_inputs(tmp_path):
     dst = _stage(tmp_path / "g4")
     assert (dst / "eval" / "locate_recall_heldout.py").is_file() and (dst / "eval" / "locate_recall.py").is_file()
     assert (dst / "data").is_symlink()
-    for big in ("golden", "kaggle", "race1", "collect"):
+    for big in ("golden", "kaggle", "collect"):          # the only read-only inputs; in Docker they are bind mounts
         assert (dst / "eval" / big).is_symlink(), big
+    for writable in ("runs", "a6000", "race1"):          # tests write here (pace_proxy_test.jsonl under eval/runs)
+        assert (dst / "eval" / writable).is_dir() and not (dst / "eval" / writable).is_symlink(), writable
     assert not list((dst / "tests").glob("__pycache__"))
     shutil.rmtree(dst)        # ~1.5 GB per copy; pytest keeps the last 3 basetemps, which emptied the disk on 2026-10-15
 
@@ -71,3 +73,36 @@ def test_refuses_to_start_when_the_disk_is_low(tmp_path):
     r = subprocess.run(["bash", str(S)], env=dict(os.environ, MIN_FREE_GB="100000"), capture_output=True, text=True,
                        timeout=60, cwd=str(S.parents[1]))
     assert r.returncode == 3 and "GB free" in r.stderr and "MIN_FREE_GB" in r.stderr, (r.returncode, r.stderr[-500:])
+
+
+def _container_commands():
+    lines = S.read_text().splitlines(); cmds = []
+    for i, l in enumerate(lines):
+        if re.match(r"\s*(exec )?docker run ", l):
+            c = l
+            while c.rstrip().endswith("\\"): i += 1; c += lines[i]
+            cmds.append(c)
+    return cmds
+
+
+def test_container_has_procps_and_the_full_suite_has_peft():
+    """Linux iteration 2 (2026-10-15): 15 tests shell out to pgrep/ps (A6000 autopilot + guard, backup_captures, bounded.py)
+    and python:3.12-slim ships without procps; train/qlora_model imports peft, which only the Mac venv had."""
+    t = S.read_text()
+    block = t.split("read -r -d '' STAGE_SCRIPT <<'SH' || true\n", 1)[1].split("\nSH\n", 1)[0]
+    assert re.search(r"apt-get -qq install -y git procps", block), block
+    full = t[t.index('bash -c "$V10_SCRIPT"'):]
+    assert "pip -q install peft==" in full
+
+
+def test_read_only_inputs_are_bind_mounted_in_both_container_commands():
+    """data/ and the big eval inputs as symlinks broke path relativisation (test_committed_split_equals_recomputation saw
+    /tmp/g4/data/... instead of data/...); in Docker they are read-only bind mounts at their real paths, and the staging's
+    symlinks are only a fallback for running the block outside Docker (the tests above)."""
+    t = S.read_text()
+    for c in _container_commands():
+        assert '"${RO_MOUNTS[@]}"' in c, c
+    assert 'RO_MOUNTS=(-v "$PWD/data:/tmp/g4/data:ro")' in t
+    assert 'RO_MOUNTS+=(-v "$PWD/eval/$d:/tmp/g4/eval/$d:ro")' in t and "for d in golden kaggle collect; do" in t
+    block = t.split("read -r -d '' STAGE_SCRIPT <<'SH' || true\n", 1)[1].split("\nSH\n", 1)[0]
+    assert '[ -e /tmp/g4/data ] || ln -s /g4/data /tmp/g4/data' in block
