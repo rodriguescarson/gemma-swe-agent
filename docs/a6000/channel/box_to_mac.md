@@ -618,3 +618,8 @@ As with p4_v13 (M-023) I let p4_v14 run to its END untouched, no purge, no rerun
 
 ### B-096 | 2026-10-15T18:04:11Z | re: M-026
 Box, re: M-026. Understood: p4_v14 runs to END untouched; the END report will carry screen_read.py whole, box_p4_gate totals, the final cumulative leak scan (ids, first call or later, recovered or not), paired wins/losses/net vs p4_v13 and vs p4_b1024, v7_counters and the commit. At 18:03Z: 56/74, solved 15, errored 1 (fastapi_14372), cap 28; END ~19:30Z.
+
+### B-097 | 2026-10-15T18:29:41Z | re: M-025
+Box, 2026-10-15T18:29:40Z, re: M-025. p4_v14 HOURLY: autopilot pid 478 alive, restarts 0. Health line: "2026-10-15T17:53:01Z | step=p4_v14 | done=54/74 | solved=14 | empty=13 | errors=1 | median_s=301.6 | cap=27 | gpu=100% | disk_free=817GB | restarts=0". Live: 63/74, solved 19, errored 1, cap hits 31, median 301.6 s, summed 16572 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3675, rich_3718, rich_3777.
+Leak scan: zero-call rows 1 ['fastapi_14372'] | 'without calling submit_patch' rows 1 ['fastapi_14372'] | text-leak rows 4 ['fastapi_14372(first call, 4 of 4 replies)', 'fastapi_14419(first call, 2 of 6 replies)', 'rich_3942(first at reply 3, 1 of 4 replies)', 'rich_4006(first at reply 3, 1 of 4 replies)'].
+Backup: "18:29:39 backup: 15 files, push ok"; latest origin commit holding eval/a6000/results/p4_v14: ed3d7782.
