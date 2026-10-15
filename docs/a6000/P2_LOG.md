@@ -1495,3 +1495,4 @@ not run (no capture)
 - 2026-10-15T13:52:52Z | step=p4_v14 | EVENT started pid 4913 (restarts so far 0; hard stop in 8.8 h)
 - 2026-10-15T14:52:52Z | step=p4_v14 | done=12/74 | solved=0 | empty=1 | errors=0 | median_s=298.2 | cap=5 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-15T15:52:55Z | step=p4_v14 | done=25/74 | solved=1 | empty=4 | errors=0 | median_s=301.6 | cap=13 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-15T16:52:58Z | step=p4_v14 | done=38/74 | solved=4 | empty=10 | errors=0 | median_s=301.6 | cap=23 | gpu=0% | disk_free=817GB | restarts=0
