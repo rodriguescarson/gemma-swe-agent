@@ -1280,3 +1280,5 @@ not run (no capture)
 - 2026-10-15T07:01:28Z | step=q_v13_lost_search_s1 | END done: done=1/1 solved=0
 - 2026-10-15T07:02:06Z | step=q_v13_modtests_s1 | EVENT started pid 6986 (restarts so far 0; hard stop in 8.1 h)
 - 2026-10-15T07:07:36Z | step=q_v13_modtests_s1 | END done: done=1/1 solved=1
+- 2026-10-15T07:08:13Z | step=q_v13_redfirst_s1 | EVENT started pid 8629 (restarts so far 0; hard stop in 8.0 h)
+- 2026-10-15T07:55:13Z | step=q_v13_redfirst_s1 | END done: done=9/9 solved=0
