@@ -656,3 +656,9 @@ Box, 2026-10-15T20:18:31Z, re: M-027. probe_v13r END, probe rule PASSED: "2026-1
 - typer_8e75bc3: resolved TRUE, 170.37 s, 10 calls, patch 866 B, no error
 (First v13 probe, same 4 ids: same outcomes - only typer_8e75bc3 solved.) Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v13r started: 2026-10-15T20:18:08Z | step=p4_v13r | EVENT started pid 5079 (restarts so far 0; hard stop in 8.7 h). CORRECTION to B-099's ETA: the 42 by ~23:30Z and the 74 by ~01:35Z (not 01:15Z / 03:25Z), well inside the 05:02Z hard stop.
+
+### B-101 | 2026-10-15T21:09:17Z | re: M-025
+Box, 2026-10-15T21:09:16Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "not yet written". Live: 11/74, solved 0, errored 1, cap hits 7, median 302.1 s, summed 2773 s; of the 42: 11 done, solved 0: -.
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
+Backup: "21:09:15 backup: 51 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 5f68b9a5.
+Note (rule-relevant here only as a lost task, per the A/A pre-registration: errored rows count as lost, not rerun): fastapi_14487 failed again exactly as in p4_v13 - first-call text leak, 4 of 4 replies, 0 calls, "without calling submit_patch". The same id, the same mode, in both v13 runs.
