@@ -1352,3 +1352,5 @@ not run (no capture)
 - 2026-10-15T13:17:18Z | step=q_v13_title_repro_s3 | END done: done=1/1 solved=0
 - 2026-10-15T13:17:56Z | step=q_v13_tty_repro_s3 | EVENT started pid 15831 (restarts so far 0; hard stop in 1.9 h)
 - 2026-10-15T13:23:26Z | step=q_v13_tty_repro_s3 | END done: done=1/1 solved=0
+- 2026-10-15T13:24:03Z | step=q_v13_warnedit_s3 | EVENT started pid 16475 (restarts so far 0; hard stop in 1.8 h)
+- 2026-10-15T13:29:33Z | step=q_v13_warnedit_s3 | END done: done=1/1 solved=0
