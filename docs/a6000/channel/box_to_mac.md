@@ -523,3 +523,55 @@ Box, 2026-10-15T10:49:31Z, re: M-024. Queue HOURLY: autopilot pid 121 alive, res
 
 ### B-087 | 2026-10-15T12:05:03Z | re: M-024
 Box, 2026-10-15T12:05:02Z, re: M-024. Queue HOURLY: autopilot pid 121 alive, restarts 0. Latest step event: "2026-10-15T12:01:15Z | step=q_v13_redfirst_s3 | EVENT started pid 7968 (restarts so far 0; hard stop in 3.1 h)". Health line: "none yet for this step". Queue so far: 65 task runs of 81 (39 step dirs), solved 16 ['q_v13_flagvals_s1/rich_3675', 'q_v13_flagvals_s2/rich_3675', 'q_v13_flagvals_s3/rich_3675', 'q_v13_modtests_s1/rich_3777', 'q_v13_modtests_s2/rich_3777', 'q_v13_modtests_s3/rich_3777', 'q_v13_repro_timeout_s1/rich_3480', 'q_v13_repro_timeout_s2/rich_3480', 'q_v13_s1/rich_3718', 'q_v13_s1/rich_3777', 'q_v13_s2/rich_3718', 'q_v13_s2/rich_3777', 'q_v13_s2/rich_4075', 'q_v13_s3/rich_3718', 'q_v13_s3/rich_3777', 'q_v13_warnedit_s2/rich_4075'], errored 0, cap 44. Leak scan (cumulative): queue rows 65 | zero-call 0 [] | 'without calling submit_patch' 0 [] | text-leak 0 []. Backup: qbackup: 39 result files; head 63c36173. Pace ~5.2 min per task run incl. step changes -> END ~13:35Z, inside the 15:08Z hard stop.
+
+### B-088 | 2026-10-15T13:30:50Z | re: M-024
+Box, 2026-10-15T13:30:49Z, re: M-024. Lever queue END; GPU released, box idle.
+Autopilot: last step "2026-10-15T13:29:33Z | step=q_v13_warnedit_s3 | END done: done=1/1 solved=0"; FINALIZE final_summary rc=0, backup_results rc=0; "END cleanup (all steps finished): ... memory.used 256 MiB ... vllm pids left: none"; "DONE 2026-10-15T13:30:09Z (all steps finished)" (06:08:32Z -> 13:30:09Z, 7.4 h; restarts 0). Nothing alive.
+`python scripts/forty_two/queue_read.py eval/a6000/results --plan data/forty_two_queue/plan.json`, output whole:
+v13                  ACCEPT  credited: rich_3718 rich_3777
+    fastapi_9753     0/3 FAIL
+    rich_3718        3/3 PASS
+    rich_3777        3/3 PASS
+    rich_4075        1/3 FAIL
+v13_edge_sweep       REJECT  credited: -
+    rich_4006        0/3 FAIL
+v13_flagvals         ACCEPT  credited: rich_3675
+    rich_3675        3/3 PASS
+v13_grepsites        REJECT  credited: -
+    fastapi_9753     0/3 FAIL
+v13_jsonesc          REJECT  credited: -
+    rich_3278        0/3 FAIL
+v13_keep_contract    REJECT  credited: -
+    rich_3052        0/3 FAIL
+v13_lost_search      REJECT  credited: -
+    rich_4076        0/3 FAIL
+v13_modtests         REJECT  credited: -
+    rich_3777        3/3 PASS
+v13_redfirst         REJECT  credited: -
+    fastapi_13920    0/3 FAIL
+    fastapi_14419    0/3 FAIL
+    fastapi_14448    0/3 FAIL
+    fastapi_14616    0/3 FAIL
+    fastapi_14986    0/3 FAIL
+    rich_3180        0/3 FAIL
+    rich_3468        0/3 FAIL
+    rich_3772        0/3 FAIL
+    rich_3782        0/3 FAIL
+v13_repro_timeout    ACCEPT  credited: rich_3480
+    rich_3480        3/3 PASS
+v13_sibling_diff     REJECT  credited: -
+    rich_3471        0/3 FAIL
+v13_title_ident      REJECT  credited: -
+    rich_3935        0/3 FAIL
+    rich_4079        0/3 FAIL
+v13_title_repro      REJECT  credited: -
+    rich_3472        0/3 FAIL
+v13_tty_repro        REJECT  credited: -
+    rich_3934        0/3 FAIL
+v13_warnedit         REJECT  credited: -
+    rich_4075        1/3 FAIL
+
+Totals over the 81 task runs (box_p4_gate.py definitions): solved 17, crash 0, errored 0, cap hits 59 (5-minute session timeout), summed seconds 23519. No sample is INCOMPLETE (45 of 45 step dirs, every id present, 0 errored), so nothing is rerun.
+Final leak scan (cumulative, all 81 traces): queue rows 81 | zero-call 0 [] | 'without calling submit_patch' 0 [] | text-leak 0 [].
+Pushed: all 45 eval/a6000/results/q_<bundle>_s<k>/ (results.jsonl, ARM, results/traces/) and the 45 q_*_proxy.jsonl; head dd3ec0b6 (last backup commit dd3ec0b6).
+Read (mine): 3 levers ACCEPT on top of v13 - v13_flagvals (rich_3675 3/3), v13_repro_timeout (rich_3480 3/3), and v13 itself (the control: rich_3718 3/3, rich_3777 3/3). v13_modtests passes rich_3777 3/3 but gets no credit because v13 alone also passes it (the --base rule). rich_4075 is 1/3 on both v13 and v13_warnedit; fastapi_9753 is 0/3 on both v13 and v13_grepsites (p4_v13 had solved both once). Every other lever 0/3, including v13_redfirst on all 9 of its tasks. Not a single text leak in 81 runs, against 4 rows in p4_v13's 74 (the queue bundles are v13 plus one rule, same prompt step 3). Per QUEUE_PLAN "Then merge": v14 = v13 + flagvals + repro_timeout. Waiting on the channel.
