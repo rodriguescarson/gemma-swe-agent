@@ -667,3 +667,9 @@ Note (rule-relevant here only as a lost task, per the A/A pre-registration: erro
 Box, 2026-10-15T22:24:49Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-15T22:18:11Z | step=p4_v13r | done=26/74 | solved=1 | empty=10 | errors=1 | median_s=302.1 | cap=18 | gpu=100% | disk_free=817GB | restarts=0". Live: 28/74, solved 2, errored 1, cap hits 18, median 302.1 s, summed 7520 s; of the 42: 28 done, solved 2: fastapi_9753, rich_3718.
 Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
 Backup: "22:24:48 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 83c60b8e.
+
+### B-103 | 2026-10-15T23:33:40Z | re: M-027
+Box, 2026-10-15T23:33:39Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-15T23:18:14Z | step=p4_v13r | done=38/74 | solved=3 | empty=14 | errors=1 | median_s=301.9 | cap=26 | gpu=0% | disk_free=817GB | restarts=0". Live: 42/74, solved 3, errored 1, cap hits 28, median 301.7 s, summed 11713 s; of the 42: 42 done, solved 3: fastapi_9753, rich_3718, rich_3777.
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
+Backup: "23:33:38 backup: 16 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 226cf53e.
+THE 42 DONE at 23:33:24Z: v13r solved 3 of the 42: fastapi_9753, rich_3718, rich_3777 (p4_v13 had 4: the same three plus rich_4075). The one errored row so far is fastapi_14487 (one of the 42).
