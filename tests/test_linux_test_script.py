@@ -47,3 +47,4 @@ def test_staging_keeps_eval_scripts_and_links_the_big_inputs(tmp_path):
     for big in ("golden", "kaggle", "race1", "collect"):
         assert (dst / "eval" / big).is_symlink(), big
     assert not list((dst / "tests").glob("__pycache__"))
+    shutil.rmtree(dst)        # ~1.5 GB per copy; pytest keeps the last 3 basetemps, which emptied the disk on 2026-10-15
