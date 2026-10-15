@@ -1290,3 +1290,5 @@ not run (no capture)
 - 2026-10-15T08:18:07Z | step=q_v13_title_ident_s1 | END done: done=2/2 solved=0
 - 2026-10-15T08:18:45Z | step=q_v13_title_repro_s1 | EVENT started pid 15083 (restarts so far 0; hard stop in 6.8 h)
 - 2026-10-15T08:24:15Z | step=q_v13_title_repro_s1 | END done: done=1/1 solved=0
+- 2026-10-15T08:24:52Z | step=q_v13_tty_repro_s1 | EVENT started pid 15758 (restarts so far 0; hard stop in 6.7 h)
+- 2026-10-15T08:30:22Z | step=q_v13_tty_repro_s1 | END done: done=1/1 solved=0
