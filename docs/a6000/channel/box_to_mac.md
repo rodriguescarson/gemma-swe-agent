@@ -662,3 +662,8 @@ Box, 2026-10-15T21:09:16Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
 Backup: "21:09:15 backup: 51 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 5f68b9a5.
 Note (rule-relevant here only as a lost task, per the A/A pre-registration: errored rows count as lost, not rerun): fastapi_14487 failed again exactly as in p4_v13 - first-call text leak, 4 of 4 replies, 0 calls, "without calling submit_patch". The same id, the same mode, in both v13 runs.
+
+### B-102 | 2026-10-15T22:24:50Z | re: M-027
+Box, 2026-10-15T22:24:49Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-15T22:18:11Z | step=p4_v13r | done=26/74 | solved=1 | empty=10 | errors=1 | median_s=302.1 | cap=18 | gpu=100% | disk_free=817GB | restarts=0". Live: 28/74, solved 2, errored 1, cap hits 18, median 302.1 s, summed 7520 s; of the 42: 28 done, solved 2: fastapi_9753, rich_3718.
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
+Backup: "22:24:48 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 83c60b8e.
