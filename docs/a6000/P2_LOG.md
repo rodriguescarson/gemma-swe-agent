@@ -1322,3 +1322,5 @@ not run (no capture)
 - 2026-10-15T10:50:43Z | step=q_v13_title_repro_s2 | END done: done=1/1 solved=0
 - 2026-10-15T10:51:20Z | step=q_v13_tty_repro_s2 | EVENT started pid 32243 (restarts so far 0; hard stop in 4.3 h)
 - 2026-10-15T10:56:50Z | step=q_v13_tty_repro_s2 | END done: done=1/1 solved=0
+- 2026-10-15T10:57:28Z | step=q_v13_warnedit_s2 | EVENT started pid 369 (restarts so far 0; hard stop in 4.2 h)
+- 2026-10-15T11:02:58Z | step=q_v13_warnedit_s2 | END done: done=1/1 solved=1
