@@ -23,6 +23,8 @@ fi
 # The task workspaces (~/.cache/g4/ws, 24 GB on 2026-10-15) are bind-mounted from the Mac, never rebuilt inside the VM: the
 # full suite had written 12 GB of them by 32% and filled the disk. kpar venvs are platform-specific and stay in the container.
 G4_WS="${G4_WS:-$HOME/.cache/g4/ws}"; mkdir -p "$G4_WS"
+# The container's full pytest log (tracebacks) is copied to this host folder (default eval/linux_test_out/, gitignored).
+LINUX_TEST_OUT="${LINUX_TEST_OUT:-$PWD/eval/linux_test_out}"; mkdir -p "$LINUX_TEST_OUT"
 # Read-only inputs bind-mounted at their in-tree paths (real directories, so paths relativise as on the Mac; a symlinked
 # data/ made test_committed_split_equals_recomputation record /tmp/g4/data/... instead of data/...).
 RO_MOUNTS=(-v "$PWD/data:/tmp/g4/data:ro")
@@ -62,13 +64,14 @@ git config --global user.email a@b; git config --global user.name a
 echo "LINUX_V10 TMPDIR=${TMPDIR-unset} TEST_TMPDIR=${TEST_TMPDIR-unset} nproc=$(nproc) G4_NIGHTLY=${G4_NIGHTLY-} G4_BUNDLE=${G4_BUNDLE-} python=$(python -V 2>&1)"
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests/test_v10_*.py tests/test_make_variant_v10.py -rfE > /tmp/v10_pytest.log 2>&1
 rc=$?
+cp /tmp/v10_pytest.log /out/v10_pytest.log 2>/dev/null
 grep -E "^(FAILED|ERROR) " /tmp/v10_pytest.log | cut -c1-300 | head -60
 tail -1 /tmp/v10_pytest.log
 exit $rc
 SH
   V10_SCRIPT="$STAGE_SCRIPT"$'\n'"$V10_SCRIPT"            # staging first (shared block above), then the v10 steps
   exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
-    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -w /tmp \
+    -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -v "$LINUX_TEST_OUT":/out -w /tmp \
     "python:${PY}-slim" bash -c "$V10_SCRIPT"
 fi
 
@@ -78,13 +81,13 @@ fi
 # The steps follow the container command (a heredoc inside the command substitution), not a heredoc above it, so
 # the static test that slices from the last container command (tests/test_v10_integration.py) still sees the wheel
 # install and the exit line. Shared staging first (STAGE_SCRIPT above), then the whole suite.
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -e "TESTS=${TESTS:-}" -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -v "$G4_WS":/root/.cache/g4/ws "${RO_MOUNTS[@]}" -v "$LINUX_TEST_OUT":/out -e "TESTS=${TESTS:-}" -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
 $(cat <<'SH'
 pip -q install pytest pyarrow >/dev/null 2>&1
 pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'
 pip -q install peft==0.21.0 >/dev/null 2>&1 || echo 'WARN peft not installed: train/qlora tests will fail'   # the Mac venv pin
 git config --global user.email a@b; git config --global user.name a
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider ${TESTS:-tests} -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
-rc=$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc
+rc=$?; cp /tmp/full.log /out/full.log 2>/dev/null; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc
 SH
 )"

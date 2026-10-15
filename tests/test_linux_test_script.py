@@ -115,3 +115,17 @@ def test_full_mode_takes_a_tests_subset():
     full = t[t.index('bash -c "$V10_SCRIPT"'):]
     assert '-e "TESTS=${TESTS:-}"' in full
     assert "python -m pytest -q -p no:cacheprovider ${TESTS:-tests} -k 'not shellcheck and not official_compiler'" in full
+
+
+def test_the_container_pytest_log_is_copied_to_the_host():
+    """The container's /tmp/full.log (full tracebacks) used to die with the container; pytest's one-line summary truncates
+    the reason, so diagnosing the 27 Linux-only failures of 2026-10-15 needed a second run. Both modes copy their log to
+    $LINUX_TEST_OUT (default eval/linux_test_out/, gitignored build output) mounted at /out."""
+    t = S.read_text()
+    assert 'LINUX_TEST_OUT="${LINUX_TEST_OUT:-$PWD/eval/linux_test_out}"; mkdir -p "$LINUX_TEST_OUT"' in t
+    for c in _container_commands():
+        assert '-v "$LINUX_TEST_OUT":/out' in c, c
+    v10 = t[t.index('if [ "${V10_ONLY:-0}" = 1 ]'):t.index('bash -c "$V10_SCRIPT"')]
+    full = t[t.index('bash -c "$V10_SCRIPT"'):]
+    assert "cp /tmp/v10_pytest.log /out/v10_pytest.log" in v10 and "cp /tmp/full.log /out/full.log" in full
+    assert "linux_test_out" in (S.parents[1] / ".gitignore").read_text()
