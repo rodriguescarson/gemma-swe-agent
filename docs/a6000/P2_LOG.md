@@ -1314,3 +1314,5 @@ not run (no capture)
 - 2026-10-15T10:21:39Z | step=q_v13_redfirst_s2 | END done: done=9/9 solved=0
 - 2026-10-15T10:22:18Z | step=q_v13_repro_timeout_s2 | EVENT started pid 28108 (restarts so far 0; hard stop in 4.8 h)
 - 2026-10-15T10:27:18Z | step=q_v13_repro_timeout_s2 | END done: done=1/1 solved=1
+- 2026-10-15T10:27:57Z | step=q_v13_sibling_diff_s2 | EVENT started pid 28825 (restarts so far 0; hard stop in 4.7 h)
+- 2026-10-15T10:33:27Z | step=q_v13_sibling_diff_s2 | END done: done=1/1 solved=0
