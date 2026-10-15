@@ -18,18 +18,22 @@ case "$PY" in
   *) echo "linux_test.sh: PY must be 3.12 or 3.13, not $PY" >&2; exit 2 ;;
 esac
 
-if [ "${V10_ONLY:-0}" = 1 ]; then
-  read -r -d '' V10_SCRIPT <<'SH' || true
-set -uo pipefail
-unset TMPDIR
+read -r -d '' STAGE_SCRIPT <<'SH' || true
 apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y git >/dev/null 2>&1
 mkdir -p /tmp/g4
 (cd /g4 && tar -cf - --exclude=./.venv --exclude=./data --exclude=./eval --exclude=./backups \
    --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4
 ln -s /g4/data /tmp/g4/data
 mkdir -p /tmp/g4/eval
-for d in race1 kaggle golden; do if [ -d "/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
+for d in race1 kaggle golden a6000; do if [ -d "/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
 cd /tmp/g4 || exit 1
+SH
+# data/ (40 GB on 2026-10-15) and eval/ are symlinked, never copied: a copy fills the Docker VM and the daemon dies.
+
+if [ "${V10_ONLY:-0}" = 1 ]; then
+  read -r -d '' V10_SCRIPT <<'SH' || true
+set -uo pipefail
+unset TMPDIR
 pip -q install pytest >/dev/null 2>&1
 if [ "${V10_HARNESS:-1}" = 1 ]; then
   pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo "WARN harness wheels not installed: sandbox/flow tests will skip"
@@ -44,15 +48,19 @@ exit $rc
 SH
   exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
     -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp \
-    "python:${PY}-slim" bash -c "$V10_SCRIPT"
+    "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+$V10_SCRIPT"
 fi
 
 # Whole suite. The harness wheels are installed because the v10 tests import swegemma/ADK (without them 150+ tests
 # failed with ModuleNotFoundError), and the exit code is pytest's: the old '| tail -5' always exited 0 (integrator,
 # 2026-09-28: a run with 152 failures reported success).
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp "python:${PY}-slim" bash -c "apt-get -qq update >/dev/null && apt-get -qq install -y git >/dev/null 2>&1; \
-  cp -r /g4 /tmp/g4 && cd /tmp/g4 && rm -rf .venv && pip -q install pytest pyarrow >/dev/null 2>&1; \
-  pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'; \
-  git config --global user.email a@b; git config --global user.name a; \
-  PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1; \
-  rc=\$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit \$rc"
+read -r -d '' FULL_SCRIPT <<'SH' || true
+pip -q install pytest pyarrow >/dev/null 2>&1
+pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'
+git config --global user.email a@b; git config --global user.name a
+PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
+rc=$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc
+SH
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
+$FULL_SCRIPT"
