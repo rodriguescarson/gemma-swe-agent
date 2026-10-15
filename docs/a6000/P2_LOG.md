@@ -1272,3 +1272,5 @@ not run (no capture)
 - 2026-10-15T06:37:58Z | step=q_v13_flagvals_s1 | END done: done=1/1 solved=1
 - 2026-10-15T06:38:35Z | step=q_v13_grepsites_s1 | EVENT started pid 4317 (restarts so far 0; hard stop in 8.5 h)
 - 2026-10-15T06:44:05Z | step=q_v13_grepsites_s1 | END done: done=1/1 solved=0
+- 2026-10-15T06:44:43Z | step=q_v13_jsonesc_s1 | EVENT started pid 5105 (restarts so far 0; hard stop in 8.4 h)
+- 2026-10-15T06:50:13Z | step=q_v13_jsonesc_s1 | END done: done=1/1 solved=0
