@@ -1,6 +1,6 @@
 """Profile task sets (statement style, gold patch size, test style) for research/pallets.md.
 
-  python3 scripts/pallets/profile.py [--valid data/pallets/valid_ids.txt] > data/pallets/profile.json
+  python3 scripts/pallets/pallets_profile.py [--valid data/pallets/valid_ids.txt] > data/pallets/profile.json
 Groups: competition 74 (data/kaggle_valid_ids.txt), competition 129, pallets repos (all, and valid when --valid given:
 pallets_valid = every valid task, pallets_valid_org = the pallets-org repos only (no sympy), and the same with the PR-style
 statements of data/pallets/tasks_prstyle.jsonl, overall and per repo).

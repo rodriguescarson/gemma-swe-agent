@@ -19,7 +19,7 @@ valid = FAIL_TO_PASS (passed in both gold runs, not passed at base) is non-empty
 grader's junit check (swegemma _validate_junit_xml) passing, within MARGIN_S. PASS_TO_PASS = passed in all three.
 Only valid tasks are written; data/heldout1k/rejects.jsonl keeps one small row per rejected candidate (id + reason).
 Problem statement = PR title + "\\n\\n" + body (scripts/pallets/pr_statements.py), title-only flag from
-scripts/pallets/profile.py statement_stats.
+scripts/pallets/pallets_profile.py statement_stats.
 """
 from __future__ import annotations
 
@@ -43,9 +43,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _load_profile():
-    """scripts/pallets/profile.py by path: the name clashes with the stdlib profiler, which may already be imported."""
+    """scripts/pallets/pallets_profile.py by path: the name clashes with the stdlib profiler, which may already be imported."""
     import importlib.util
-    spec = importlib.util.spec_from_file_location("pallets_profile", Path(__file__).resolve().parent / "profile.py")
+    spec = importlib.util.spec_from_file_location("pallets_profile", Path(__file__).resolve().parent / "pallets_profile.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
