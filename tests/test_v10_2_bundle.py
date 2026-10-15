@@ -309,7 +309,7 @@ def v10_only_copy(dst):
     """Run linux_test.sh's V10_ONLY copy-and-link lines (from `mkdir -p /tmp/g4` up to `cd /tmp/g4`) with /g4 -> this
     repo and /tmp/g4 -> dst: the tree the container's pytest collects."""
     s = (ROOT / "scripts" / "linux_test.sh").read_text()
-    block = s.split("read -r -d '' V10_SCRIPT <<'SH' || true\n", 1)[1].split("\nSH\n", 1)[0]
+    block = s.split("read -r -d '' STAGE_SCRIPT <<'SH' || true\n", 1)[1].split("\nSH\n", 1)[0]   # shared staging (2026-10-15)
     start, end = block.index("mkdir -p /tmp/g4"), block.index("cd /tmp/g4 || exit 1")
     cmds = block[start:end].replace("/tmp/g4", "@DST@").replace("/g4", "@SRC@")
     cmds = cmds.replace("@DST@", str(dst)).replace("@SRC@", str(ROOT))

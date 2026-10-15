@@ -326,5 +326,5 @@ def test_linux_test_script_full_mode_static():
     s = (ROOT / "scripts" / "linux_test.sh").read_text()
     full = s[s.index('docker run', s.index('bash -c "$V10_SCRIPT"')):]     # the whole-suite command, not comments
     assert "harness/wheels/*.whl" in full and "g4-pip-cache" in full
-    assert "exit \\$rc" in full and "| tail -5" not in full
+    assert ("exit \\$rc" in full or "exit $rc" in full) and "| tail -5" not in full
     assert subprocess.run(["bash", "-n", str(ROOT / "scripts" / "linux_test.sh")]).returncode == 0

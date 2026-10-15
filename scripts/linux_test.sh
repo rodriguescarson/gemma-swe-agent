@@ -46,10 +46,10 @@ grep -E "^(FAILED|ERROR) " /tmp/v10_pytest.log | cut -c1-300 | head -60
 tail -1 /tmp/v10_pytest.log
 exit $rc
 SH
+  V10_SCRIPT="$STAGE_SCRIPT"$'\n'"$V10_SCRIPT"            # staging first (shared block above), then the v10 steps
   exec docker run --rm --cpus 2 --memory 4g -e TEST_TMPDIR=/tmp -e "G4_NIGHTLY=${G4_NIGHTLY:-}" -e "G4_BUNDLE=${G4_BUNDLE:-}" \
     -e "V10_HARNESS=${V10_HARNESS:-1}" -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp \
-    "python:${PY}-slim" bash -c "$STAGE_SCRIPT
-$V10_SCRIPT"
+    "python:${PY}-slim" bash -c "$V10_SCRIPT"
 fi
 
 # Whole suite. The harness wheels are installed because the v10 tests import swegemma/ADK (without them 150+ tests
@@ -62,5 +62,5 @@ git config --global user.email a@b; git config --global user.name a
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider tests -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1
 rc=$?; grep -E '^(FAILED|ERROR) ' /tmp/full.log | cut -c1-300 | head -60; tail -1 /tmp/full.log; exit $rc
 SH
-docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp "python:${PY}-slim" bash -c "$STAGE_SCRIPT
-$FULL_SCRIPT"
+FULL_SCRIPT="$STAGE_SCRIPT"$'\n'"$FULL_SCRIPT"                 # staging first, then the whole suite
+docker run --rm -v "$PWD":/g4:ro -v g4-pip-cache:/root/.cache/pip -w /tmp "python:${PY}-slim" bash -c "$FULL_SCRIPT"
