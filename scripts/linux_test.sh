@@ -25,10 +25,14 @@ mkdir -p /tmp/g4
    --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4
 ln -s /g4/data /tmp/g4/data
 mkdir -p /tmp/g4/eval
-for d in race1 kaggle golden a6000; do if [ -d "/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
+(cd /g4/eval && tar -cf - --exclude=./collect --exclude=./golden --exclude=./kaggle --exclude=./a6000 --exclude=./runs \
+   --exclude=./race1 --exclude='*/__pycache__' --exclude='*.pyc' .) | tar -xf - -C /tmp/g4/eval
+for d in race1 kaggle golden a6000 collect runs; do if [ -d "/g4/eval/$d" ]; then ln -s "/g4/eval/$d" "/tmp/g4/eval/$d"; fi; done
 cd /tmp/g4 || exit 1
 SH
-# data/ (40 GB on 2026-10-15) and eval/ are symlinked, never copied: a copy fills the Docker VM and the daemon dies.
+# data/ (40 GB on 2026-10-15) is symlinked, never copied: a copy fills the Docker VM and the daemon dies. eval/ is copied
+# minus its big read-only inputs (collect, golden, kaggle, a6000, runs, race1), which are symlinked: its scripts
+# (eval/locate_recall_heldout.py is imported by a test module) and small outputs must be present and writable.
 
 if [ "${V10_ONLY:-0}" = 1 ]; then
   read -r -d '' V10_SCRIPT <<'SH' || true
