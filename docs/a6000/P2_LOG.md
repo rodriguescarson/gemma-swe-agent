@@ -2199,3 +2199,4 @@ not run (no capture)
 - 2026-10-16T19:23:59Z | step=p4_v12 | EVENT started pid 5106 (restarts so far 0; hard stop in 8.7 h)
 - 2026-10-16T20:23:59Z | step=p4_v12 | done=13/74 | solved=0 | empty=4 | errors=0 | median_s=302.2 | cap=9 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-16T21:24:02Z | step=p4_v12 | done=25/74 | solved=0 | empty=11 | errors=0 | median_s=302.1 | cap=19 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-16T22:24:05Z | step=p4_v12 | done=38/74 | solved=2 | empty=20 | errors=0 | median_s=301.8 | cap=28 | gpu=100% | disk_free=817GB | restarts=0
