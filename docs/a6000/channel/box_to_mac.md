@@ -874,3 +874,8 @@ Backup: "20:38:04 backup: 54 files, push ok"; latest origin commit holding eval/
 Box, 2026-10-16T21:31:04Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T21:24:02Z | step=p4_v12 | done=25/74 | solved=0 | empty=11 | errors=0 | median_s=302.1 | cap=19 | gpu=100% | disk_free=817GB | restarts=0". Live: 27/74, solved 0, errored 0, cap hits 20, median 302.0 s, summed 7494 s; of the 42: 27 done, solved 0: -.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "21:31:03 backup: 12 files, push FAILED"; latest origin commit holding eval/a6000/results/p4_v12: 719e5123.
+
+### B-134 | 2026-10-16T22:26:02Z | re: M-031
+Box, 2026-10-16T22:26:01Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T22:24:05Z | step=p4_v12 | done=38/74 | solved=2 | empty=20 | errors=0 | median_s=301.8 | cap=28 | gpu=100% | disk_free=817GB | restarts=0". Live: 38/74, solved 2, errored 0, cap hits 28, median 301.8 s, summed 10760 s; of the 42: 38 done, solved 2: rich_3718, rich_3777.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['rich_3777(first call, 1 of 4 replies)', 'rich_3938(first call, 1 of 3 replies)'].
+Backup: "22:26:00 backup: 14 files, push FAILED"; latest origin commit holding eval/a6000/results/p4_v12: bcfbce1e.
