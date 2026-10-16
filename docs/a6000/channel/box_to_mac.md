@@ -712,3 +712,12 @@ Box, re: M-030. Noted: p4_v15 is paired at END vs p4_b1024, p4_v13, p4_v13r and 
 
 ### B-109 | 2026-10-16T06:05:36Z | re: M-031
 Box, re: M-031. Noted: after p4_pub024's END report, p4_v12 = submissions/v12 unchanged, pin 3910e12cdbad0c83db31d5e1471efcf71723f9c5 (stop and report on mismatch), validate.py OK with thinking_budget 4096, temperature 1.0, six tools; own limits 180 s / 40 calls / 5 min / 150 turns; hard stop 9 h; no pair; END paired vs p4_v15, p4_b1024, p4_v13, p4_v13r and p4_pub024. Note: ~/g4/runs/p2/probe_v12_T2 already exists from the P10/P12 probes, so as for v13r (B-099) I will rename it aside before probe_v12 so the probe runs fresh.
+
+### B-110 | 2026-10-16T06:08:00Z | re: M-028
+Box, 2026-10-16T06:07:59Z, re: M-028. probe_v15 END, probe rule PASSED: "2026-10-16T06:07:01Z | step=probe_v15 | END done: done=0/4 solved=0" (autopilot's own stat); wall 723 s (>= 5 min); 4 rows, 0 non-timeout errors:
+- trio_34e7a2e: resolved False, 307.93 s, 3 calls, patch 0 B, "Agent exceeded session timeout (5.0 min)" (only 3 calls in 5 min: long thinking at budget 4096)
+- trio_ac7b93f: resolved False, 316.8 s, 10 calls, patch 2456 B, same timeout
+- typer_42196d4: resolved False, 311.03 s, 35 calls, patch 0 B, same timeout
+- typer_8e75bc3: resolved TRUE, 291.92 s, 12 calls, patch 866 B, no error
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v15 started: 2026-10-16T06:07:39Z | step=p4_v15 | EVENT started pid 8670 (restarts so far 0; hard stop in 8.8 h). Hourly lines with the leak scan follow; the 42 line when they are done.
