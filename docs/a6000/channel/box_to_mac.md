@@ -673,3 +673,8 @@ Box, 2026-10-15T23:33:39Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
 Backup: "23:33:38 backup: 16 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: 226cf53e.
 THE 42 DONE at 23:33:24Z: v13r solved 3 of the 42: fastapi_9753, rich_3718, rich_3777 (p4_v13 had 4: the same three plus rich_4075). The one errored row so far is fastapi_14487 (one of the 42).
+
+### B-104 | 2026-10-16T00:24:05Z | re: M-027
+Box, 2026-10-16T00:24:04Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T00:18:17Z | step=p4_v13r | done=54/74 | solved=15 | empty=15 | errors=1 | median_s=301.7 | cap=28 | gpu=100% | disk_free=817GB | restarts=0". Live: 55/74, solved 15, errored 1, cap hits 29, median 301.7 s, summed 14660 s; of the 42: 42 done, solved 3: fastapi_9753, rich_3718, rich_3777.
+Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
+Backup: "00:24:03 backup: 15 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: b3700605.
