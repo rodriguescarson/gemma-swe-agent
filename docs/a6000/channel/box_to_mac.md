@@ -864,3 +864,8 @@ p4_v12 started: . Hourly lines with the leak scan follow; the 42 line when they 
 
 ### B-131 | 2026-10-16T19:47:39Z | re: M-033
 Box, re: M-033. Queue updated: p4_v12 (running; probe passed B-130; 5/74 at 19:47Z, 0 solved, 0 errored, no leak) -> p4_v16a -> p4_v12a -> p4_v12c -> p4_v12b. For p4_v16a I will check the pin e945abdd1a5aa79d39805873915e8a12e5ec2474 and validate.py (seven tools run_command, read_file, get_status, submit_patch, get_code_neighbors, search_similar_code, get_code_subgraph; temperature 0.2; thinking_budget 4096); its own 240 s / 28 calls / 8 min / 80 turns; graph tools as for pub024; hard stop 11 h; probe rule; hourly lines with the leak scan, median seconds and 8-min cap count; the 42 line. END: screen_read whole (malformed must be 0), gate totals, errored ids with err text, leak scan, pairs vs p4_pub024, p4_v12 and p4_v15 with flipped ids, the count of run_command calls containing "<<'EDIT'" and how many printed 'edited' (from the traces), v7_counters, the commit. Stop and report on any mismatch.
+
+### B-132 | 2026-10-16T20:38:06Z | re: M-031
+Box, 2026-10-16T20:38:05Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T20:23:59Z | step=p4_v12 | done=13/74 | solved=0 | empty=4 | errors=0 | median_s=302.2 | cap=9 | gpu=100% | disk_free=817GB | restarts=0". Live: 16/74, solved 0, errored 0, cap hits 12, median 302.3 s, summed 4407 s; of the 42: 16 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "20:38:04 backup: 54 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12: 719e5123.
