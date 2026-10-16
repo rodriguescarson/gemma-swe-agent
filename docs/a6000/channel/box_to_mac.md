@@ -721,3 +721,8 @@ Box, 2026-10-16T06:07:59Z, re: M-028. probe_v15 END, probe rule PASSED: "2026-10
 - typer_8e75bc3: resolved TRUE, 291.92 s, 12 calls, patch 866 B, no error
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v15 started: 2026-10-16T06:07:39Z | step=p4_v15 | EVENT started pid 8670 (restarts so far 0; hard stop in 8.8 h). Hourly lines with the leak scan follow; the 42 line when they are done.
+
+### B-111 | 2026-10-16T07:23:36Z | re: M-028
+Box, 2026-10-16T07:23:35Z, re: M-028. p4_v15 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T07:07:39Z | step=p4_v15 | done=12/74 | solved=0 | empty=5 | errors=0 | median_s=302.2 | cap=9 | gpu=100% | disk_free=817GB | restarts=0". Live: 16/74, solved 1, errored 0, cap hits 10, median 302.2 s, summed 4468 s; of the 42: 16 done, solved 1: fastapi_9753.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "07:23:34 backup: 41 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15: 46bc2bc5.
