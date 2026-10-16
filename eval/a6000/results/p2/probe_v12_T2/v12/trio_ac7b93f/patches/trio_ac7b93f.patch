@@ -1,75 +1,115 @@
-diff --git a/src/trio/_tools/sync_pre_commit.py b/src/trio/_tools/sync_pre_commit.py
+diff --git a/src/trio/_tools/sync_requirements.py b/src/trio/_tools/sync_requirements.py
 new file mode 100644
-index 0000000..dfa3fdb
+index 0000000..3471bae
 --- /dev/null
-+++ b/src/trio/_tools/sync_pre_commit.py
-@@ -0,0 +1,69 @@
++++ b/src/trio/_tools/sync_requirements.py
+@@ -0,0 +1,109 @@
 +import yaml
 +import re
++import subprocess
 +import sys
 +from pathlib import Path
 +
-+def sync():
-+    config_path = Path(".pre-commit-config.yaml")
-+    reqs_path = Path("test-requirements.txt")
-+    
-+    if not config_path.exists() or not reqs_path.exists():
-+        print("Missing .pre-commit-config.yaml or test-requirements.txt")
-+        sys.exit(1)
-+        
-+    with open(config_path, "r") as f:
-+        config = yaml.safe_load(f)
-+        
-+    # Mapping of repo URL to package name
-+    mapping = {
-+        "https://github.com/psf/black-pre-commit-mirror": "black",
-+        "https://github.com/astral-sh/ruff-pre-commit": "ruff",
-+        "https://github.com/codespell-project/codespell": "codespell",
-+        "https://github.com/adhtruong/mirrors-typos": "typos",
-+        "https://github.com/sphinx-contrib/sphinx-lint": "sphinx-lint",
-+        "https://github.com/woodruffw/zizmor-pre-commit": "zizmor",
-+    }
-+    
-+    updates = {}
-+    for repo_entry in config.get("repos", []):
-+        repo_url = repo_entry.get("repo")
-+        rev = repo_entry.get("rev")
-+        if repo_url in mapping and rev:
-+            package_name = mapping[repo_url]
-+            # Strip leading 'v' if present
-+            version = rev[1:] if rev.startswith("v") else rev
-+            updates[package_name] = version
-+            
-+    if not updates:
-+        print("No updates to apply.")
++# Mapping from pre-commit repo URL to the package name in test-requirements.in
++REPO_MAPPING = {
++    "https://github.com/psf/black-pre-commit-mirror": "black",
++    "https://github.com/astral-sh/ruff-pre-commit": "ruff",
++    "https://github.com/codespell-project/codespell": "codespell",
++    "https://github.com/astral-sh/uv-pre-commit": "uv",
++}
++
++def main():
++    pre_commit_config_path = Path(".pre-commit-config.yaml")
++    requirements_in_path = Path("test-requirements.in")
++    requirements_txt_path = Path("test-requirements.txt")
++
++    if not pre_commit_config_path.exists() or not requirements_in_path.exists():
++        print("Required files not found.")
 +        return
 +
-+    with open(reqs_path, "r") as f:
++    with open(pre_commit_config_path, "r") as f:
++        config = yaml.safe_load(f)
++
++    repos = config.get("repos", [])
++    versions = {}
++    for repo in repos:
++        repo_url = repo.get("repo")
++        if repo_url in REPO_MAPPING:
++            rev = repo.get("rev")
++            if rev:
++                # Strip leading 'v' if present
++                if rev.startswith("v"):
++                    rev = rev[1:]
++                versions[REPO_MAPPING[repo_url]] = rev
++
++    if not versions:
++        print("No matching tools found in .pre-commit-config.yaml")
++        return
++
++    with open(requirements_in_path, "r") as f:
 +        lines = f.readlines()
-+        
++
 +    new_lines = []
 +    changed = False
 +    for line in lines:
-+        # Match lines like 'black==25.1.0 ; implementation_name == "cpython"'
-+        # or 'codespell==2.4.1'
-+        # We want to replace the version part after '=='
-+        match = re.match(r'^([a-zA-Z0-9\-_]+)==([a-zA-Z0-9\.\-_]+)(.*)$', line)
-+        if match:
-+            package, version, rest = match.groups()
-+            if package in updates:
-+                new_version = updates[package]
-+                if version != new_version:
-+                    print(f"Updating {package}: {version} -> {new_version}")
-+                    line = f"{package}=={new_version}{rest}\n"
-+                    changed = True
-+        new_lines.append(line)
++        # We want to identify lines that specify one of our tools.
++        # A line might be: 'black; implementation_name == "cpython"'
++        # or 'ruff >= 0.8.0'
++        # or 'uv >= 0.2.24'
 +        
++        matched_tool = None
++        for tool in versions:
++            # Match tool name at the beginning of the line (after optional whitespace)
++            if re.match(rf"^\s*{tool}(\s*[=> <\d\.\a-z]*|;|$)", line):
++                matched_tool = tool
++                break
++        
++        if matched_tool:
++            version = versions[matched_tool]
++            # Split line into: part_before_tool, tool_and_version, markers_and_comments
++            # We want to replace tool_and_version with tool==version.
++            
++            # Use regex to capture:
++            # 1. Leading whitespace
++            # 2. The tool name
++            # 3. The version constraint (optional)
++            # 4. The rest of the line (markers, comments)
++            pattern = rf"^(\s*){matched_tool}([^; #\n]*)(\s*;.*)?(\s*#.*)?$"
++            match = re.match(pattern, line)
++            if match:
++                prefix, old_version, markers, comment = match.groups()
++                markers = markers or ""
++                comment = comment or ""
++                new_line = f"{prefix}{matched_tool}=={version}{markers}{comment}\n"
++                if new_line != line:
++                    changed = True
++                    new_lines.append(new_line)
++                    continue
++        
++        new_lines.append(line)
++
 +    if changed:
-+        with open(reqs_path, "w") as f:
++        with open(requirements_in_path, "w") as f:
 +            f.writelines(new_lines)
-+        print("Updated test-requirements.txt")
++        print("Updated test-requirements.in")
++        
++        # Run uv pip compile
++        try:
++            subprocess.run([
++                "uv", "pip", "compile", 
++                "--universal", 
++                "--python-version=3.9", 
++                "test-requirements.in", 
++                "-o", "test-requirements.txt"
++            ], check=True)
++            print("Updated test-requirements.txt using uv pip compile")
++        except subprocess.CalledProcessError as e:
++            print(f"Error running uv pip compile: {e}")
++            sys.exit(1)
++        
++        sys.exit(1) # Fail the pre-commit hook so changes can be committed
 +    else:
-+        print("No versions needed updating.")
++        print("Requirements are already in sync")
 +
 +if __name__ == "__main__":
-+    sync()
++    main()
