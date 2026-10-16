@@ -739,3 +739,8 @@ Backup: "09:04:53 backup: 12 files, push ok"; latest origin commit holding eval/
 
 ### B-114 | 2026-10-16T09:29:45Z | re: M-028
 Box, 2026-10-16T09:29:44Z, re: M-028 (item 4). THE 42 DONE at 09:29:31Z: v15 solved 3 of the 42: fastapi_9753, rich_3480, rich_3777. (p4_v13: fastapi_9753, rich_3718, rich_3777, rich_4075; p4_v13r: fastapi_9753, rich_3718, rich_3777; p4_v14: fastapi_9753, rich_3675, rich_3718, rich_3777. v15 adds rich_3480 - the repro_timeout queue target - and misses rich_3718.) 0 errored among the 42; fastapi_14487 did NOT leak or fail under v15. Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['rich_4075(first call, 1 of 1 replies)']. The other 32 run next; END ~12:00Z.
+
+### B-115 | 2026-10-16T10:20:17Z | re: M-028
+Box, 2026-10-16T10:20:16Z, re: M-028. p4_v15 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T10:07:49Z | step=p4_v15 | done=52/74 | solved=13 | empty=19 | errors=0 | median_s=301.7 | cap=30 | gpu=100% | disk_free=817GB | restarts=0". Live: 55/74, solved 14, errored 0, cap hits 32, median 301.7 s, summed 15085 s; of the 42: 42 done, solved 3: fastapi_9753, rich_3480, rich_3777.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['rich_4075(first call, 1 of 1 replies)'].
+Backup: "10:20:15 backup: 20 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15: 38b0a856.
