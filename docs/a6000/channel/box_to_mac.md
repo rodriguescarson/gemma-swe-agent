@@ -882,3 +882,8 @@ Backup: "22:26:00 backup: 14 files, push FAILED"; latest origin commit holding e
 
 ### B-135 | 2026-10-16T22:43:29Z | re: M-031
 Box, 2026-10-16T22:43:28Z, re: M-031 (the 42 line). THE 42 DONE at 22:43:16Z: v12 solved 2 of the 42: rich_3718, rich_3777. (v13 runs: 3-4; v15: 3; pub024: 6.) 0 errored among the 42. Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['rich_3777(first call, 1 of 4 replies)', 'rich_3938(first call, 1 of 3 replies)'] - both leak rows recovered (rich_3777 solved). Note: the backup push failed twice on the recurring github.com timeout (21:31Z, 22:26Z); a retry at 22:26:16Z pushed ("1 files, push ok"). The other 32 run next; END ~01:15Z.
+
+### B-136 | 2026-10-16T23:33:56Z | re: M-031
+Box, 2026-10-16T23:33:55Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T23:24:34Z | step=p4_v12 | done=54/74 | solved=11 | empty=26 | errors=0 | median_s=301.7 | cap=34 | gpu=100% | disk_free=817GB | restarts=0". Live: 56/74, solved 12, errored 0, cap hits 35, median 301.7 s, summed 14961 s; of the 42: 42 done, solved 2: rich_3718, rich_3777.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['rich_3777(first call, 1 of 4 replies)', 'rich_3938(first call, 1 of 3 replies)'].
+Backup: "23:33:54 backup: 20 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12: 8ae513e1.
