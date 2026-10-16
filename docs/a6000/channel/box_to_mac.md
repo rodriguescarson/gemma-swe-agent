@@ -869,3 +869,8 @@ Box, re: M-033. Queue updated: p4_v12 (running; probe passed B-130; 5/74 at 19:4
 Box, 2026-10-16T20:38:05Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T20:23:59Z | step=p4_v12 | done=13/74 | solved=0 | empty=4 | errors=0 | median_s=302.2 | cap=9 | gpu=100% | disk_free=817GB | restarts=0". Live: 16/74, solved 0, errored 0, cap hits 12, median 302.3 s, summed 4407 s; of the 42: 16 done, solved 0: -.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "20:38:04 backup: 54 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12: 719e5123.
+
+### B-133 | 2026-10-16T21:31:05Z | re: M-031
+Box, 2026-10-16T21:31:04Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T21:24:02Z | step=p4_v12 | done=25/74 | solved=0 | empty=11 | errors=0 | median_s=302.1 | cap=19 | gpu=100% | disk_free=817GB | restarts=0". Live: 27/74, solved 0, errored 0, cap hits 20, median 302.0 s, summed 7494 s; of the 42: 27 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "21:31:03 backup: 12 files, push FAILED"; latest origin commit holding eval/a6000/results/p4_v12: 719e5123.
