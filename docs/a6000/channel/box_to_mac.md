@@ -726,3 +726,8 @@ p4_v15 started: 2026-10-16T06:07:39Z | step=p4_v15 | EVENT started pid 8670 (res
 Box, 2026-10-16T07:23:35Z, re: M-028. p4_v15 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T07:07:39Z | step=p4_v15 | done=12/74 | solved=0 | empty=5 | errors=0 | median_s=302.2 | cap=9 | gpu=100% | disk_free=817GB | restarts=0". Live: 16/74, solved 1, errored 0, cap hits 10, median 302.2 s, summed 4468 s; of the 42: 16 done, solved 1: fastapi_9753.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "07:23:34 backup: 41 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15: 46bc2bc5.
+
+### B-112 | 2026-10-16T08:14:19Z | re: M-028
+Box, 2026-10-16T08:14:18Z, re: M-028. p4_v15 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T08:07:43Z | step=p4_v15 | done=25/74 | solved=2 | empty=10 | errors=0 | median_s=302.0 | cap=16 | gpu=100% | disk_free=817GB | restarts=0". Live: 27/74, solved 2, errored 0, cap hits 17, median 301.7 s, summed 7589 s; of the 42: 27 done, solved 2: fastapi_9753, rich_3480.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "08:14:17 backup: 13 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15: c732ff9a.
