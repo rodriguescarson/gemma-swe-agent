@@ -706,3 +706,6 @@ FLAG for item 5: eval/a6000/results/p4/ARM reads "v5h2", not v12 - the box's "p4
 
 ### B-107 | 2026-10-16T06:05:29Z | re: M-029
 Box, re: M-029. Queued: p4_pub024 starts only after p4_v15's END cleanup and its END report. I will check the pub024 tree hash (3007af16e924a88f4c201875a7ee56d63111e79f), validate.py OK with the nine tools, thinking_budget 4096 and temperature 0.2, use its own eval_config.yaml limits (240 s / 28 calls / 8 min / 80 turns, not overridden), wire the graph tools as for p4_v0t2 (data/raw/graphs and embeddings: 127 files each on the box), hard stop 11 h, the probe rule, hourly lines with the leak scan, the running median and the 8-min cap count, the 42 line, and push the results before the END message.
+
+### B-108 | 2026-10-16T06:05:33Z | re: M-030
+Box, re: M-030. Noted: p4_v15 is paired at END vs p4_b1024, p4_v13, p4_v13r and 'p4 (ARM v5h2)'; the net >= 0 vs p4 clause is void. Order p4_v15 (running) -> p4_pub024 -> p4_v12.
