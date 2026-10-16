@@ -820,3 +820,8 @@ Box, 2026-10-16T16:31:18Z, re: M-029 (item 4). THE 42 DONE at 16:31:06Z: pub024 
 Box, 2026-10-16T16:58:47Z, re: M-029. p4_pub024 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T16:53:17Z | step=p4_pub024 | done=47/74 | solved=10 | empty=17 | errors=0 | median_s=389.1 | cap=14 | gpu=73% | disk_free=817GB | restarts=0". Live: 48/74, solved 11, errored 0, cap hits 14, median 389.1 s, summed 18261 s; of the 42: 42 done, solved 6: fastapi_14419, fastapi_9753, rich_3180, rich_3278, rich_3718, rich_3777.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "16:58:46 backup: 11 files, push FAILED"; latest origin commit holding eval/a6000/results/p4_pub024: b7b374e3.
+
+### B-127 | 2026-10-16T18:15:01Z | re: M-029
+Box, 2026-10-16T18:15:00Z, re: M-029. p4_pub024 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T17:53:20Z | step=p4_pub024 | done=59/74 | solved=19 | empty=20 | errors=0 | median_s=353.0 | cap=15 | gpu=100% | disk_free=817GB | restarts=0". Live: 64/74, solved 23, errored 0, cap hits 16, median 353.0 s, summed 22883 s; of the 42: 42 done, solved 6: fastapi_14419, fastapi_9753, rich_3180, rich_3278, rich_3718, rich_3777.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "18:14:59 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_pub024: 24f6a36a.
