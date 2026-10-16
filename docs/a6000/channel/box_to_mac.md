@@ -744,3 +744,23 @@ Box, 2026-10-16T09:29:44Z, re: M-028 (item 4). THE 42 DONE at 09:29:31Z: v15 sol
 Box, 2026-10-16T10:20:16Z, re: M-028. p4_v15 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T10:07:49Z | step=p4_v15 | done=52/74 | solved=13 | empty=19 | errors=0 | median_s=301.7 | cap=30 | gpu=100% | disk_free=817GB | restarts=0". Live: 55/74, solved 14, errored 0, cap hits 32, median 301.7 s, summed 15085 s; of the 42: 42 done, solved 3: fastapi_9753, rich_3480, rich_3777.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['rich_4075(first call, 1 of 1 replies)'].
 Backup: "10:20:15 backup: 20 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15: 38b0a856.
+
+### B-116 | 2026-10-16T11:30:45Z | re: M-028
+Box, 2026-10-16T11:30:43Z, re: M-028 / M-030. p4_v15 END.
+END: "2026-10-16T11:27:25Z | step=p4_v15 | END done: done=74/74 solved=29"; post hooks p4_judge rc=0, v7_counters rc=0, backup_results rc=0 (11:27:28-11:27:32Z); FINALIZE rc=0; "END cleanup (all steps finished): ... memory.used 256 MiB ... vllm pids left: none"; "DONE 2026-10-16T11:30:18Z (all steps finished)".
+COMMIT holding eval/a6000/results/p4_v15/ (results.jsonl 74 rows, identical to the box file; traces) and eval/a6000/results/p4_v15_proxy.jsonl: 20cf5841 "a6000 results backup: 21 new/changed files".
+`python scripts/forty_two/screen_read.py eval/a6000/results/p4_v15`, output whole:
+NO EVIDENCE solved 29/74 (ref 28) paired +3 -2 net +1 p 1.0 | the 42: 3 | cap 36 | malformed 0 edit/write ok 0 attempts 0 commands>=61s 0 template edits 104 refused 21
+wins: fastapi_9753 rich_3480 rich_3777
+losses: rich_3506 rich_3521
+the 42 solved: fastapi_9753 rich_3480 rich_3777
+box_p4_gate.py: PASS solved 29/74 crash 0 errored 0 cap 36 missing 0 secs 19153 (floor 26)  (VALID: 74 rows, 0 crash, 0 errored.)
+Paired on the same 74:
+- vs p4 (ARM v5h2): 29 vs 29; wins 4 (fastapi_11194, fastapi_9753, rich_3480, rich_3777); losses 4 (fastapi_14851, fastapi_15589, rich_3506, rich_3676); net +0; F 8; p 1.000.
+- vs p4_b1024: 29 vs 28; wins 3 (fastapi_9753, rich_3480, rich_3777); losses 2 (rich_3506, rich_3521); net +1; F 5; p 1.000.
+- vs p4_v13: 29 vs 31; wins 1 (rich_3480); losses 3 (rich_3676, rich_3718, rich_4075); net -2; F 4; p 0.625.
+- vs p4_v13r: 29 vs 29; wins 2 (fastapi_5077, rich_3480); losses 2 (fastapi_14851, rich_3718); net +0; F 4; p 1.000.
+Of the 42: 3 (fastapi_9753, rich_3480, rich_3777). Cap hits 36; median 301.7 s; summed 19153 s.
+Counters (v7_counters.py): tasks 74, solved 29, loops_ge5 0, budget_exhausted_tasks 2, all others 0; verdict pass true.
+Final leak scan: zero-call 0; "without calling submit_patch" 0; text-leak 1: rich_4075 (first call, 1 of 1 non-thinking reply), recovered (34 calls), not solved, ended on the 5-minute cap. fastapi_14487 did not leak under v15 (it leaked in both v13 runs).
+Read (mine): v15 = 29, equal to v13's second run and 1 below v13's mean (30); vs v13 mean the budget change is net about -1, inside the A/A noise (F 4). The cleanest property: no errored row and no zero-call row, the first L1/L2 bundle with none. p4_pub024 launches next (M-029), then p4_v12 (M-031); pre-checks already done: pub024 tree 3007af16e924a88f4c201875a7ee56d63111e79f, validate OK (nine tools, temperature 0.2, thinking_budget 4096), limits 240 s / 28 calls / 8 min / 80 turns; v12 pin 3910e12cdbad0c83db31d5e1471efcf71723f9c5 matches.
