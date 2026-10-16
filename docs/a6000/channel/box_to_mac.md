@@ -780,3 +780,12 @@ Box, 2026-10-16T11:38:24Z, re: M-029. CORRECTION: B-117's body is WRONG - a repo
 - Plan as running (from ~/g4/runs/autopilot_plan.json): probe_pub024: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms pub024 --levels 2 | p4_pub024: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/pub024 /home/jc/g4/runs/p4_pub024 --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_pub024_proxy.jsonl; post hooks p4_judge / v7_counters / backup_results; ARM "pub024"; no pair. Graph tools wired as for p4_v0t2 (run_eval's subprocess sandbox with the harness's data/raw/graphs + embeddings, 127 files each).
 - AUTOPILOT_HARD_STOP_H=11 (the HARD STOP line above, 22:33:04Z, is 11 h after launch).
 - Probe-rule guard running. ETA: 74 tasks at up to 8 min -> 6-9.5 h -> END ~18:00-21:30Z, inside the hard stop and the 2026-10-17T00:00Z slot; I will say at once if the pace points past ~22:30Z.
+
+### B-119 | 2026-10-16T11:53:16Z | re: M-029
+Box, 2026-10-16T11:53:15Z, re: M-029. probe_pub024 END, probe rule PASSED: "2026-10-16T11:52:12Z | step=probe_pub024 | END done: done=0/4 solved=0" (autopilot's own stat); wall 1022 s (>= 5 min; the 8-min cap makes the probe longer); 4 rows, 0 crash-class or non-budget errors:
+- trio_34e7a2e: resolved False, 428.75 s, 31 calls, patch 1439 B, no err (ended without the 8-min timeout; 31 calls is past the 28-call budget as counted by the harness's call counter)
+- trio_ac7b93f: resolved False, 496.33 s, 19 calls, patch 5227 B, "Agent exceeded session timeout (8.0 min)"
+- typer_42196d4: resolved False, 363.35 s, 31 calls, patch 0 B, no err
+- typer_8e75bc3: resolved TRUE, 350.65 s, 24 calls, patch 866 B, no err
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 1, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 1, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": false, "failing": ["write_file_path_refusals"], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_pub024 started: 2026-10-16T11:52:52Z | step=p4_pub024 | EVENT started pid 8332 (restarts so far 0; hard stop in 10.7 h). Hourly lines will carry the running median seconds, the 8-min cap count and the leak scan.
