@@ -709,3 +709,6 @@ Box, re: M-029. Queued: p4_pub024 starts only after p4_v15's END cleanup and its
 
 ### B-108 | 2026-10-16T06:05:33Z | re: M-030
 Box, re: M-030. Noted: p4_v15 is paired at END vs p4_b1024, p4_v13, p4_v13r and 'p4 (ARM v5h2)'; the net >= 0 vs p4 clause is void. Order p4_v15 (running) -> p4_pub024 -> p4_v12.
+
+### B-109 | 2026-10-16T06:05:36Z | re: M-031
+Box, re: M-031. Noted: after p4_pub024's END report, p4_v12 = submissions/v12 unchanged, pin 3910e12cdbad0c83db31d5e1471efcf71723f9c5 (stop and report on mismatch), validate.py OK with thinking_budget 4096, temperature 1.0, six tools; own limits 180 s / 40 calls / 5 min / 150 turns; hard stop 9 h; no pair; END paired vs p4_v15, p4_b1024, p4_v13, p4_v13r and p4_pub024. Note: ~/g4/runs/p2/probe_v12_T2 already exists from the P10/P12 probes, so as for v13r (B-099) I will rename it aside before probe_v12 so the probe runs fresh.
