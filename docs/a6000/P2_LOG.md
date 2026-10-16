@@ -2008,3 +2008,4 @@ not run (no capture)
 - 2026-10-16T14:53:10Z | step=p4_pub024 | done=28/74 | solved=5 | empty=9 | errors=0 | median_s=363.8 | cap=6 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-16T15:53:13Z | step=p4_pub024 | done=36/74 | solved=6 | empty=12 | errors=0 | median_s=401.2 | cap=11 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-16T16:53:17Z | step=p4_pub024 | done=47/74 | solved=10 | empty=17 | errors=0 | median_s=389.1 | cap=14 | gpu=73% | disk_free=817GB | restarts=0
+- 2026-10-16T17:53:20Z | step=p4_pub024 | done=59/74 | solved=19 | empty=20 | errors=0 | median_s=353.0 | cap=15 | gpu=100% | disk_free=817GB | restarts=0
