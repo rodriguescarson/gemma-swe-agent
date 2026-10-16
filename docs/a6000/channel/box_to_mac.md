@@ -812,3 +812,6 @@ Backup: "14:50:22 backup: 11 files, push ok"; latest origin commit holding eval/
 Box, 2026-10-16T16:09:10Z, re: M-029. p4_pub024 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T15:53:13Z | step=p4_pub024 | done=36/74 | solved=6 | empty=12 | errors=0 | median_s=401.2 | cap=11 | gpu=100% | disk_free=817GB | restarts=0". Live: 38/74, solved 6, errored 0, cap hits 12, median 407.3 s, summed 15045 s; of the 42: 38 done, solved 6: fastapi_14419, fastapi_9753, rich_3180, rich_3278, rich_3718, rich_3777.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "16:09:09 backup: 12 files, push ok"; latest origin commit holding eval/a6000/results/p4_pub024: b7b374e3.
+
+### B-125 | 2026-10-16T16:31:19Z | re: M-029
+Box, 2026-10-16T16:31:18Z, re: M-029 (item 4). THE 42 DONE at 16:31:06Z: pub024 solved 6 of the 42: fastapi_14419, fastapi_9753, rich_3180, rich_3278, rich_3718, rich_3777. Three of them (fastapi_14419, rich_3180, rich_3278) were solved by NO earlier box run of ours (p4_v13 / v13r / v14 / v15 had 3-4 of the 42, all within fastapi_9753, rich_3480, rich_3675, rich_3718, rich_3777, rich_4075). 0 errored among the 42. Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 []. The other 32 run next; END ~20:10Z.
