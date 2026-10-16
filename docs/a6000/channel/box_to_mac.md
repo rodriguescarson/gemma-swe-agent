@@ -678,3 +678,20 @@ THE 42 DONE at 23:33:24Z: v13r solved 3 of the 42: fastapi_9753, rich_3718, rich
 Box, 2026-10-16T00:24:04Z, re: M-027. p4_v13r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T00:18:17Z | step=p4_v13r | done=54/74 | solved=15 | empty=15 | errors=1 | median_s=301.7 | cap=28 | gpu=100% | disk_free=817GB | restarts=0". Live: 55/74, solved 15, errored 1, cap hits 29, median 301.7 s, summed 14660 s; of the 42: 42 done, solved 3: fastapi_9753, rich_3718, rich_3777.
 Leak scan: zero-call rows 1 ['fastapi_14487'] | 'without calling submit_patch' rows 1 ['fastapi_14487'] | text-leak rows 1 ['fastapi_14487(first call, 4 of 4 replies)'].
 Backup: "00:24:03 backup: 15 files, push ok"; latest origin commit holding eval/a6000/results/p4_v13r: b3700605.
+
+### B-105 | 2026-10-16T01:30:19Z | re: M-027
+Box, 2026-10-16T01:30:18Z, re: M-027. p4_v13r (v13 A/A replicate) END; the box idles.
+END: "2026-10-16T01:28:53Z | step=p4_v13r | END done: done=74/74 solved=29"; post hooks p4_judge rc=0, v7_counters rc=0, backup_results rc=0 (01:28:55-01:29:00Z); FINALIZE rc=0; "END cleanup (all steps finished): ... memory.used 252 MiB ... vllm pids left: none"; "DONE 2026-10-16T01:29:36Z (all steps finished)". Nothing alive.
+COMMIT holding eval/a6000/results/p4_v13r/ (results.jsonl 74 rows, identical to the box file; traces) and eval/a6000/results/p4_v13r_proxy.jsonl: de403122 "a6000 results backup: 21 new/changed files".
+`python scripts/forty_two/screen_read.py eval/a6000/results/p4_v13r`, output whole (note: screen_read applies the v13 screen's rule 1, so it prints INVALID for the one errored row; under the A/A pre-registration the read is VALID: every id present, 0 crash rows, the errored row counted as lost):
+INVALID solved 29/74 (ref 28) paired +4 -3 net +1 p 1.0 | the 42: 3 | cap 34 | malformed 0 edit/write ok 0 attempts 0 commands>=61s 0 template edits 113 refused 18
+wins: fastapi_14851 fastapi_9753 rich_3718 rich_3777
+losses: fastapi_5077 rich_3506 rich_3521
+the 42 solved: fastapi_9753 rich_3718 rich_3777
+box_p4_gate.py: FAIL solved 29/74 crash 0 errored 1 cap 34 missing 0 secs 18628 (floor 26)
+A/A PAIR vs p4_v13 (same bundle, same 74 ids): v13r 29 vs v13 31; wins (solved now, not then) 1: fastapi_14851; losses (solved then, not now) 3: fastapi_5077, rich_3676, rich_4075; net -2; flips F = 4; two-sided sign test p 0.625.
+vs p4_b1024: v13r 29 vs 28; wins 4 (fastapi_14851, fastapi_9753, rich_3718, rich_3777); losses 3 (fastapi_5077, rich_3506, rich_3521); net +1; F 7; p 1.000.
+Of the 42: 3 solved (fastapi_9753, rich_3718, rich_3777; p4_v13 had these plus rich_4075). Cap hits 34 (p4_v13 36).
+Counters (v7_counters.py): tasks 74, solved 29, loops_ge5 0, budget_exhausted_tasks 4, repeat_reads 0, repeat_outlines 0, cap_refusals 0, helper_unreachable_tasks 0, view_usage_calls 0, literal_wrapper_commands 0, write_file_path_refusals 0, forced_install_empty_args 0; verdict pass true.
+Final leak scan (all 74 traces): zero-call 1 [fastapi_14487]; "without calling submit_patch" 1 [fastapi_14487]; text-leak 2: fastapi_14487 (first call, 4 of 4 replies) NOT recovered (0 calls) - the same id and mode as in p4_v13; rich_3518 (first call, 1 of 3 replies) recovered (20 calls), solved, no err (it was a 0-call errored row in p4_v14).
+Read against the pre-registration (mine; the Mac decides): solved 29 is inside the expected 27-35; |net| = 2 <= 3; F = 4 is BELOW the expected 6-12, so this box's A/A noise on one 74-read looks smaller than assumed. Consequence (1) does not trigger (|net| < 4 and F < 14): a single 74-read can still ACCEPT/DROP at the +-2 threshold. Consequence (2): the A/A |net| is 2, far from 7, so the v14 DROP stands (v14 vs v13 was net -7 with F 9, larger than this A/A pair's F 4). Consequence (3): v13's count for later comparisons is the mean of 31 and 29 = 30. The fastapi_14487 leak reproduced exactly, so it is a property of that task under v13's prompt, not chance.
