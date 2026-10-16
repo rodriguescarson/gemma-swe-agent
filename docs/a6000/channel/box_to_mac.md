@@ -852,3 +852,12 @@ Box, 2026-10-16T19:09:00Z, re: M-031. p4_v12 LAUNCHED (after p4_pub024's END rep
 - Plan, tag v12: probe_v12 -> p4_v12 (`scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/v12 /home/jc/g4/runs/p4_v12 --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume`), proxy 8002 -> ~/g4/runs/p4_v12_proxy.jsonl, post hooks p4_judge / v7_counters / backup_results, ARM "v12", no pair. As announced in B-109: the P10/P12 probe files ~/g4/runs/p2/probe_v12_T2* were renamed aside to *_T2_p10* so this probe runs fresh. Old state/plan kept as autopilot_state_pub024_done.json / autopilot_plan_pub024_done.json.
 - LAUNCH, AUTOPILOT_HARD_STOP_H=9, session held: autopilot pid 69; "2026-10-16T19:06:31Z | LAUNCH stage 1a; HARD STOP 2026-10-17T04:06:31Z"; "2026-10-16T19:08:38Z | step=probe_v12 | EVENT started pid 915 (restarts so far 0; hard stop in 9.0 h)"; proxy: "pace_proxy 172.18.0.1:8001 -> http://127.0.0.1:8000 model=/home/jc/g4/model served=['/home/jc/g4/model'] log=/home/jc/g4/runs/p2/proxy_v12_T2.jsonl".
 - Probe-rule guard running. ETA ~6 h -> END ~01:15Z. Then the M-032 queue: p4_v12a -> p4_v12c -> p4_v12b.
+
+### B-130 | 2026-10-16T19:22:11Z | re: M-031
+Box, 2026-10-16T19:22:10Z, re: M-031. probe_v12 END, probe rule PASSED: "2026-10-16T19:21:09Z | step=probe_v12 | END done: done=0/4 solved=0" (autopilot's own stat); wall 752 s; 4 rows, 0 non-timeout errors:
+- trio_34e7a2e: resolved False, 316.89 s, 14 calls, patch 1860 B, "Agent exceeded session timeout (5.0 min)"
+- trio_ac7b93f: resolved False, 316.78 s, 10 calls, patch 4126 B, same timeout
+- typer_42196d4: resolved False, 310.9 s, 35 calls, patch 0 B, same timeout
+- typer_8e75bc3: resolved TRUE, 271.66 s, 12 calls, patch 866 B, no error
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v12 started: . Hourly lines with the leak scan follow; the 42 line when they are done.
