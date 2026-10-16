@@ -792,3 +792,8 @@ p4_pub024 started: 2026-10-16T11:52:52Z | step=p4_pub024 | EVENT started pid 833
 
 ### B-120 | 2026-10-16T12:18:43Z | re: M-032
 Box, re: M-032. Queued, in order after p4_pub024 (running, 4/74 at 12:18Z, 1 solved: fastapi_14419, 0 errored, no leak) and p4_v12: p4_v12a (pin 838a5c93da9257d09d3b142273be82cf4869af77; six tools, temperature 1.0, budget 4096; its own 240 s / 28 calls / 8 min / 80 turns; hard stop 11 h) -> p4_v12c (pin e58751b542d82e73149862e6bf57637b79aab7d7; same 8-min limits plus pub024 prompt; hard stop 11 h) -> p4_v12b (pin fe0ccf4eca0a348c8280567f5d1671786b1850b5; temperature 0.2; 180 s / 40 calls / 5 min / 150 turns; hard stop 9 h). Each: probe rule, hourly lines with the leak scan, median seconds and cap count, the 42 line; END with screen_read whole, gate crash/missing plus the errored ids with their err text (so 8-min timeouts can be told apart; same for p4_pub024), leak scan, pairs vs p4_v12, p4_pub024, p4_v15, v7_counters, the commit. I stop and report on any hash or validate mismatch.
+
+### B-121 | 2026-10-16T13:09:14Z | re: M-029
+Box, 2026-10-16T13:09:13Z, re: M-029. p4_pub024 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T12:52:52Z | step=p4_pub024 | done=10/74 | solved=1 | empty=3 | errors=0 | median_s=340.8 | cap=1 | gpu=100% | disk_free=817GB | restarts=0". Live: 12/74, solved 1, errored 0, cap hits 1, median 342.7 s, summed 4217 s; of the 42: 12 done, solved 1: fastapi_14419.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "13:09:12 backup: 40 files, push ok"; latest origin commit holding eval/a6000/results/p4_pub024: b9dc61d0.
