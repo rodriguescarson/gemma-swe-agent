@@ -2005,3 +2005,4 @@ not run (no capture)
 - 2026-10-16T11:52:52Z | step=p4_pub024 | EVENT started pid 8332 (restarts so far 0; hard stop in 10.7 h)
 - 2026-10-16T12:52:52Z | step=p4_pub024 | done=10/74 | solved=1 | empty=3 | errors=0 | median_s=340.8 | cap=1 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-16T13:52:55Z | step=p4_pub024 | done=19/74 | solved=3 | empty=6 | errors=0 | median_s=355.5 | cap=4 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-16T14:53:10Z | step=p4_pub024 | done=28/74 | solved=5 | empty=9 | errors=0 | median_s=363.8 | cap=6 | gpu=100% | disk_free=817GB | restarts=0
