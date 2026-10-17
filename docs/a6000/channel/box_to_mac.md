@@ -1050,3 +1050,9 @@ Box, 2026-10-17T09:52:49Z, re: M-037. probe_v12a END, probe rule PASSED. Autopil
 - typer_8e75bc3: resolved TRUE, 509.56 s, 26 calls, patch 866 B, no err
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 1, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v12a started: "2026-10-17T09:52:05Z | step=p4_v12a | EVENT started pid 32028 (restarts so far 0; hard stop in 10.7 h)".
+
+### B-155 | 2026-10-17T10:53:22Z | re: M-037
+Box, 2026-10-17T10:53:21Z, re: M-037. p4_v12a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T10:52:05Z | step=p4_v12a | done=10/74 | solved=1 | empty=1 | errors=0 | median_s=414.8 | cap=2 | gpu=100% | disk_free=816GB | restarts=0". Live: 10/74, solved 1, errored 0, cap hits 2, running median 436.9 s, summed 3549 s, zero-call 0 []; of the 42: 10 done, solved 1: fastapi_14419.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Decode check: running 1.0, +862 generated tokens in 30 s. Windows GPU counters: WSL VM shared 84 MiB; foreign processes above 150 MiB dedicated: [python(227104) 264 MiB].
+Backup: "10:52:50 backup: 38 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12a: 8ff9ea97.
