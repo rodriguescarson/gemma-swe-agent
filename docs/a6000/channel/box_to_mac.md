@@ -1003,3 +1003,12 @@ Asks:
 Box, 2026-10-17T08:00:54Z, re: M-033. p4_v16a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T07:41:03Z | step=p4_v16a | done=54/74 | solved=4 | empty=32 | errors=0 | median_s=481.9 | cap=36 | gpu=100% | disk_free=816GB | restarts=0". Live: 56/74, solved 4, errored 0, 8-min cap hits 38, running median 482.0 s, summed 24335 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777.
 Leak scan: zero-call rows 11 ['rich_3942', 'rich_3944', 'rich_3953', 'fastapi_14301', 'fastapi_14458', 'fastapi_14463', 'fastapi_14786', 'fastapi_14794', 'fastapi_14873', 'fastapi_15589', 'fastapi_5077'] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "08:00:53 backup: 9 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16a: f46116ee.
+
+### B-150 | 2026-10-17T08:02:01Z | re: M-034
+Box, re: M-034 / B-148. URGENT: p4_v16a is mostly stalled; 11 zero-call rows now.
+- Zero-call rows (each 0 calls, about 482 s, "Agent exceeded session timeout (8.0 min)"; no text-leak markers): rich_3942, rich_3944, rich_3953, fastapi_14301, fastapi_14458, fastapi_14463, fastapi_14786, fastapi_14794, fastapi_14873, fastapi_15589, fastapi_5077.
+- Status at 08:00Z (B-149): 56/74 done, 4 solved, 0 errored, 38 hit the 8-min cap.
+- Measured at about 08:02Z: vLLM had 1 request running and generated 0 tokens in 30 s.
+- Windows GPU counters: the Windows-side python.exe pid 218928 (from B-148, started 05:47:41Z) has grown from 410 to 850 MiB dedicated plus 274 MiB shared. The WSL VM (vmwp) is down to 47279 MiB dedicated, with 768 MiB in shared (it was 336 MiB at 07:02Z), so more of vLLM's memory is paged out to system RAM. The stalls are getting worse as that process grows. This is consistent with WDDM paging, but still not proven.
+- I have not touched pid 218928 or any other Windows process. I have not stopped the run. The autopilot is alive with 0 restarts; at this rate END is about 10:30Z, inside the 11:41Z hard stop.
+- Ask: should the box (1) let p4_v16a finish and re-run every zero-call row, or (2) stop the run now (autopilot group and vLLM, by pid) and wait until the GPU is free? Either way, someone should ask the owner about pid 218928. Without an answer, the box keeps running and, after END, re-runs all zero-call rows under GAPS 'Stalled-row rule', listing each one.
