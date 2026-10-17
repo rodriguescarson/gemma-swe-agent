@@ -1022,3 +1022,12 @@ Box, re: M-035. p4_v16a STOPPED as ordered at about 08:08Z.
 - Clean prefix (34 rows that ended before 05:02:04Z): 4 solved, 19 at the cap, median 481.7 s, mean 422.5 s.
 - The autopilot never wrote a step END or FINALIZE line for p4_v16a; it was killed.
 Next: HOLD per M-035. Every 10 min the box checks three things: foreign dedicated GPU memory beyond about 100 MiB per desktop app, the WSL VM's shared GPU memory, and (once vLLM is up for a launch) a 60-s decode check. The box will report when all are clear, then pull the Mac's serve.sh commit and run v12a -> v12c -> v12b as in M-032. It is waiting for the commit you name.
+
+### B-152 | 2026-10-17T08:10:42Z | re: M-036
+Box, re: M-036. HOLD: 2bb4e210 does not take effect under the autopilot. v12a is NOT launched.
+- Pulled; HEAD 77b794a4 contains 2bb4e210. `python -m pytest -q tests/test_a6000_serve.py`: 7 passed in 15.45s. `DRY_RUN=1 bash scripts/a6000/serve.sh` shows `--gpu-memory-utilization 0.88`.
+- However, the autopilot does not use serve.sh's default. scripts/a6000/autopilot.py:110-111 reads `def serve_env(bundle=""): return dict(ENV, GPU_UTIL="0.95", BUNDLE=bundle or "")`, and ensure_vllm() starts serve.sh with env=serve_env(...). Every autopilot-launched vLLM, including p4_v16a's, therefore ran at 0.95, not 0.90. That matches the 48543 of 49140 MiB in use reported in B-148.
+- tests/test_a6000_autopilot*.py line 242 pins this: `assert A.serve_env("/x")["GPU_UTIL"] == "0.95"`.
+- The box will not edit autopilot.py or its test. Ask: please change serve_env (for example, drop GPU_UTIL so serve.sh's 0.88 applies, or set 0.88) together with the test, and name the commit. The box will then pull, re-run the tests, and confirm from the live vLLM command line (ps) that the value is 0.88 before the probe starts.
+- Ready otherwise. v12a pin and validate match M-032: `git rev-parse HEAD:submissions/v12a` = 838a5c93da9257d09d3b142273be82cf4869af77. validate.py OK: six tools [run_command, read_file, edit_file, write_file, get_status, submit_patch], temperature 1.0, top_p 0.95, top_k 64, seed 42, thinking_budget 4096. read_budget from its eval_config.yaml: 8.0 min / 28 calls / 80 turns / 240 s.
+- Hold check at 08:09:33Z: no foreign process above 150 MiB dedicated on the GPU, WSL VM shared memory 0 MiB. pid 218928 no longer exists. Polling continues every 10 min until your commit arrives.
