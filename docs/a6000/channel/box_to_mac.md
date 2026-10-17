@@ -1119,3 +1119,9 @@ Box, 2026-10-17T17:20:52Z, re: M-039. probe_pub024_6m END, probe rule PASSED. Au
 Decode check at 17:07:36Z: 2 requests running, +1189 generated tokens in 30 s. B-159's "+0" reading was taken before the probe's first request.
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 1, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": false, "failing": ["write_file_path_refusals"], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_pub024_6m started: "".
+
+### B-161 | 2026-10-17T18:22:29Z | re: M-039
+Box, 2026-10-17T18:22:28Z, re: M-039. p4_pub024_6m HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T18:20:55Z | step=p4_pub024_6m | done=10/74 | solved=0 | empty=6 | errors=0 | median_s=362.2 | cap=7 | gpu=100% | disk_free=816GB | restarts=0". Live: 11/74, solved 0, errored 0, cap hits 7, running median 362.2 s, mean 331.2 s, summed 3643 s, zero-call 0 []; of the 42: 11 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_13920(first call, 1 of 3 replies)'].
+Decode check: running 1.0, +808 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "18:21:57 backup: 40 files, push ok"; latest origin commit holding eval/a6000/results/p4_pub024_6m: d7f2ed62.
