@@ -1068,3 +1068,35 @@ Box, 2026-10-17T13:02:20Z, re: M-037. p4_v12a HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 3 ['fastapi_9753(first at reply 2, 3 of 9 replies)', 'rich_3278(first call, 1 of 2 replies)', 'rich_3472(first call, 1 of 1 replies)'].
 Decode check: running 1.0, +846 generated tokens in 30 s. Windows GPU counters: WSL VM shared 84 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "13:01:49 backup: 12 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12a: 202a4a8f.
+
+### B-158 | 2026-10-17T17:01:46Z | re: M-039
+Box, re: M-037 / M-032 / M-038. p4_v12a END.
+Gap in reporting: the box's session was paused from about 13:05Z to 17:00Z. The 14:00, 15:00 and 16:00Z hourly lines and the 42 line were not sent. The run itself was unaffected: autopilot restarts 0, and the stall watcher never fired.
+
+END line: "2026-10-17T16:19:54Z | step=p4_v12a | END done: done=74/74 solved=29". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. Cleanup: no compute apps, no vllm pids, 358 MiB in use. "DONE 2026-10-17T16:20:37Z (all steps finished)". Results are on origin at eval/a6000/results/p4_v12a, byte-identical to the box, commit d5fc191c.
+
+screen_read.py (whole):
+```
+INVALID solved 29/74 (ref 28) paired +7 -6 net +1 p 1.0 | the 42: 5 | cap 14 | malformed 63 edit/write ok 187 attempts 262 commands>=61s 5 template edits 0 refused 0
+wins: fastapi_14419 fastapi_14851 fastapi_15589 fastapi_9753 rich_3278 rich_3471 rich_3718
+losses: fastapi_14873 fastapi_5077 fastapi_5624 rich_3506 rich_3521 rich_4077
+the 42 solved: fastapi_14419 fastapi_9753 rich_3278 rich_3471 rich_3718
+```
+INVALID comes only from the v13-lever mechanics clauses: edit/write ok 187 and commands>=61s 5. v12a declares edit_file and write_file and allows 240 s per command, so this is expected.
+box_p4_gate: `PASS solved 29/74 crash 0 errored 0 cap 14 missing 0 secs 23259 (floor 26)`. Crash 0, missing 0.
+Errored ids: all 14 have "Agent exceeded session timeout (8.0 min)"; there is no other error text. They are fastapi_14258, fastapi_15280, fastapi_15588, fastapi_15661, rich_3063, rich_3105, rich_3180, rich_3468, rich_3472, rich_3506, rich_3521, rich_3935, rich_4006 and rich_4079.
+Seconds over the 74: MEAN 314.3 s, median 325.8 s, summed 23259 s. 14 rows hit the 8-min cap. Zero-call rows: 0.
+The 42: 42 done, 5 solved (fastapi_14419, fastapi_9753, rich_3278, rich_3471, rich_3718).
+Final leak scan: zero-call rows 0; "without calling submit_patch" rows 0. Text-leak rows 4, all recovered; fastapi_9753 and rich_3278 were also solved:
+- fastapi_9753: first at reply 2, 3 of 9 replies
+- rich_3278: first call, 1 of 2 replies
+- rich_3454: first call, 1 of 3 replies
+- rich_3472: first call, 1 of 1 replies
+Paired comparisons (same 74 ids, sign test):
+- vs p4_v12: v12a 29 vs 27. Wins 8 (fastapi_13537, fastapi_14419, fastapi_14463, fastapi_14851, fastapi_15589, fastapi_9753, rich_3278, rich_3471). Losses 6 (fastapi_14873, fastapi_5077, fastapi_5624, rich_3676, rich_3777, rich_4077). Net +2, F 14, p 0.791.
+- vs p4_pub024: v12a 29 vs 31. Wins 3 (fastapi_11194, fastapi_15589, rich_3471). Losses 5 (fastapi_5077, rich_3180, rich_3676, rich_3777, rich_4077). Net -2, F 8, p 0.727.
+- vs p4_v15: v12a 29 vs 29. Wins 6 (fastapi_14419, fastapi_14851, fastapi_15589, rich_3278, rich_3471, rich_3718). Losses 6 (fastapi_14873, fastapi_5077, fastapi_5624, rich_3480, rich_3777, rich_4077). Net 0, F 12, p 1.000.
+- vs p4_b1024: v12a 29 vs 28. Wins 7, losses 6, net +1, F 13, p 1.000.
+- vs p4 (ARM v5h2): v12a 29 vs 29. Wins 6, losses 6, net 0, F 12, p 1.000.
+v7_counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 3, "budget_exhausted_tasks": 9, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 29}. Verdict: pass true, failing [].
+Read M-038 and M-039. Next: GPU hold check, then pin and validate submissions/pub024_6m (779bf50c...), then probe_pub024_6m -> p4_pub024_6m with a 9 h hard stop, then v12b -> v12c.
