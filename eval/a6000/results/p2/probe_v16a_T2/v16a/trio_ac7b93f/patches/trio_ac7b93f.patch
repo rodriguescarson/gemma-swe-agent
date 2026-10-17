@@ -1,0 +1,136 @@
+diff --git a/.pre-commit-config.yaml b/.pre-commit-config.yaml
+index 91b607f..6ea4463 100644
+--- a/.pre-commit-config.yaml
++++ b/.pre-commit-config.yaml
+@@ -58,6 +58,13 @@ repos:
+         pass_filenames: false
+         additional_dependencies: ["astor", "attrs", "black", "ruff"]
+         files: ^src\/trio\/_core\/(_run|(_i(o_(common|epoll|kqueue|windows)|nstrumentation)))\.py$
++      - id: sync-pre-commit-versions
++        name: sync pre-commit versions
++        language: python
++        entry: python src/trio/_tools/sync_pre_commit_versions.py
++        pass_filenames: false
++        additional_dependencies: ["PyYAML"]
++        files: .pre-commit-config.yaml
+   - repo: https://github.com/astral-sh/uv-pre-commit
+     rev: 0.7.2
+     hooks:
+diff --git a/src/trio/_tools/sync_pre_commit_versions.py b/src/trio/_tools/sync_pre_commit_versions.py
+new file mode 100644
+index 0000000..21fbdaa
+--- /dev/null
++++ b/src/trio/_tools/sync_pre_commit_versions.py
+@@ -0,0 +1,87 @@
++import yaml
++import re
++import sys
++from pathlib import Path
++
++def get_package_name(repo_url):
++    if repo_url == 'local':
++        return None
++    repo_name = repo_url.split('/')[-1]
++    if repo_name == 'pre-commit-hooks':
++        return None
++    if repo_name == 'mirrors-typos':
++        return 'typos'
++    if repo_name.endswith('-pre-commit-mirror'):
++        return repo_name[:-len('-pre-commit-mirror')]
++    if repo_name.endswith('-pre-commit'):
++        return repo_name[:-len('-pre-commit')]
++    return repo_name
++
++def sync_versions():
++    config_path = Path('.pre-commit-config.yaml')
++    reqs_in_path = Path('test-requirements.in')
++    
++    if not config_path.exists() or not reqs_in_path.exists():
++        return
++
++    with open(config_path, 'r') as f:
++        config = yaml.safe_load(f)
++    
++    versions = {}
++    for repo in config.get('repos', []):
++        url = repo.get('repo')
++        rev = repo.get('rev')
++        if url and rev:
++            pkg = get_package_name(url)
++            if pkg:
++                # Remove 'v' prefix from version if present
++                version = rev[1:] if rev.startswith('v') else rev
++                versions[pkg] = version
++
++    with open(reqs_in_path, 'r') as f:
++        lines = f.readlines()
++
++    new_lines = []
++    updated_pkgs = set()
++    
++    for line in lines:
++        matched = False
++        for pkg, version in versions.items():
++            # Match package name at the start of the line, 
++            # followed by either a space, a semicolon, a version specifier, or end of line.
++            pattern = re.compile(rf'^({pkg})([\s;=<>!].*)?$')
++            match = pattern.match(line.strip())
++            if match:
++                rest = match.group(2) if match.group(2) else ""
++                marker = ""
++                if ';' in rest:
++                    marker = ';' + rest.split(';', 1)[1]
++                
++                new_line = f"{pkg}=={version}{marker}\n"
++                new_lines.append(new_line)
++                updated_pkgs.add(pkg)
++                matched = True
++                break
++        
++        if not matched:
++            new_lines.append(line)
++
++    # Add any tools that were in .pre-commit-config.yaml but not in test-requirements.in
++    for pkg, version in versions.items():
++        if pkg not in updated_pkgs:
++            # Find the # Tools section
++            for i, line in enumerate(new_lines):
++                if line.strip() == '# Tools':
++                    new_lines.insert(i + 1, f"{pkg}=={version}\n")
++                    updated_pkgs.add(pkg)
++                    break
++            if pkg not in updated_pkgs:
++                # If # Tools section not found, just append to the end
++                new_lines.append(f"{pkg}=={version}\n")
++                updated_pkgs.add(pkg)
++
++    with open(reqs_in_path, 'w') as f:
++        f.writelines(new_lines)
++
++if __name__ == '__main__':
++    sync_versions()
+diff --git a/test-requirements.in b/test-requirements.in
+index bf64c56..f5c8b43 100644
+--- a/test-requirements.in
++++ b/test-requirements.in
+@@ -10,13 +10,16 @@ jedi; implementation_name == "cpython"                  # for jedi code completi
+ cryptography>=41.0.0  # cryptography<41 segfaults on pypy3.10
+ 
+ # Tools
+-black; implementation_name == "cpython"
++zizmor==1.6.0
++sphinx-lint==1.0.0
++typos==1.32.0
++black==25.1.0; implementation_name == "cpython"
+ mypy  # Would use mypy[faster-cache], but orjson has build issues on pypy
+ orjson; implementation_name == "cpython" and python_version < "3.14"    # orjson does not yet install on 3.14
+-ruff >= 0.8.0
++ruff==0.11.8
+ astor          # code generation
+-uv >= 0.2.24
+-codespell
++uv==0.7.2
++codespell==2.4.1
+ pre-commit
+ 
+ # https://github.com/python-trio/trio/pull/654#issuecomment-420518745
