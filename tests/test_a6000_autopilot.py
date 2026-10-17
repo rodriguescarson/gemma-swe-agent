@@ -239,6 +239,9 @@ def test_serve_env_passes_the_plan_bundle_to_serve_sh():
         spec = importlib.util.spec_from_file_location("autopilot", pathlib.Path(__file__).resolve().parents[1] / "scripts" / "a6000" / "autopilot.py")
         A = importlib.util.module_from_spec(spec); spec.loader.exec_module(A)
     assert A.serve_env("")["BUNDLE"] == "" and A.serve_env("/home/u/g4/serve_bundle")["BUNDLE"] == "/home/u/g4/serve_bundle"
-    assert A.serve_env("/x")["GPU_UTIL"] == "0.95" and not any(p.startswith("/mnt/") for p in A.serve_env("/x")["PATH"].split(":"))
+    # 2026-10-17: 0.95 -> 0.88, the same headroom serve.sh now defaults to (p4_v16a stalled under WDDM paging when a foreign
+    # Windows process and desktop apps shared the 48 GiB card); the autopilot must not override serve.sh back to 0.95
+    assert A.serve_env("/x")["GPU_UTIL"] == "0.88" and not any(p.startswith("/mnt/") for p in A.serve_env("/x")["PATH"].split(":"))
+    assert "0.95" not in A.serve_env("/x").values()
     src = (pathlib.Path(A.__file__)).read_text()
     assert 'SERVE_BUNDLE = plan.get("serve_bundle") or ""' in src and "env=serve_env(SERVE_BUNDLE)" in src

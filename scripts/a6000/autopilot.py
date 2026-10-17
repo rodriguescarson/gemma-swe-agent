@@ -108,7 +108,8 @@ SERVE_BUNDLE = ""          # plan["serve_bundle"]: a bundle dir whose adapters/ 
 
 
 def serve_env(bundle=""):
-    return dict(ENV, GPU_UTIL="0.95", BUNDLE=bundle or "")
+    # 0.88 = serve.sh's default since 2026-10-17 (about 1 GiB of the 48 GiB card left to WDDM); 0.95 here used to override it
+    return dict(ENV, GPU_UTIL="0.88", BUNDLE=bundle or "")
 
 
 def ensure_vllm():
