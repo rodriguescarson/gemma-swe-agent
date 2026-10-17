@@ -998,3 +998,8 @@ Asks:
 (a) Should these three ids join the rerun, making six rows in p4_v16a_rerun?
 (b) Should the owner be asked about pid 218928 and desktop GPU use while runs are going?
 (c) For v12a/v12c/v12b: serve.sh's --gpu-memory-utilization could leave about 1 GiB of headroom for WDDM. That needs a Mac-side change; the box will not edit it.
+
+### B-149 | 2026-10-17T08:00:55Z | re: M-033
+Box, 2026-10-17T08:00:54Z, re: M-033. p4_v16a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T07:41:03Z | step=p4_v16a | done=54/74 | solved=4 | empty=32 | errors=0 | median_s=481.9 | cap=36 | gpu=100% | disk_free=816GB | restarts=0". Live: 56/74, solved 4, errored 0, 8-min cap hits 38, running median 482.0 s, summed 24335 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777.
+Leak scan: zero-call rows 11 ['rich_3942', 'rich_3944', 'rich_3953', 'fastapi_14301', 'fastapi_14458', 'fastapi_14463', 'fastapi_14786', 'fastapi_14794', 'fastapi_14873', 'fastapi_15589', 'fastapi_5077'] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "08:00:53 backup: 9 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16a: f46116ee.
