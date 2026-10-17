@@ -1158,3 +1158,33 @@ Box, 2026-10-17T23:22:20Z, re: M-039. p4_pub024_6m HOURLY: autopilot alive, rest
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_13920(first call, 1 of 3 replies)'].
 Decode check: running 1.0, +849 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "23:21:49 backup: 15 files, push ok"; latest origin commit holding eval/a6000/results/p4_pub024_6m: 2b68b7f9.
+
+### B-168 | 2026-10-17T23:48:55Z | re: M-040
+Box, re: M-039 / M-040. p4_pub024_6m END. The run was NOT stopped and ran to completion.
+
+END line: "2026-10-17T23:47:43Z | step=p4_pub024_6m | END done: done=74/74 solved=25". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. Cleanup: no compute apps, no vllm pids, 368 MiB in use. "DONE 2026-10-17T23:48:25Z (all steps finished)". Results are on origin at eval/a6000/results/p4_pub024_6m, byte-identical to the box, commit ac035acb. Autopilot restarts: 0. The stall watcher never fired, and there were 0 zero-call rows.
+
+Against the sub20 criteria in M-039 (VALID, mean <= 300 s, solved >= 28, net >= -3 vs p4_pub024), as measured: mean 313.4 s, solved 25, net -6 vs p4_pub024. The gate below is FAIL (25 < floor 26).
+
+Seconds over the 74: MEAN 313.4 s, median 361.7 s, summed 23193 s. 31 rows hit the 6-min cap. 38 rows ran longer than 360 s, so the cap is applied late: the longest row is 558.7 s, and in the probe typer_42196d4 took 448.8 s.
+
+screen_read.py (whole):
+```
+INVALID solved 25/74 (ref 28) paired +4 -7 net -3 p 0.549 | the 42: 2 | cap 31 | malformed 34 edit/write ok 81 attempts 137 commands>=61s 3 template edits 0 refused 0
+wins: fastapi_14851 rich_3480 rich_3676 rich_3718
+losses: fastapi_11194 fastapi_14873 fastapi_5624 fastapi_9425 rich_3506 rich_3521 rich_4077
+the 42 solved: rich_3480 rich_3718
+```
+INVALID comes from the v13-lever mechanics clauses (edit/write ok 81, commands>=61s 3). pub024_6m declares edit_file and write_file and allows 240 s commands, as pub024 does. Malformed count: 34.
+box_p4_gate: `FAIL solved 25/74 crash 0 errored 0 cap 31 missing 0 secs 23194 (floor 26)`. Crash 0, missing 0.
+Errored ids: all 31 have "Agent exceeded session timeout (6.0 min)"; there is no other error text. They are fastapi_14258, fastapi_14419, fastapi_14448, fastapi_14487, fastapi_14616, fastapi_14873, fastapi_14986, fastapi_15280, fastapi_15661, fastapi_5624, fastapi_9425, requests_6644, rich_3063, rich_3105, rich_3180, rich_3278, rich_3468, rich_3470, rich_3471, rich_3472, rich_3506, rich_3521, rich_3782, rich_3930, rich_3934, rich_3935, rich_3938, rich_3942, rich_3944, rich_3953 and rich_4006.
+The 42: 42 done, 2 solved (rich_3480, rich_3718).
+Final leak scan: zero-call rows 0; "without calling submit_patch" rows 0; text-leak rows 1 (fastapi_13920: first call, 1 of 3 replies, recovered).
+Paired comparisons (same 74 ids, sign test):
+- vs p4_pub024: pub024_6m 25 vs 31. Win 1 (rich_3480). Losses 7 (fastapi_14419, fastapi_9425, fastapi_9753, rich_3180, rich_3278, rich_3777, rich_4077). Net -6, F 8, p 0.070.
+- vs p4_v12: pub024_6m 25 vs 27. Wins 4 (fastapi_13537, fastapi_14463, fastapi_14851, rich_3480). Losses 6 (fastapi_11194, fastapi_14873, fastapi_5624, fastapi_9425, rich_3777, rich_4077). Net -2, F 10, p 0.754.
+- vs p4_v12a: pub024_6m 25 vs 29. Wins 3 (fastapi_5077, rich_3480, rich_3676). Losses 7 (fastapi_11194, fastapi_14419, fastapi_15589, fastapi_9425, fastapi_9753, rich_3278, rich_3471). Net -4, F 10, p 0.344.
+- vs p4_v15: pub024_6m 25 vs 29. Wins 3 (fastapi_14851, rich_3676, rich_3718). Losses 7 (fastapi_11194, fastapi_14873, fastapi_5624, fastapi_9425, fastapi_9753, rich_3777, rich_4077). Net -4, F 10, p 0.344.
+Of pub024's six solves among the 42, four (fastapi_14419, fastapi_9753, rich_3180, rich_3278) are 6-min timeouts here.
+v7_counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 10, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 2, "budget_exhausted_tasks": 15, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 25}. Verdict: pass false, failing ["write_file_path_refusals"]. This is the same must-zero rule of our own bundles that pub024 tripped (10 there as well).
+Next per M-038/M-040: GPU hold check, then p4_v12b (pin fe0ccf4e..., hard stop 9 h), then p4_v12c.
