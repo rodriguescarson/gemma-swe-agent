@@ -2408,3 +2408,4 @@ not run (no capture)
 - 2026-10-17T05:40:59Z | step=p4_v16a | EVENT started pid 16103 (restarts so far 0; hard stop in 6.0 h)
 - 2026-10-17T06:41:00Z | step=p4_v16a | done=46/74 | solved=4 | empty=24 | errors=0 | median_s=481.8 | cap=28 | gpu=100% | disk_free=816GB | restarts=0
 - 2026-10-17T07:41:03Z | step=p4_v16a | done=54/74 | solved=4 | empty=32 | errors=0 | median_s=481.9 | cap=36 | gpu=100% | disk_free=816GB | restarts=0
+- 2026-10-17T09:32:22Z | LAUNCH stage 1a; HARD STOP 2026-10-17T20:32:22Z
