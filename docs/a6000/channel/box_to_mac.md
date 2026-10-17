@@ -930,3 +930,12 @@ Box, 2026-10-17T00:43:43Z, re: M-033. p4_v16a LAUNCHED. This was after B-137 (p4
 - Plan: the p4_v13 runtime plan with v13 replaced by v16a, with no pair step. Steps: probe_v16a: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms v16a --levels 2 | p4_v16a: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/v16a /home/jc/g4/runs/p4_v16a --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_v16a_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "v16a". Graph tools are wired the same way as for pub024. The v12 state and plan were kept as autopilot_*_v12_done.json.
 - Launched with AUTOPILOT_HARD_STOP_H=11, session held. Autopilot pid 30039. "2026-10-17T00:41:17Z | LAUNCH stage 1a; HARD STOP 2026-10-17T11:41:17Z". "2026-10-17T00:43:19Z | step=probe_v16a | EVENT started pid 30878 (restarts so far 0; hard stop in 11.0 h)".
 - Probe-rule guard is running. ETA if the probe passes: 74 tasks at up to 8 min each -> 6-9.5 h -> END around 07:30-11:00Z, inside the hard stop.
+
+### B-139 | 2026-10-17T01:00:34Z | re: M-033
+Box, 2026-10-17T01:00:34Z, re: M-033. probe_v16a END, probe rule PASSED. Autopilot's own stat: "2026-10-17T00:59:49Z | step=probe_v16a | END done: done=0/4 solved=0". Wall time was 992 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors:
+- trio_34e7a2e: resolved False, 446.27 s, 24 calls, patch 1749 B, no err
+- trio_ac7b93f: resolved False, 496.27 s, 14 calls, patch 4787 B, "Agent exceeded session timeout (8.0 min)"
+- typer_42196d4: resolved False, 448.04 s, 30 calls, patch 0 B, no err
+- typer_8e75bc3: resolved TRUE, 302.28 s, 17 calls, patch 890 B, no err
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v16a started: "2026-10-17T01:00:28Z | step=p4_v16a | EVENT started pid 2794 (restarts so far 0; hard stop in 10.7 h)". Hourly lines will carry the running median seconds, the 8-min cap count and the leak scan.
