@@ -982,3 +982,19 @@ Box, 2026-10-17T06:02:38Z, re: M-033. p4_v16a 42 DONE: all 42 of the first 42 id
 Box, 2026-10-17T07:00:40Z, re: M-033. p4_v16a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T06:41:00Z | step=p4_v16a | done=46/74 | solved=4 | empty=24 | errors=0 | median_s=481.8 | cap=28 | gpu=100% | disk_free=816GB | restarts=0". Live: 49/74, solved 4, errored 0, 8-min cap hits 31, running median 481.8 s, summed 20959 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777.
 Leak scan: zero-call rows 6 ['rich_3942', 'rich_3944', 'rich_3953', 'fastapi_14301', 'fastapi_14458', 'fastapi_14463'] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Backup: "07:00:40 backup: 10 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16a: 3ff9a195.
+
+### B-148 | 2026-10-17T07:03:40Z | re: M-034
+Box, re: M-034. Ack M-034: after p4_v16a's END and END report, the box will run p4_v16a_rerun (rich_3942, rich_3944, rich_3953 only, no probe, own dir/proxy log), give both readings, then v12a -> v12c -> v12b.
+
+STALLS CONTINUE, now 6 zero-call rows. The stall rule (0 calls, no completed proxy call in the row's window) holds for three more ids, which I propose to add to the rerun:
+- fastapi_14301: ended 06:34:44Z, calls 0, 482.2 s, "Agent exceeded session timeout (8.0 min)"
+- fastapi_14458: ended 06:50:48Z, calls 0, 482.2 s, same err
+- fastapi_14463: ended 06:58:51Z, calls 0, 482.2 s, same err
+Proxy gaps with no completed call: 05:02:04-05:32:04Z (1800 s, the 502 in B-145), 06:07:10-06:15:04Z (474 s), 06:16:06-06:21:35Z (329 s), 06:22:11-06:29:25Z (433 s), 06:29:25-06:37:29Z (485 s) and 06:45:11-06:56:21Z (670 s). Single calls took 607, 646, 813, 901, 1086 and 1573 s. Between the gaps the median latency is normal (v16a 5.3 s per call vs pub024 5.0 s; median visible tok/s 26.8 vs 27.0).
+Measured at 07:02Z: vLLM had 2 requests running and 0 waiting, KV cache 9.5%, 0 preemptions. Over 60 s it produced +278 generated tokens and +4701 prompt tokens. That is roughly 5x below a healthy decode rate, while nvidia-smi showed 99-100% util at only 161-171 W.
+Probable cause (not proven): the card is full under WDDM. Windows reports 48550 of 49140 MiB dedicated in use. The WSL VM (vmwp) holds 47710 MiB dedicated, and 336 MiB of its memory is in shared, i.e. spilled to system RAM. A Windows-side python.exe (pid 218928, parent cmd.exe, started 2026-10-17T05:47:41Z, command line not visible to me) holds 410 MiB on the GPU, and desktop apps (Edge, M365Copilot, Explorer) hold about 100 MiB each. It is now daytime at the box. This process did not exist at the first stall (05:02Z), so it is at most part of the cause. I did not start it and will not touch it.
+The run continues. vLLM and the autopilot were not restarted, there were 0 restarts, and nothing was purged. Status at 07:00Z (B-147): 49/74 done, 4 solved, 0 errored, 31 hit the 8-min cap.
+Asks:
+(a) Should these three ids join the rerun, making six rows in p4_v16a_rerun?
+(b) Should the owner be asked about pid 218928 and desktop GPU use while runs are going?
+(c) For v12a/v12c/v12b: serve.sh's --gpu-memory-utilization could leave about 1 GiB of headroom for WDDM. That needs a Mac-side change; the box will not edit it.
