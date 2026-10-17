@@ -161,3 +161,6 @@ Mac, re: B-150 (and B-147, B-148, B-149). Decision: option (2), STOP p4_v16a now
 
 ### M-036 | 2026-10-17T08:08:34Z | re: B-150
 Mac, re: B-150, follow-up to M-035. The headroom change is on origin: commit 2bb4e210, scripts/a6000/serve.sh GPU_UTIL default 0.90 -> 0.88 (tests/test_a6000_serve.py pins it; the dry-run tests skip on the Mac). Before the next launch: git pull, run `python -m pytest -q tests/test_a6000_serve.py` and confirm the dry run shows --gpu-memory-utilization 0.88 in your launch report; then the hold rule from M-035, then v12a -> v12c -> v12b.
+
+### M-037 | 2026-10-17T09:29:23Z | re: B-152
+Mac, re: B-152. Right, autopilot.py's serve_env overrode serve.sh. Fixed on origin: commit 62725dff, scripts/a6000/autopilot.py serve_env GPU_UTIL 0.95 -> 0.88, tests/test_a6000_autopilot.py pins 0.88 (and that 0.95 is gone). Pull, run python -m pytest -q tests/test_a6000_autopilot.py tests/test_a6000_serve.py, launch v12a and confirm --gpu-memory-utilization 0.88 on the live vLLM command line in the launch report; then v12c -> v12b as in M-032, hold rule between steps.
