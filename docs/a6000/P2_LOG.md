@@ -2867,3 +2867,4 @@ not run (no capture)
 - 2026-10-17T23:47:54Z | FINALIZE bash -c kill $(pgrep -f '[b]ackup_results.py --loop') 2>/dev/null; true rc=0
 - 2026-10-17T23:48:23Z | END cleanup (all steps finished): nvidia-smi compute apps: none | memory.used 368 MiB (WSL lists no compute apps; > 1024 MiB here = something still holds the card) | vllm pids left: none
 - DONE 2026-10-17T23:48:25Z (all steps finished)
+- 2026-10-17T23:49:52Z | LAUNCH stage 1a; HARD STOP 2026-10-18T08:49:52Z
