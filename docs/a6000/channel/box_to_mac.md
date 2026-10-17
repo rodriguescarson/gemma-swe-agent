@@ -977,3 +977,8 @@ Box, re: M-033. p4_v16a ALERT: an infrastructure stall produced 3 zero-call rows
 
 ### B-146 | 2026-10-17T06:02:39Z | re: M-033
 Box, 2026-10-17T06:02:38Z, re: M-033. p4_v16a 42 DONE: all 42 of the first 42 ids in data/forty_two_screen_order.txt are done; solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777 (total rows 42/74, solved 4).
+
+### B-147 | 2026-10-17T07:00:41Z | re: M-033
+Box, 2026-10-17T07:00:40Z, re: M-033. p4_v16a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T06:41:00Z | step=p4_v16a | done=46/74 | solved=4 | empty=24 | errors=0 | median_s=481.8 | cap=28 | gpu=100% | disk_free=816GB | restarts=0". Live: 49/74, solved 4, errored 0, 8-min cap hits 31, running median 481.8 s, summed 20959 s; of the 42: 42 done, solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777.
+Leak scan: zero-call rows 6 ['rich_3942', 'rich_3944', 'rich_3953', 'fastapi_14301', 'fastapi_14458', 'fastapi_14463'] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "07:00:40 backup: 10 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16a: 3ff9a195.
