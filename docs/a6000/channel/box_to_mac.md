@@ -887,3 +887,39 @@ Box, 2026-10-16T22:43:28Z, re: M-031 (the 42 line). THE 42 DONE at 22:43:16Z: v1
 Box, 2026-10-16T23:33:55Z, re: M-031. p4_v12 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-16T23:24:34Z | step=p4_v12 | done=54/74 | solved=11 | empty=26 | errors=0 | median_s=301.7 | cap=34 | gpu=100% | disk_free=817GB | restarts=0". Live: 56/74, solved 12, errored 0, cap hits 35, median 301.7 s, summed 14961 s; of the 42: 42 done, solved 2: rich_3718, rich_3777.
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['rich_3777(first call, 1 of 4 replies)', 'rich_3938(first call, 1 of 3 replies)'].
 Backup: "23:33:54 backup: 20 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12: 8ae513e1.
+
+### B-137 | 2026-10-17T00:37:12Z | re: M-031
+Box, re: M-031. p4_v12 END.
+
+END line: `2026-10-17T00:33:21Z | step=p4_v12 | END done: done=74/74 solved=27`. The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. `DONE 2026-10-17T00:36:15Z (all steps finished)`. Cleanup found no compute apps and no vllm pids, with 256 MiB still in use on the card.
+Results are on origin at eval/a6000/results/p4_v12, commit 5f252ea7 (the backup commit), and are byte-identical to ~/g4/runs/p4_v12/results.jsonl. The step-done commit is 9f438d7a.
+
+screen_read.py (whole output):
+```
+INVALID solved 27/74 (ref 28) paired +3 -4 net -1 p 1.0 | the 42: 2 | cap 37 | malformed 133 edit/write ok 137 attempts 277 commands>=61s 3 template edits 0 refused 0
+wins: rich_3676 rich_3718 rich_3777
+losses: fastapi_13537 fastapi_14463 rich_3506 rich_3521
+the 42 solved: rich_3718 rich_3777
+```
+INVALID comes only from the v12-mechanics clauses: 137 edit/write calls succeeded, and 3 run_command calls lasted 61 s or more. Both are expected in a v12 run because v12 declares those tools and keeps those limits. The INVALID clauses that cover missing ids, crashes and errored rows are all 0 (see the gate line below). The screen rule was written for v13-lever mechanics, so it does not apply to this arm.
+
+box_p4_gate: `PASS solved 27/74 crash 0 errored 0 cap 37 missing 0 secs 18538 (floor 26)`
+
+Timed-out rows: all 37 are "Agent exceeded session timeout (5.0 min)". None hit 8 min (v12 runs with 5-min limits), and no row has any other error.
+Ids: fastapi_13537 fastapi_13920 fastapi_14419 fastapi_14448 fastapi_14463 fastapi_14616 fastapi_14851 fastapi_14986 fastapi_15280 fastapi_15588 fastapi_15589 fastapi_15661 fastapi_15800 fastapi_9753 requests_6644 rich_3052 rich_3061 rich_3063 rich_3180 rich_3278 rich_3468 rich_3470 rich_3471 rich_3480 rich_3521 rich_3535 rich_3772 rich_3782 rich_3930 rich_3934 rich_3935 rich_3938 rich_3944 rich_3953 rich_4006 rich_4075 rich_4079
+
+Final leak scan: zero-call rows 0 []. "without calling submit_patch" rows 0 []. Text-leak rows 2: rich_3777 (first call, 1 of 4 replies) and rich_3938 (first call, 1 of 3 replies). Both recovered, and rich_3777 was solved.
+
+The 42: all 42 done, 2 solved: rich_3718 and rich_3777.
+
+Paired comparisons (sign test; all 74 ids in each comparison):
+- vs p4 (ARM v5h2): v12 27 vs 29. Wins 3 (fastapi_11194, rich_3718, rich_3777). Losses 5 (fastapi_13537, fastapi_14463, fastapi_14851, fastapi_15589, rich_3506). Net -2, F 8, p 0.727.
+- vs p4_b1024: v12 27 vs 28. Wins 3 (rich_3676, rich_3718, rich_3777). Losses 4 (fastapi_13537, fastapi_14463, rich_3506, rich_3521). Net -1, F 7, p 1.000.
+- vs p4_v13: v12 27 vs 31. Wins 0. Losses 4 (fastapi_13537, fastapi_14463, fastapi_9753, rich_4075). Net -4, F 4, p 0.125.
+- vs p4_v13r: v12 27 vs 29. Wins 2 (fastapi_5077, rich_3676). Losses 4 (fastapi_13537, fastapi_14463, fastapi_14851, fastapi_9753). Net -2, F 6, p 0.688.
+- vs p4_v15: v12 27 vs 29. Wins 2 (rich_3676, rich_3718). Losses 4 (fastapi_13537, fastapi_14463, fastapi_9753, rich_3480). Net -2, F 6, p 0.688.
+- vs p4_pub024: v12 27 vs 31. Wins 3 (fastapi_11194, fastapi_14873, fastapi_5624). Losses 7 (fastapi_13537, fastapi_14419, fastapi_14463, fastapi_14851, fastapi_9753, rich_3180, rich_3278). Net -4, F 10, p 0.344.
+
+v7_counters: `{"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 7, "budget_exhausted_tasks": 1, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 27}`. Verdict: `{"pass": true, "failing": [], "must_zero": [...4 counters...]}`.
+
+Next, per M-033: set up p4_v16a. The box will check the pin and run validate first, and will stop and report on any mismatch.
