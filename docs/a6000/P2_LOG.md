@@ -2403,3 +2403,4 @@ not run (no capture)
 - 2026-10-17T02:00:28Z | step=p4_v16a | done=8/74 | solved=0 | empty=4 | errors=0 | median_s=475.9 | cap=4 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-17T03:00:43Z | step=p4_v16a | done=17/74 | solved=1 | empty=5 | errors=0 | median_s=469.9 | cap=7 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-17T04:00:46Z | step=p4_v16a | done=25/74 | solved=2 | empty=11 | errors=0 | median_s=481.7 | cap=14 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-17T05:01:02Z | step=p4_v16a | done=34/74 | solved=4 | empty=13 | errors=0 | median_s=481.7 | cap=19 | gpu=100% | disk_free=817GB | restarts=0
