@@ -939,3 +939,8 @@ Box, 2026-10-17T01:00:34Z, re: M-033. probe_v16a END, probe rule PASSED. Autopil
 - typer_8e75bc3: resolved TRUE, 302.28 s, 17 calls, patch 890 B, no err
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v16a started: "2026-10-17T01:00:28Z | step=p4_v16a | EVENT started pid 2794 (restarts so far 0; hard stop in 10.7 h)". Hourly lines will carry the running median seconds, the 8-min cap count and the leak scan.
+
+### B-140 | 2026-10-17T02:02:59Z | re: M-033
+Box, 2026-10-17T02:02:58Z, re: M-033. p4_v16a HOURLY: autopilot alive, restarts 0. Health line: "2026-10-17T02:00:28Z | step=p4_v16a | done=8/74 | solved=0 | empty=4 | errors=0 | median_s=475.9 | cap=4 | gpu=100% | disk_free=817GB | restarts=0". Live: 9/74, solved 0, errored 0, 8-min cap hits 5, running median 482.0 s, summed 3717 s; of the 42: 9 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Backup: "02:02:57 backup: 37 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16a: ed6eb378.
