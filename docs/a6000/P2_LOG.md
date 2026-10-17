@@ -2399,3 +2399,5 @@ not run (no capture)
 - 2026-10-17T00:43:19Z | step=probe_v16a | EVENT started pid 30878 (restarts so far 0; hard stop in 11.0 h)
 - 2026-10-17T00:59:49Z | step=probe_v16a | END done: done=0/4 solved=0
 - 2026-10-17T00:59:52Z | step=probe_v16a | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
+- 2026-10-17T01:00:28Z | step=p4_v16a | EVENT started pid 2794 (restarts so far 0; hard stop in 10.7 h)
+- 2026-10-17T02:00:28Z | step=p4_v16a | done=8/74 | solved=0 | empty=4 | errors=0 | median_s=475.9 | cap=4 | gpu=100% | disk_free=817GB | restarts=0
