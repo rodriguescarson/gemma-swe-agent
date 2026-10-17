@@ -2419,3 +2419,4 @@ not run (no capture)
 - 2026-10-17T13:52:15Z | step=p4_v12a | done=38/74 | solved=5 | empty=6 | errors=0 | median_s=409.5 | cap=9 | gpu=0% | disk_free=816GB | restarts=0
 - 2026-10-17T14:52:18Z | step=p4_v12a | done=53/74 | solved=16 | empty=9 | errors=0 | median_s=334.2 | cap=11 | gpu=100% | disk_free=816GB | restarts=0
 - 2026-10-17T15:52:21Z | step=p4_v12a | done=66/74 | solved=25 | empty=10 | errors=0 | median_s=326.9 | cap=12 | gpu=100% | disk_free=816GB | restarts=0
+- 2026-10-17T16:19:54Z | step=p4_v12a | END done: done=74/74 solved=29
