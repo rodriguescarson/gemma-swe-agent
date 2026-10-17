@@ -42,7 +42,7 @@ def test_dry_run_matches_kernel_settings_with_tp1(tmp_path):
     out = r.stdout
     assert "vllm.entrypoints.openai.api_server" in out
     for flag in ("--tool-call-parser gemma4", "--reasoning-parser gemma4", "--max-model-len 32768", "--dtype bfloat16",
-                 "--gpu-memory-utilization 0.9", "--enable-auto-tool-choice", "--port 8000", "--host 127.0.0.1"):
+                 "--gpu-memory-utilization 0.88", "--enable-auto-tool-choice", "--port 8000", "--host 127.0.0.1"):
         assert flag in out, flag
     assert "--tensor-parallel-size" not in out          # tp=1: the builder omits the flag
     assert "--default-chat-template-kwargs" not in out  # kernel passes none
@@ -83,4 +83,4 @@ def test_kv_dtype_and_utilisation_knobs(tmp_path):
     out = _dry(tmp_path, KV_DTYPE="fp8", GPU_UTIL="0.95").stdout
     assert "--kv-cache-dtype fp8" in out and "--gpu-memory-utilization 0.95" in out
     default = _dry(tmp_path).stdout
-    assert "--kv-cache-dtype" not in default and "--gpu-memory-utilization 0.9" in default
+    assert "--kv-cache-dtype" not in default and "--gpu-memory-utilization 0.88" in default

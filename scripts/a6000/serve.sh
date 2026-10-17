@@ -9,7 +9,9 @@ export MODEL_DIR="${MODEL_DIR:-$HOME/g4/model}"
 export PORT="${PORT:-8000}"
 export BUNDLE="${BUNDLE:-}"
 export KV_DTYPE="${KV_DTYPE:-}"      # P2 addendum 2: fp8 doubles the KV tokens (screen-only deviation); empty = the kernel's default
-export GPU_UTIL="${GPU_UTIL:-0.90}"
+# 2026-10-17: 0.90 -> 0.88 leaves ~1 GiB of the 48 GiB card for WDDM when the Windows desktop is in use (p4_v16a stalled under
+# a foreign python.exe + desktop apps; GAPS "p4_v16a stopped as CONTAMINATED")
+export GPU_UTIL="${GPU_UTIL:-0.88}"
 # environment of the kernel's install cell
 export LITELLM_LOCAL_MODEL_COST_MAP=True TRANSFORMERS_NO_TF=1 VLLM_WORKER_MULTIPROC_METHOD=spawn \
   VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=1 VLLM_ENGINE_READY_TIMEOUT_S=1200 VLLM_NO_USAGE_STATS=1 \
