@@ -2404,3 +2404,6 @@ not run (no capture)
 - 2026-10-17T03:00:43Z | step=p4_v16a | done=17/74 | solved=1 | empty=5 | errors=0 | median_s=469.9 | cap=7 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-17T04:00:46Z | step=p4_v16a | done=25/74 | solved=2 | empty=11 | errors=0 | median_s=481.7 | cap=14 | gpu=100% | disk_free=817GB | restarts=0
 - 2026-10-17T05:01:02Z | step=p4_v16a | done=34/74 | solved=4 | empty=13 | errors=0 | median_s=481.7 | cap=19 | gpu=100% | disk_free=817GB | restarts=0
+- 2026-10-17T05:40:26Z | step=p4_v16a | EVENT high slowdown (S=44.0) but the GPU is idle with vLLM idle (samples [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]): false alarm, nothing purged, contention check suppressed for 30 min
+- 2026-10-17T05:40:59Z | step=p4_v16a | EVENT started pid 16103 (restarts so far 0; hard stop in 6.0 h)
+- 2026-10-17T06:41:00Z | step=p4_v16a | done=46/74 | solved=4 | empty=24 | errors=0 | median_s=481.8 | cap=28 | gpu=100% | disk_free=816GB | restarts=0
