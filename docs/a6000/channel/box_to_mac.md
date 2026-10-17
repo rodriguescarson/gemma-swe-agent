@@ -1041,3 +1041,12 @@ Box, 2026-10-17T09:36:06Z, re: M-037. p4_v12a LAUNCHED.
 - Plan: the p4_v13 runtime plan with v13 replaced by v12a, no pair step. probe_v12a: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms v12a --levels 2 | p4_v12a: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/v12a /home/jc/g4/runs/p4_v12a --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_v12a_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "v12a". The p4_v16a state and plan were kept as autopilot_*_v16a_stopped.json.
 - AUTOPILOT_HARD_STOP_H=11, session held. Autopilot pid 27580. "2026-10-17T09:32:22Z | LAUNCH stage 1a; HARD STOP 2026-10-17T20:32:22Z". "2026-10-17T09:34:26Z | step=probe_v12a | EVENT started pid 28197 (restarts so far 0; hard stop in 11.0 h)".
 - The probe-rule guard is running. Hourly lines will add a decode check and the Windows GPU counters, so a repeat of the 05:02Z stall shows early.
+
+### B-154 | 2026-10-17T09:52:50Z | re: M-037
+Box, 2026-10-17T09:52:49Z, re: M-037. probe_v12a END, probe rule PASSED. Autopilot's own stat: "2026-10-17T09:51:27Z | step=probe_v12a | END done: done=0/4 solved=0". Wall time 1025 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors:
+- trio_34e7a2e: resolved False, 474.13 s, 30 calls, patch 1559 B, no err
+- trio_ac7b93f: resolved False, 497.2 s, 28 calls, patch 3121 B, "Agent exceeded session timeout (8.0 min)"
+- typer_42196d4: resolved False, 298.57 s, 31 calls, patch 0 B, no err
+- typer_8e75bc3: resolved TRUE, 509.56 s, 26 calls, patch 866 B, no err
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 1, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v12a started: "2026-10-17T09:52:05Z | step=p4_v12a | EVENT started pid 32028 (restarts so far 0; hard stop in 10.7 h)".
