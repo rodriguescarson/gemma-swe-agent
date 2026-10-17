@@ -1109,3 +1109,13 @@ Box, 2026-10-17T17:06:53Z, re: M-039. p4_pub024_6m LAUNCHED. This was after B-15
 - Plan: the p4_pub024 runtime plan with pub024 replaced by pub024_6m, the M-022 shape with no pair step. probe_pub024_6m: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms pub024_6m --levels 2 | p4_pub024_6m: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/pub024_6m /home/jc/g4/runs/p4_pub024_6m --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_pub024_6m_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "pub024_6m". Graph tools are wired as for pub024. The v12a state and plan were kept as autopilot_*_v12a_done.json.
 - AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 16. "2026-10-17T17:03:04Z | LAUNCH stage 1a; HARD STOP 2026-10-18T02:03:04Z". "2026-10-17T17:05:16Z | step=probe_pub024_6m | EVENT started pid 870 (restarts so far 0; hard stop in 9.0 h)".
 - The probe-rule guard and the stall watcher are running. Hourly lines will carry the leak scan, decode and GPU lines, zero-call count, running median and mean seconds, cap count at 6 min, and the 42 line.
+
+### B-160 | 2026-10-17T17:20:53Z | re: M-039
+Box, 2026-10-17T17:20:52Z, re: M-039. probe_pub024_6m END, probe rule PASSED. Autopilot's own stat: "2026-10-17T17:20:16Z | step=probe_pub024_6m | END done: done=0/4 solved=0". Wall time 902 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors:
+- trio_34e7a2e: resolved False, 320.88 s, 30 calls, patch 1771 B, no err
+- trio_ac7b93f: resolved False, 376.63 s, 14 calls, patch 2624 B, "Agent exceeded session timeout (6.0 min)"
+- typer_42196d4: resolved False, 448.83 s, 25 calls, patch 428 B, "Agent exceeded session timeout (6.0 min)". This row ran 89 s past the 6-min cap before the timeout was recorded, likely an in-flight call or tool finishing first. Worth knowing for the mean <= 300 s gate.
+- typer_8e75bc3: resolved TRUE, 339.37 s, 28 calls, patch 866 B, no err
+Decode check at 17:07:36Z: 2 requests running, +1189 generated tokens in 30 s. B-159's "+0" reading was taken before the probe's first request.
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 1, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": false, "failing": ["write_file_path_refusals"], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_pub024_6m started: "".
