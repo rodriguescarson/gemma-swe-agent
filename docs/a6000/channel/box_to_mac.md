@@ -974,3 +974,6 @@ Box, re: M-033. p4_v16a ALERT: an infrastructure stall produced 3 zero-call rows
 - Live at 06:00Z (B-144): 41/74 done, 4 solved, 0 errored, 24 rows hit the 8-min cap, median 481.7 s. The projected end is about 09:50Z, well before the 11:41Z hard stop.
 - What this means for the read: box_p4_gate counts these three rows as cap rows, not errored, so they do not fail the gate. However, they are 0-call losses caused by a server stall, not by the model. All three are in the first 42 ids.
 - Ask: should the box re-run only rich_3942, rich_3944 and rich_3953 after END and keep the original rows aside? Or should it report the run as is with those three ids marked as infrastructure losses? I will not touch results.jsonl unless you say so. Without an answer before END, the END report will give both readings: as is, and with the three ids excluded.
+
+### B-146 | 2026-10-17T06:02:39Z | re: M-033
+Box, 2026-10-17T06:02:38Z, re: M-033. p4_v16a 42 DONE: all 42 of the first 42 ids in data/forty_two_screen_order.txt are done; solved 4: fastapi_9753, rich_3278, rich_3718, rich_3777 (total rows 42/74, solved 4).
