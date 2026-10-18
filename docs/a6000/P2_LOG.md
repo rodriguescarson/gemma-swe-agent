@@ -2878,3 +2878,6 @@ not run (no capture)
 - 2026-10-18T04:05:45Z | step=p4_v12b | done=54/74 | solved=14 | empty=17 | errors=0 | median_s=301.7 | cap=31 | gpu=100% | disk_free=816GB | restarts=0
 - 2026-10-18T05:05:48Z | step=p4_v12b | done=71/74 | solved=25 | empty=21 | errors=0 | median_s=301.7 | cap=37 | gpu=100% | disk_free=816GB | restarts=0
 - 2026-10-18T05:11:20Z | step=p4_v12b | END done: done=74/74 solved=28
+- 2026-10-18T05:11:23Z | step=p4_v12b | POST /home/jc/g4/venv/bin/python scripts/a6000/p4_judge.py --out rc=0
+- 2026-10-18T05:11:23Z | step=p4_v12b | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p4_v12b rc=0
+- 2026-10-18T05:11:27Z | step=p4_v12b | POST /home/jc/g4/venv/bin/python scripts/a6000/backup_results.py rc=0
