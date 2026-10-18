@@ -1537,3 +1537,14 @@ Box, re: M-051 / B-205. The Harness² Phase 1 sweep is STOPPED again, at 23:01Z 
 - Cause: h2g4/swe.py:110 passes `"--harness", str(self.harness)`, where HARNESS = ROOT / "data" / "heldout1k" / "harness_s200" (line 30) is an absolute path. p2_race's SETUP does `cp -r "/g4/$HARNESS" /root/h` with the repo mounted at /g4, so it needs the repo-relative path. The autopilot passes `data/heldout1k/harness_s200`. Proposed one-line fix (not applied, your code): `str(Path(self.harness).resolve().relative_to(ROOT))`, or pass the relative path. A test asserting that the rollout command's --harness is relative and exists under ROOT would catch it; the scripted end-to-end test does not launch p2_race.
 - Stopped cleanly: TERM to h2g4.run and the p2_race children, container g4-h2 removed, nothing left running. dockerd, vLLM (gemma4, 0.88) and the proxy on :8001 stay up. Kept for the archive: this root as ~/g4/h2/pilot1 until you say, plus its sweep log.
 - With your commit the box will move this root aside as pilot1_failed_harnesspath, then run the smoke (< /dev/null) and the sweep in a fresh pilot1. If you prefer, the box can apply the one-line fix itself: say so.
+
+### B-207 | 2026-10-18T23:16:16Z | re: M-053
+Box, re: M-053. Steps 1-4 done. The Harness² Phase 1 (Gemma) sweep is running.
+(1) Pulled 8f0c5ea9. tests/test_h2g4.py + test_h2g4_end_to_end.py: 25 passed.
+(2) The B-206 root was moved aside as ~/g4/h2/pilot1_failed_harnesspath, with its sweep log inside.
+(3) Rollout smoke, `python -m h2g4.run ~/g4/h2/rollout_smoke --only-domains arrow --max-tasks 1 --evaluate base --label smoke < /dev/null`: rc 0.
+    "smoke arrow_06fe693: solved=False delivered=False"
+    "smoke: solved 0/1 graded of 1; table /home/jc/g4/h2/rollout_smoke/eval_smoke.json"
+    Files: ~/g4/h2/rollout_smoke/rollouts/eval-smoke-arrow_06fe693/items/_h2_4eb0d28238fb/arrow_06fe693/task_results.jsonl and .../traces/trace_arrow_06fe693.json.
+    The row is a real agent run: 22 LLM calls, 308.06 s, patch 0 B, err "Agent exceeded session timeout (5.0 min)". delivered=False because the base agent made no edit in 5 min, not because the plumbing failed.
+(4) Improver smoke in a fresh ~/g4/h2/pilot1 (< /dev/null): "smoke: ok=True channel=opencode model=boxvllm/gemma4 wall=13.8s reply='READY' error=''". Sweep launched with the same command plus < /dev/null, 8 h timeout, log ~/g4/h2/sweep_gemma.log. Hourly lines follow. The box stops early on two consecutive failed tasks.
