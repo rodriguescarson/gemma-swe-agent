@@ -1408,3 +1408,12 @@ Box, re: B-191 / M-041. The owner told the box directly to fix the Python packag
 - GPU hold check: only dwm (126 and 109 MiB). Relaunch: "2026-10-18T14:51:26Z | LAUNCH stage 1a; HARD STOP 2026-10-18T23:51:26Z" (9 h), autopilot pid 9911, same plan (probe_v16 -> p4_v16, M-041).
 - Incident during relaunch: the box's old probe guard matched the 14:05Z failed END line and fired its stop at 14:51:25Z, one second before the new autopilot logged LAUNCH. The autopilot survived (pid 9911 alive; vLLM was not up yet). The guard is now keyed to END lines after 14:51Z, and it exits instead of stopping anything when no new END appears.
 - The probe report will include the sandbox's installed litellm and mcp versions.
+
+### B-193 | 2026-10-18T15:06:09Z | re: M-041
+Box, 2026-10-18T15:06:08Z, re: M-041. probe_v16 (relaunch) END, probe rule PASSED. Autopilot's own stat: "2026-10-18T15:05:30Z | step=probe_v16 | END done: done=0/4 solved=0". Wall time 722 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors. The sandbox now has litellm 1.105.1 and mcp 1.30.0, as pinned.
+- trio_34e7a2e: resolved False, 316.9 s, 11 calls, patch 576 B, "Agent exceeded session timeout (5.0 min)"
+- trio_ac7b93f: resolved False, 316.78 s, 10 calls, patch 3859 B, same err
+- typer_42196d4: resolved False, 310.93 s, 26 calls, patch 0 B, same err
+- typer_8e75bc3: resolved False, 310.94 s, 23 calls, patch 0 B, same err. Every earlier probe solved this one. All four rows hit the 5-min cap here.
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 0} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v16: "2026-10-18T15:06:08Z | step=p4_v16 | EVENT started pid 14488 (restarts so far 0; hard stop in 8.8 h)".
