@@ -1,0 +1,962 @@
+{
+  "schema_version": "ATIF-v1.7",
+  "agent": {
+    "name": "adk-eval-core",
+    "version": "1.0"
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "source": "system",
+      "message": "You are a software engineer fixing one reported issue in the Python repository at /workspace. You have about 5 minutes and 40 tool calls for the whole task, and a model call with thinking takes several seconds, so plan for 12 tool calls and never more than 25. Think briefly before each call: what you expect to see and what you will do with it.\n\nWork in this order, one step per tool call:\n1. Locate. Take the most specific identifier or error text from the issue and list the candidate files with one shell line through the run_command tool, for example `git grep -n \"the_identifier\" -- \"*.py\" | head -n 20`. If the first search returns nothing, search a shorter token; the file the fix touches is usually in the top few hits. Do not read files that are not in the hits.\n2. Read only the function that must change, with the read_file tool and a line range (at most 150 lines). One or two reads are enough.\n3. Edit the source with the edit_file tool: a short, unique old_string copied exactly from what you read, and the minimal new_string. Create new functions, parameters, messages or files with exactly the names the issue implies. If an edit fails because old_string was not found, read those lines again and retry with a shorter old_string; never resend the identical edit. Apply the same fix to an obvious sibling (both branches of a condition, load and loads) with one more edit.\n4. Check. Run the one test file or test that covers this code, for example `python3 -m pytest tests/test_x.py -x -q -k name` with a 60-second timeout in the command, or run the issue's own example as `python3 - <<'EOF'` with an assert. Failures unrelated to your change are not yours to fix. Never run the whole test suite.\n5. Submit. Call the submit_patch tool once the targeted check passes, or once you have made the best change you can and 20 tool calls or most of the time are spent. Then reply with one sentence and stop.\n\nRules:\n- Never modify, create or delete test files or test configuration (anything under tests/, test_*.py, *_test.py, conftest.py, pytest.ini, setup.cfg, tox.ini, pyproject.toml). The grader resets them and such edits break the hidden tests.\n- Never search outside /workspace, never install packages, never refactor or reformat code you were not asked to change.\n- The current code IS wrong: an empty patch is a failure, so never conclude that nothing needs changing.\n- If a tool reply says the budget is exhausted, call submit_patch at once.\n- Call the get_status tool after your 10th tool call; if less than 90 seconds remain, submit what you have.",
+      "extra": {
+        "event_type": "system_instruction",
+        "elapsed_s": 0.6233446598052979,
+        "timestamp": 1792295115.8487706,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 2,
+      "source": "user",
+      "message": "You are evaluating a software engineering task for repository fastapi/fastapi.\n\nProblem Statement:\n\ud83d\udc1b Fix OpenAPI duplication of `anyOf` refs for app-level responses with specified `content` and `model` as `Union`\n\n## Summary\r\n\r\nFixes an issue where defining app-level `responses={...}` with a `Union` of Pydantic models **and** specifying `[\"content\"][...][\"examples\"]` causes the generated OpenAPI schema to accumulate duplicate `$ref` entries in the `anyOf` array.\r\n\r\n\r\n\r\n## Minimal reproducible example\r\n\r\n<details open>\r\n<summary> <code>app.py</code> </summary>\r\n\r\n```python\r\nfrom fastapi import FastAPI\r\nfrom pydantic import BaseModel\r\n\r\n\r\nclass ModelA(BaseModel):\r\n    a: str\r\n\r\n\r\nclass ModelB(BaseModel):\r\n    b: str\r\n\r\n\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'model': ModelA | ModelB,\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}}\r\n            }}\r\n        }\r\n    }\r\n)\r\n\r\n\r\n@app.get('/route1')\r\ndef route1():\r\n    return \"test\"\r\n\r\n@app.get('/route2')\r\ndef route2():\r\n    return \"test\"\r\n\r\n@app.get('/route3')\r\ndef route2():\r\n    return \"test\"\r\n```\r\n</details>\r\n\r\n<details open>\r\n<summary>Generated <code>/openapi.json</code> excerpt (<code>paths[\"/route1\"][\"get\"][\"responses\"]</code>)</summary>\r\n\r\n```json\r\n{\r\n  \"500\": {\r\n    \"description\": \"Internal Server Error\",\r\n    \"content\": {\r\n      \"application/json\": {\r\n        \"schema\": {\r\n          \"anyOf\": [\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" },\r\n            { \"$ref\": \"#/components/schemas/ModelA\" },\r\n            { \"$ref\": \"#/components/schemas/ModelB\" }\r\n          ]\r\n        }\r\n       }\r\n     }\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAs you can see, the `$ref`s are duplicated three times within `anyOf`. \r\n\r\nThis appears to be an unintended behavior, since FastAPI\u2019s documentation does not indicate that specifying both a `model` and `content` is prohibited. The generated schema is still valid, but the duplication grows with teh route count and produces excessively large `anyOf` lists for bigger applications.\r\n\r\n\r\n<details open>\r\n<summary> <h2>Root Cause</h2> </summary>\r\n\r\n[Relevant Code Snippet](https://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L416)\r\n\r\nFirst, `additional_response` is taken from the `route` object:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L376-L379\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n    'model': ModelA | ModelB,\r\n    'content': {\"application/json\": {\r\n        'examples': {\"Case A\": {\"value\": \"a\"}}\r\n    }}\r\n}\r\n```\r\n</details>\r\n\r\n `additional_response` is *shallowly* `.copy()`ed into `process_response`:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L380\r\n\r\nNow, `id(process_response['content']) == id(additional_response['content'])`, so when `process_response['content']` is modified, the `route.responses` object inadvertently modified as well. And, since the response was defined within `FastAPI(...)`, all the routes share the same `route.responses` object.\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/openapi/utils.py#L401-L406\r\n\r\n`deep_dict_update()` will combine `anyOf` segments together:\r\n\r\nhttps://github.com/fastapi/fastapi/blob/f0dd1046a688935ffd23666b3d4164b838a4d8fe/fastapi/utils.py#L227-L242\r\n\r\nWhen this method is called the second time (for the second route), `additional_response` will now already contain the schema definition from the first route:\r\n\r\n<details>\r\n<summary> Example <code>additional_response</code> </summary>\r\n\r\n```python\r\n{\r\n  'model': ModelA | ModelB,\r\n  'content': {\"application/json\": {\r\n      'examples': {\"Case A\": {\"value\": \"a\"}}\r\n  }},\r\n  'schema\": {\r\n    \"anyOf\": [\r\n      { \"$ref\": \"#/components/schemas/ModelA\" },\r\n      { \"$ref\": \"#/components/schemas/ModelB\" }\r\n    ]\r\n  }\r\n}\r\n```\r\n</details>\r\n\r\nAnd, for each subsequent route, the additional \"anyOf\" elements will keep appending to the same array.\r\n\r\n</details>\r\n\r\n<details open>\r\n<summary> <h2> Workaround (before fix) </h2> </summary>\r\n\r\nDefine the schema manually instead of using `model`:\r\n\r\n```python\r\napp = FastAPI(\r\n    responses={\r\n        500: {\r\n            'content': {\"application/json\": {\r\n                'examples': {\"Case A\": {\"value\": \"a\"}},\r\n                'schema': {\r\n                    \"anyOf\": [\r\n                        model.model_json_schema() for model in [ModelA, ModelB]\r\n                    ]\r\n                }\r\n            }}\r\n        }\r\n    }\r\n)\r\n```\r\n\r\n</details>\r\n\r\n## Additional Information\r\n<details>\r\n<summary> Full <code>openapi.json</code> </summary>\r\n\r\n```json\r\n{\r\n  \"openapi\": \"3.1.0\",\r\n  \"info\": {\r\n    \"title\": \"FastAPI\",\r\n    \"version\": \"0.1.0\"\r\n  },\r\n  \"paths\": {\r\n    \"/route1\": {\r\n      \"get\": {\r\n        \"summary\": \"Route1\",\r\n        \"operationId\": \"route1_route1_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route2\": {\r\n      \"get\": {\r\n        \"summary\": \"Route2\",\r\n        \"operationId\": \"route2_route2_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    },\r\n    \"/route3\": {\r\n      \"get\": {\r\n        \"summary\": \"Route3\",\r\n        \"operationId\": \"route3_route3_get\",\r\n        \"responses\": {\r\n          \"200\": {\r\n            \"description\": \"Successful Response\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n\r\n                }\r\n              }\r\n            }\r\n          },\r\n          \"500\": {\r\n            \"description\": \"Internal Server Error\",\r\n            \"content\": {\r\n              \"application/json\": {\r\n                \"schema\": {\r\n                  \"anyOf\": [\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelA\"\r\n                    },\r\n                    {\r\n                      \"$ref\": \"#/components/schemas/ModelB\"\r\n                    }\r\n                  ],\r\n                  \"title\": \"Response 500 Route3 Route3 Get\"\r\n                },\r\n                \"examples\": {\r\n                  \"Case A\": {\r\n                    \"value\": \"a\"\r\n                  }\r\n                }\r\n              }\r\n            }\r\n          }\r\n        }\r\n      }\r\n    }\r\n  },\r\n  \"components\": {\r\n    \"schemas\": {\r\n      \"ModelA\": {\r\n        \"properties\": {\r\n          \"a\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"A\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"a\"\r\n        ],\r\n        \"title\": \"ModelA\"\r\n      },\r\n      \"ModelB\": {\r\n        \"properties\": {\r\n          \"b\": {\r\n            \"type\": \"string\",\r\n            \"title\": \"B\"\r\n          }\r\n        },\r\n        \"type\": \"object\",\r\n        \"required\": [\r\n          \"b\"\r\n        ],\r\n        \"title\": \"ModelB\"\r\n      }\r\n    }\r\n  }\r\n}\r\n```\r\n\r\n</details>\n\n## Task Budget (Session terminates when any budget is exhausted)\n- Time allowance: 5.0 minutes\n- Tool calls allowance: 40 calls\n- Max loop iterations: 150 turns\n\n## Execution Environment Rules\n- Single command timeout: 180 seconds (commands exceeding this fail without ending the session)\n- Command output limit: 5000 characters\n- File view limit: 150 lines per read_file call\n- File character limit: 10000 characters per read_file call\n- Environment is offline (no network/PyPI access). All repository and test dependencies are ALREADY pre-installed. Do NOT attempt to run pip install or download packages.\n\n## Instructions:\n0. All source code is under `/workspace`. Do NOT search outside `/workspace` (e.g. `/usr/`, `/wheels/`, system site-packages). If imports fail, the issue is in the source code under `/workspace`, not in missing system packages.\n1. Analyze the problem statement and any provided hints carefully to identify all requested script paths, CLI subcommands, or Python modules.\n2. Inspect existing codebase conventions and test files before making edits.\n3. Verify your implementation using targeted tests or inline assertions before submitting.\n4. Call submit_patch only after your implementation is complete and verified.\n5. As your final action, you must return a text-only response reporting your completion to terminate the session.\n## Workspace Layout\nThe repository is located at `/workspace`. Here is the directory tree (up to 3 levels):\n```\n./CITATION.cff\n./CONTRIBUTING.md\n./LICENSE\n./README.md\n./SECURITY.md\n./conftest.py\n./docs\n./docs_src\n./fastapi\n./fastapi/__init__.py\n./fastapi/__main__.py\n./fastapi/_compat\n./fastapi/_compat/__init__.py\n./fastapi/_compat/shared.py\n./fastapi/_compat/v2.py\n./fastapi/applications.py\n./fastapi/background.py\n./fastapi/cli.py\n./fastapi/concurrency.py\n./fastapi/datastructures.py\n./fastapi/dependencies\n./fastapi/dependencies/__init__.py\n./fastapi/dependencies/models.py\n./fastapi/dependencies/utils.py\n./fastapi/encoders.py\n./fastapi/exception_handlers.py\n./fastapi/exceptions.py\n./fastapi/logger.py\n./fastapi/middleware\n./fastapi/middleware/__init__.py\n./fastapi/middleware/asyncexitstack.py\n./fastapi/middleware/cors.py\n./fastapi/middleware/gzip.py\n./fastapi/middleware/httpsredirect.py\n./fastapi/middleware/trustedhost.py\n./fastapi/middleware/wsgi.py\n./fastapi/openapi\n./fastapi/openapi/__init__.py\n./fastapi/openapi/constants.py\n./fastapi/openapi/docs.py\n./fastapi/openapi/models.py\n./fastapi/openapi/utils.py\n./fastapi/param_functions.py\n./fastapi/params.py\n./fastapi/py.typed\n./fastapi/requests.py\n./fastapi/responses.py\n./fastapi/routing.py\n./fastapi/security\n./fastapi/security/__init__.py\n./fastapi/security/api_key.py\n./fastapi/security/base.py\n./fastapi/security/http.py\n./fastapi/security/oauth2.py\n./fastapi/security/open_id_connect_url.py\n./fastapi/security/utils.py\n./fastapi/staticfiles.py\n./fastapi/templating.py\n./fastapi/testclient.py\n./fastapi/types.py\n./fastapi/utils.py\n./fastapi/websockets.py\n./pdm_build.py\n./pyproject.toml\n./pytest.ini\n./requirements-docs-tests.txt\n./requirements-docs.txt\n./requirements-github-actions.txt\n./requirements-tests.txt\n./requirements-translations.txt\n./requirements.txt\n./scripts\n./scripts/contributors.py\n./scripts/coverage.sh\n./scripts/deploy_docs_status.py\n./scripts/docs.py\n./scripts/format.sh\n./scripts/general-llm-prompt.md\n./scripts/label_approved.py\n./scripts/lint.sh\n./scripts/mkdocs_hooks.py\n./scripts/notify_translations.py\n./scripts/people.py\n./scripts/playwright\n./scripts/playwright/cookie_param_models\n./scripts/playwright/header_param_models\n./scripts/playwright/query_param_models\n./scripts/playwright/request_form_models\n./scripts/playwright/separate_openapi_schemas\n./scripts/playwright/sql_databases\n./scripts/sponsors.py\n./scripts/test-cov-html.sh\n./scripts/test.sh\n./scripts/topic_repos.py\n./scripts/translate.py\n./tests\n```\n",
+      "extra": {
+        "event_type": "task_prompt",
+        "elapsed_s": 0.6233484745025635,
+        "timestamp": 1792295115.8487744,
+        "author": "harness"
+      }
+    },
+    {
+      "step_id": 3,
+      "source": "agent",
+      "message": "The user is reporting an issue where OpenAPI duplication of `anyOf` refs occurs for app-level responses when both `content` and `model` (as a `Union`) are specified.\nThe root cause is identified as a shallow copy of `additional_response` in `fastapi/openapi/utils.py`, which leads to the modification of the shared `route.responses` object.\n\nI need to:\n1. Reproduce the issue with the provided example.\n2. Fix the issue by ensuring a deep copy or avoiding the mutation of the shared response object.\n3. Verify the fix.\n\nLet's start by reproducing the issue.",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 5689,
+        "completion_tokens": 561,
+        "cached_tokens": 0,
+        "total_tokens": 6250
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 23.057451248168945,
+        "timestamp": 1792295138.2828772,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 4,
+      "source": "agent",
+      "message": "// Thinking Process:\n1. Create a reproduction script `repro.py` based on the provided example.\n2. Run the script and check the generated OpenAPI schema for duplication in `anyOf`.\n\nThe reproduction script should:\n- Define the FastAPI app as in the example.\n- Use `app.openapi()` to get the OpenAPI schema.\n- Check if `anyOf` in the 500 response of the routes has duplicate refs.<channel|>",
+      "model_name": "/home/jc/g4/model",
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "text",
+        "elapsed_s": 23.057451248168945,
+        "timestamp": 1792295138.2828772,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 5,
+      "source": "agent",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_4",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "cat <<'EOF' > repro.py\nfrom fastapi import FastAPI\nfrom pydantic import BaseModel\nimport json\n\nclass ModelA(BaseModel):\n    a: str\n\nclass ModelB(BaseModel):\n    b: str\n\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n\n@app.get('/route1')\ndef route1():\n    return \"test\"\n\n@app.get('/route2')\ndef route2():\n    return \"test\"\n\n@app.get('/route3')\ndef route3():\n    return \"test\"\n\nopenapi_schema = app.openapi()\nresponses_500 = openapi_schema[\"paths\"][\"/route1\"][\"get\"][\"responses\"][\"500\"]\nany_of = responses_500[\"content\"][\"application/json\"][\"schema\"][\"anyOf\"]\n\nprint(f\"Number of anyOf elements: {len(any_of)}\")\nfor i, item in enumerate(any_of):\n    print(f\"{i}: {item}\")\n\nassert len(any_of) == 2, f\"Expected 2 elements in anyOf, got {len(any_of)}\"\nEOF\npython3 repro.py\n"
+          },
+          "extra": {
+            "elapsed_s": 23.057451248168945,
+            "timestamp": 1792295138.2828772,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_62541f6f-ed0__g4uvdk5/workspace/repro.py\\\", line 42, in <module>\\n    assert len(any_of) == 2, f\\\"Expected 2 elements in anyOf, got {len(any_of)}\\\"\\n           ^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 elements in anyOf, got 6\\n\", \"details\": {\"stdout\": \"Number of anyOf elements: 6\\n0: {'$ref': '#/components/schemas/ModelA'}\\n1: {'$ref': '#/components/schemas/ModelB'}\\n2: {'$ref': '#/components/schemas/ModelA'}\\n3: {'$ref': '#/components/schemas/ModelB'}\\n4: {'$ref': '#/components/schemas/ModelA'}\\n5: {'$ref': '#/components/schemas/ModelB'}\\n\", \"stderr\": \"Traceback (most recent call last):\\n  File \\\"/tmp/swegemma_sandbox_62541f6f-ed0__g4uvdk5/workspace/repro.py\\\", line 42, in <module>\\n    assert len(any_of) == 2, f\\\"Expected 2 elements in anyOf, got {len(any_of)}\\\"\\n           ^^^^^^^^^^^^^^^^\\nAssertionError: Expected 2 elements in anyOf, got 6\\n\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 23.30356216430664,
+          "timestamp": 1792295138.5289881,
+          "author": "swe_single_agent"
+        }
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "elapsed_s": 23.057451248168945,
+        "timestamp": 1792295138.2828772,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 6,
+      "source": "agent",
+      "message": "The reproduction script confirmed the issue: `anyOf` has 6 elements instead of 2.\n\nNow let's examine the code in `fastapi/openapi/utils.py` around the lines mentioned in the root cause.\nThe root cause says:\n- `additional_response` is taken from `route.responses`.\n- It's shallowly copied: `process_response = additional_response.copy()`.\n- `process_response['content']` is modified, which modifies `additional_response['content']` because it's a shallow copy.\n- `deep_dict_update()` is used to combine `anyOf` segments.\n\nLet's read `fastapi/openapi/utils.py`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_7",
+          "function_name": "read_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "start_line": 370,
+            "end_line": 420
+          },
+          "extra": {
+            "elapsed_s": 30.699663877487183,
+            "timestamp": 1792295145.9250898,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"content\": \"                    status_code, {}\\n                ).setdefault(\\\"content\\\", {}).setdefault(route_response_media_type, {})[\\n                    \\\"schema\\\"\\n                ] = response_schema\\n            if route.responses:\\n                operation_responses = operation.setdefault(\\\"responses\\\", {})\\n                for (\\n                    additional_status_code,\\n                    additional_response,\\n                ) in route.responses.items():\\n                    process_response = additional_response.copy()\\n                    process_response.pop(\\\"model\\\", None)\\n                    status_code_key = str(additional_status_code).upper()\\n                    if status_code_key == \\\"DEFAULT\\\":\\n                        status_code_key = \\\"default\\\"\\n                    openapi_response = operation_responses.setdefault(\\n                        status_code_key, {}\\n                    )\\n                    assert isinstance(process_response, dict), (\\n                        \\\"An additional response must be a dict\\\"\\n                    )\\n                    field = route.response_fields.get(additional_status_code)\\n                    additional_field_schema: Optional[dict[str, Any]] = None\\n                    if field:\\n                        additional_field_schema = get_schema_from_model_field(\\n                            field=field,\\n                            model_name_map=model_name_map,\\n                            field_mapping=field_mapping,\\n                            separate_input_output_schemas=separate_input_output_schemas,\\n                        )\\n                        media_type = route_response_media_type or \\\"application/json\\\"\\n                        additional_schema = (\\n                            process_response.setdefault(\\\"content\\\", {})\\n                            .setdefault(media_type, {})\\n                            .setdefault(\\\"schema\\\", {})\\n                        )\\n                        deep_dict_update(additional_schema, additional_field_schema)\\n                    status_text: Optional[str] = status_code_ranges.get(\\n                        str(additional_status_code).upper()\\n                    ) or http.client.responses.get(int(additional_status_code))\\n                    description = (\\n                        process_response.get(\\\"description\\\")\\n                        or openapi_response.get(\\\"description\\\")\\n                        or status_text\\n                        or \\\"Additional Response\\\"\\n                    )\\n                    deep_dict_update(openapi_response, process_response)\\n                    openapi_response[\\\"description\\\"] = description\\n            http422 = \\\"422\\\"\\n            all_route_params = get_flat_params(route.dependant)\\n            if (all_route_params or route.body_field) and not any(\", \"start_line\": 370, \"end_line\": 420, \"total_lines\": 567, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 30.701697826385498,
+          "timestamp": 1792295145.9271238,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 6643,
+        "completion_tokens": 197,
+        "cached_tokens": 0,
+        "total_tokens": 6840
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 30.699663877487183,
+        "timestamp": 1792295145.9250898,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 7,
+      "source": "agent",
+      "message": "The code is:\n```python\n                for (\n                    additional_status_code,\n                    additional_response,\n                ) in route.responses.items():\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    # ...\n                    if field:\n                        # ...\n                        additional_schema = (\n                            process_response.setdefault(\"content\", {})\n                            .setdefault(media_type, {})\n                            .setdefault(\"schema\", {})\n                        )\n                        deep_dict_update(additional_schema, additional_field_schema)\n                    # ...\n                    deep_dict_update(openapi_response, process_response)\n```\n\nWait, the root cause analysis says:\n`additional_response` is shallowly `.copy()`ed into `process_response`.\n`process_response['content']` is modified, which modifies `additional_response['content']`.\n\nIn the provided example:\n```python\napp = FastAPI(\n    responses={\n        500: {\n            'model': ModelA | ModelB,\n            'content': {\"application/json\": {\n                'examples': {\"Case A\": {\"value\": \"a\"}}\n            }}\n        }\n    }\n)\n```\n`additional_response` is `{'model': ModelA | ModelB, 'content': {\"application/json\": {'examples': {\"Case A\": {\"value\": \"a\"}}}}} `.\n`process_response = additional_response.copy()` creates a shallow copy.\n`process_response.pop(\"model\", None)` removes 'model' from `process_response` but not from `additional_response`.\nThen:\n```python\n                        additional_schema = (\n                            process_response.setdefault(\"content\", {})\n                            .setdefault(media_type, {})\n                            .setdefault(\"schema\", {})\n                        )\n                        deep_dict_update(additional_schema, additional_field_schema)\n```\n`process_response.setdefault(\"content\", {})` returns the `content` dict from `additional_response` (because it's a shallow copy).\nThen `setdefault(media_type, {})` returns the dict for `application/json`.\nThen `setdefault(\"schema\", {})` returns the `schema` dict (or creates it).\nThen `deep_dict_update(additional_schema, additional_field_schema)` modifies this `additional_schema` dict in place.\n\nSince `additional_schema` is part of the `content` dict which is shared across all routes (because it's in `app.responses`), the `schema` is updated for all routes.\nAnd `deep_dict_update` probably appends to lists if they exist.\n\nLet's check `deep_dict_update` in `fastapi/utils.py`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_10",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 245,
+            "filepath": "fastapi/utils.py",
+            "start_line": 220
+          },
+          "extra": {
+            "elapsed_s": 53.711734771728516,
+            "timestamp": 1792295168.9371607,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"ValueError\", \"error_message\": \"start_line (220) cannot be greater than end_line (164)\", \"details\": {}}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 53.71396827697754,
+          "timestamp": 1792295168.9393942,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 7492,
+        "completion_tokens": 653,
+        "cached_tokens": 0,
+        "total_tokens": 8145
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 53.711734771728516,
+        "timestamp": 1792295168.9371607,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 8,
+      "source": "agent",
+      "message": "Ah, I might have the wrong line numbers for `deep_dict_update`. Let me search for it.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_13",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "grep -n \"def deep_dict_update\" fastapi/utils.py"
+          },
+          "extra": {
+            "elapsed_s": 55.831639528274536,
+            "timestamp": 1792295171.0570655,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"131:def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 55.83566403388977,
+          "timestamp": 1792295171.06109,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8202,
+        "completion_tokens": 58,
+        "cached_tokens": 0,
+        "total_tokens": 8260
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 55.831639528274536,
+        "timestamp": 1792295171.0570655,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 9,
+      "source": "agent",
+      "message": "Okay, it's at line 131.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_16",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 150,
+            "filepath": "fastapi/utils.py",
+            "start_line": 131
+          },
+          "extra": {
+            "elapsed_s": 57.78433346748352,
+            "timestamp": 1792295173.0097594,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/utils.py\", \"content\": \"def deep_dict_update(main_dict: dict[Any, Any], update_dict: dict[Any, Any]) -> None:\\n    for key, value in update_dict.items():\\n        if (\\n            key in main_dict\\n            and isinstance(main_dict[key], dict)\\n            and isinstance(value, dict)\\n        ):\\n            deep_dict_update(main_dict[key], value)\\n        elif (\\n            key in main_dict\\n            and isinstance(main_dict[key], list)\\n            and isinstance(update_dict[key], list)\\n        ):\\n            main_dict[key] = main_dict[key] + update_dict[key]\\n        else:\\n            main_dict[key] = value\\n\\n\\ndef get_value_or_default(\\n    first_item: Union[DefaultPlaceholder, DefaultType],\", \"start_line\": 131, \"end_line\": 150, \"total_lines\": 164, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 57.786256551742554,
+          "timestamp": 1792295173.0116825,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8330,
+        "completion_tokens": 53,
+        "cached_tokens": 0,
+        "total_tokens": 8383
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 57.78433346748352,
+        "timestamp": 1792295173.0097594,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 10,
+      "source": "agent",
+      "message": "Yes, `main_dict[key] = main_dict[key] + update_dict[key]` appends the lists.\n\nSo the fix should be to make a deep copy of `additional_response` instead of a shallow copy.\nWait, `copy.deepcopy` might be too expensive or might not be appropriate if there are non-serializable objects.\nBut `additional_response` is usually a dict of simple types or Pydantic models (which are handled by `get_schema_from_model_field`).\n\nActually, the issue is specifically that `process_response.setdefault(\"content\", {})` is getting the shared `content` dict.\n\nIf we use `copy.deepcopy(additional_response)`, it should solve it.\n\nLet's see if `copy` is imported in `fastapi/openapi/utils.py`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_19",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "grep \"import copy\" fastapi/openapi/utils.py"
+          },
+          "extra": {
+            "elapsed_s": 65.41662240028381,
+            "timestamp": 1792295180.6420484,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"\", \"details\": {\"stdout\": \"\", \"stderr\": \"\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 65.42066431045532,
+          "timestamp": 1792295180.6460903,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8656,
+        "completion_tokens": 211,
+        "cached_tokens": 0,
+        "total_tokens": 8867
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 65.41662240028381,
+        "timestamp": 1792295180.6420484,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 11,
+      "source": "agent",
+      "message": "It's not imported. I can import it.\n\nAlternatively, I can just deep copy the `content` if it exists.\n\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n```\n\nIf I change it to:\n```python\n                    import copy\n                    process_response = copy.deepcopy(additional_response)\n                    process_response.pop(\"model\", None)\n```\nWait, `additional_response` might contain Pydantic models (in the `model` key). `deepcopy` on Pydantic models might be okay, but it's better to avoid it if possible.\n\nActually, `process_response.pop(\"model\", None)` is called right after the copy.\nIf we deepcopy the `additional_response` and then pop `model`, it should be fine.\n\nWait, if I only deepcopy the `content` part?\n\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    if \"content\" in process_response:\n                        import copy\n                        process_response[\"content\"] = copy.deepcopy(process_response[\"content\"])\n```\n\nBut `additional_response` could have other nested structures.\n\nThe root cause analysis says:\n`additional_response` is *shallowly* `.copy()`ed into `process_response`.\n`process_response['content']` is modified, which modifies `additional_response['content']`.\n\nIf I use `copy.deepcopy(additional_response)`, it will copy everything.\n\nLet's see where `additional_response` comes from.\n`for (additional_status_code, additional_response,) in route.responses.items():`\n`route.responses` is a dict.\n\nIf I use `copy.deepcopy`, I need to import `copy`.\n\nLet's check if there's a better way.\nMaybe just:\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    if \"content\" in process_response:\n                        process_response[\"content\"] = {\n                            k: v.copy() if isinstance(v, dict) else v \n                            for k, v in process_response[\"content\"].items()\n                        }\n```\nBut `v` could also be a dict (e.g., `{\"schema\": {...}, \"examples\": {...}}`). So it needs to be deeper.\n\n`copy.deepcopy` is the safest way to ensure no shared mutable state.\n\nLet's check if `copy` is used elsewhere in `fastapi/openapi/utils.py`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_22",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "grep \"copy\" fastapi/openapi/utils.py"
+          },
+          "extra": {
+            "elapsed_s": 86.79352235794067,
+            "timestamp": 1792295202.0189483,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"                    process_response = additional_response.copy()\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 86.79741978645325,
+          "timestamp": 1792295202.0228457,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 8919,
+        "completion_tokens": 613,
+        "cached_tokens": 0,
+        "total_tokens": 9532
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 86.79352235794067,
+        "timestamp": 1792295202.0189483,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 12,
+      "source": "agent",
+      "message": "Only the shallow copy.\n\nLet's try to use `copy.deepcopy`. I'll add `import copy` at the top of the file.\n\nWait, I should check if `additional_response` can contain things that cannot be deepcopied.\nIt's usually a dict with keys like `description`, `model`, `content`.\n`model` is a Pydantic model or a type.\n`content` is a dict.\n\nIf I deepcopy `additional_response`, and then pop `model`, the `model` was deepcopied for nothing, but it shouldn't cause issues unless the model is weird.\n\nActually, if I pop `model` first, then deepcopy?\nNo, `additional_response` is the original.\n\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n```\n\nIf I do:\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    if \"content\" in process_response:\n                        import copy\n                        process_response[\"content\"] = copy.deepcopy(process_response[\"content\"])\n```\nThis only deepcopies the `content` part, which is where the mutation happens.\n\nLet's see if there are other mutations.\n`deep_dict_update(openapi_response, process_response)`\n`openapi_response` is `operation_responses.setdefault(status_code_key, {})`.\n`process_response` is what we just created.\n\nIf `process_response` has other nested dicts besides `content`, they will also be shared.\n\nLet's check if `additional_response` can have other nested dicts.\nAccording to FastAPI docs, `responses` can have `description`, `model`, `content`.\n`content` is a dict of media types, each being a dict with `schema`, `examples`, etc.\n\nSo `content` is the main nested structure.\n\nLet's try to use `copy.deepcopy` for the whole `additional_response` but after popping `model`?\nNo, I can't pop from `additional_response` because it's shared.\n\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    import copy\n                    process_response = copy.deepcopy(process_response)\n```\nThis would work and avoid deepcopying the `model`.\n\nWait, `additional_response.copy()` is already a shallow copy.\nThen `process_response.pop(\"model\", None)` removes the reference to the model from the shallow copy.\nThen `copy.deepcopy(process_response)` deepcopies everything else.\n\nThis seems safe and correct.\n\nLet's verify if `import copy` should be at the top of the file. Yes, that's better.\n\nLet's check the imports in `fastapi/openapi/utils.py`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_25",
+          "function_name": "read_file",
+          "arguments": {
+            "end_line": 30,
+            "filepath": "fastapi/openapi/utils.py",
+            "start_line": 1
+          },
+          "extra": {
+            "elapsed_s": 110.74115633964539,
+            "timestamp": 1792295225.9665823,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"content\": \"import http.client\\nimport inspect\\nimport warnings\\nfrom collections.abc import Sequence\\nfrom typing import Any, Optional, Union, cast\\n\\nfrom fastapi import routing\\nfrom fastapi._compat import (\\n    ModelField,\\n    Undefined,\\n    get_compat_model_name_map,\\n    get_definitions,\\n    get_schema_from_model_field,\\n    lenient_issubclass,\\n)\\nfrom fastapi.datastructures import DefaultPlaceholder\\nfrom fastapi.dependencies.models import Dependant\\nfrom fastapi.dependencies.utils import (\\n    _get_flat_fields_from_params,\\n    get_flat_dependant,\\n    get_flat_params,\\n    get_validation_alias,\\n)\\nfrom fastapi.encoders import jsonable_encoder\\nfrom fastapi.exceptions import FastAPIDeprecationWarning\\nfrom fastapi.openapi.constants import METHODS_WITH_BODY, REF_PREFIX\\nfrom fastapi.openapi.models import OpenAPI\\nfrom fastapi.params import Body, ParamTypes\\nfrom fastapi.responses import Response\\nfrom fastapi.types import ModelNameMap\", \"start_line\": 1, \"end_line\": 30, \"total_lines\": 567, \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "read_file",
+          "elapsed_s": 110.74305605888367,
+          "timestamp": 1792295225.968482,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 9579,
+        "completion_tokens": 685,
+        "cached_tokens": 0,
+        "total_tokens": 10264
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 110.74115633964539,
+        "timestamp": 1792295225.9665823,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 13,
+      "source": "agent",
+      "message": "I will add `import copy` and change the line.\n\nWait, I should check if `copy` is already imported but I missed it. No, `grep` said no.\n\nLet's refine the change.\n\nCurrent code:\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n```\n\nProposed change:\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    import copy\n                    process_response = copy.deepcopy(process_response)\n```\nActually, putting `import copy` at the top is cleaner.\n\nLet's check if I can just use `copy.deepcopy(additional_response)` and then pop `model`.\n\n```python\n                    import copy\n                    process_response = copy.deepcopy(additional_response)\n                    process_response.pop(\"model\", None)\n```\nThis is simpler. Is it okay to deepcopy the `model`?\nThe `model` is usually a Pydantic model class or a type. Deepcopying a class is generally fine (it just copies the reference to the class). Deepcopying an instance of a Pydantic model is also fine.\n\nWait, if `model` is a type (like `ModelA | ModelB`), `deepcopy` of a type is just the type itself.\n\nLet's test this hypothesis.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_28",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"import copy; from pydantic import BaseModel; class A(BaseModel): pass; print(copy.deepcopy(A) is A)\""
+          },
+          "extra": {
+            "elapsed_s": 123.81407380104065,
+            "timestamp": 1792295239.0394998,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"error\", \"error_type\": \"CommandError\", \"error_message\": \"  File \\\"<string>\\\", line 1\\n    import copy; from pydantic import BaseModel; class A(BaseModel): pass; print(copy.deepcopy(A) is A)\\n                                                 ^^^^^\\nSyntaxError: invalid syntax\\n\", \"details\": {\"stdout\": \"\", \"stderr\": \"  File \\\"<string>\\\", line 1\\n    import copy; from pydantic import BaseModel; class A(BaseModel): pass; print(copy.deepcopy(A) is A)\\n                                                 ^^^^^\\nSyntaxError: invalid syntax\\n\", \"exit_code\": 1}}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 123.87800240516663,
+          "timestamp": 1792295239.1034284,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 10582,
+        "completion_tokens": 362,
+        "cached_tokens": 0,
+        "total_tokens": 10944
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 123.81407380104065,
+        "timestamp": 1792295239.0394998,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 14,
+      "source": "agent",
+      "message": "Ah, I used `print(copy.deepcopy(A) is A)` in a one-liner and maybe something went wrong. Let me try again.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_31",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"import copy; from pydantic import BaseModel; \nclass A(BaseModel): \n    pass\nprint(copy.deepcopy(A) is A)\""
+          },
+          "extra": {
+            "elapsed_s": 127.26782155036926,
+            "timestamp": 1792295242.4932475,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"True\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 127.35382843017578,
+          "timestamp": 1792295242.5792544,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11108,
+        "completion_tokens": 90,
+        "cached_tokens": 0,
+        "total_tokens": 11198
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 127.26782155036926,
+        "timestamp": 1792295242.4932475,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 15,
+      "source": "agent",
+      "message": "Okay, so `copy.deepcopy` on the class is fine.\n\nWhat about `ModelA | ModelB`?",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_34",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"import copy; from pydantic import BaseModel; \nclass A(BaseModel): pass\nclass B(BaseModel): pass\nC = A | B\nprint(copy.deepcopy(C) is C)\""
+          },
+          "extra": {
+            "elapsed_s": 130.80555701255798,
+            "timestamp": 1792295246.030983,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"False\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 130.89007234573364,
+          "timestamp": 1792295246.1154983,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11236,
+        "completion_tokens": 94,
+        "cached_tokens": 0,
+        "total_tokens": 11330
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 130.80555701255798,
+        "timestamp": 1792295246.030983,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 16,
+      "source": "agent",
+      "message": "Wait, `False`? That's interesting. Let's see what it is.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_37",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 -c \"import copy; from pydantic import BaseModel; \nclass A(BaseModel): pass\nclass B(BaseModel): pass\nC = A | B\nD = copy.deepcopy(C)\nprint(f'C: {C}, D: {D}, {C == D}')\""
+          },
+          "extra": {
+            "elapsed_s": 134.73868799209595,
+            "timestamp": 1792295249.964114,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"C: __main__.A | __main__.B, D: __main__.A | __main__.B, True\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 134.82971501350403,
+          "timestamp": 1792295250.055141,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11368,
+        "completion_tokens": 106,
+        "cached_tokens": 0,
+        "total_tokens": 11474
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 134.73868799209595,
+        "timestamp": 1792295249.964114,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 17,
+      "source": "agent",
+      "message": "It's a different object but it's equivalent.\n\nAnyway, the safest and most performant way is to pop `model` first and then deepcopy.\n\n```python\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n                    import copy\n                    process_response = copy.deepcopy(process_response)\n```\n\nWait, if I put `import copy` at the top, it's better.\n\nLet's check if there are other places where `additional_response` is used.\n\nIn `fastapi/openapi/utils.py`:\n```python\n                for (\n                    additional_status_code,\n                    additional_response,\n                ) in route.responses.items():\n                    process_response = additional_response.copy()\n                    process_response.pop(\"model\", None)\n```\n\nIf I change it to:\n```python\n                for (\n                    additional_status_code,\n                    additional_response,\n                ) in route.responses.items():\n                    process_response = copy.deepcopy(additional_response)\n                    process_response.pop(\"model\", None)\n```\nAnd add `import copy` at the top.\n\nLet's try this.\n\nWait, I should check if `additional_response` can be something other than a dict.\nThe code has `assert isinstance(process_response, dict), (\"An additional response must be a dict\")`.\nSo it's a dict.\n\nLet's apply the fix.\n\n1. Add `import copy` to `fastapi/openapi/utils.py`.\n2. Change `process_response = additional_response.copy()` to `process_response = copy.deepcopy(additional_response)`.\n\nWait, let me double check the line numbers.\n`fastapi/openapi/utils.py` line 380: `process_response = additional_response.copy()`\n\nLet's do it.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_40",
+          "function_name": "edit_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "new_string": "import copy\nimport http.client\nimport inspect\nimport warnings\n",
+            "old_string": "import http.client\nimport inspect\nimport warnings\n"
+          },
+          "extra": {
+            "elapsed_s": 152.30109763145447,
+            "timestamp": 1792295267.5265236,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"occurrences\": 1, \"strategy\": \"exact\", \"diff\": \"--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -1,3 +1,4 @@\\n+import copy\\n import http.client\\n import inspect\\n import warnings\\n\", \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 152.30367422103882,
+          "timestamp": 1792295267.5291002,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 11536,
+        "completion_tokens": 492,
+        "cached_tokens": 0,
+        "total_tokens": 12028
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 152.30109763145447,
+        "timestamp": 1792295267.5265236,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 18,
+      "source": "agent",
+      "message": "Now change the copy line.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_43",
+          "function_name": "edit_file",
+          "arguments": {
+            "filepath": "fastapi/openapi/utils.py",
+            "new_string": "                    process_response = copy.deepcopy(additional_response)",
+            "old_string": "                    process_response = additional_response.copy()"
+          },
+          "extra": {
+            "elapsed_s": 155.04627656936646,
+            "timestamp": 1792295270.2717025,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"filepath\": \"fastapi/openapi/utils.py\", \"occurrences\": 1, \"strategy\": \"exact\", \"diff\": \"--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -378,7 +378,7 @@\\n                     additional_status_code,\\n                     additional_response,\\n                 ) in route.responses.items():\\n-                    process_response = additional_response.copy()\\n+                    process_response = copy.deepcopy(additional_response)\\n                     process_response.pop(\\\"model\\\", None)\\n                     status_code_key = str(additional_status_code).upper()\\n                     if status_code_key == \\\"DEFAULT\\\":\\n\", \"is_truncated\": false}",
+        "extra": {
+          "tool_name": "edit_file",
+          "elapsed_s": 155.0486195087433,
+          "timestamp": 1792295270.2740455,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 12142,
+        "completion_tokens": 71,
+        "cached_tokens": 0,
+        "total_tokens": 12213
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 155.04627656936646,
+        "timestamp": 1792295270.2717025,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 19,
+      "source": "agent",
+      "message": "Now let's run the reproduction script.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_46",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 repro.py"
+          },
+          "extra": {
+            "elapsed_s": 156.52345490455627,
+            "timestamp": 1792295271.7488809,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"Number of anyOf elements: 2\\n0: {'$ref': '#/components/schemas/ModelA'}\\n1: {'$ref': '#/components/schemas/ModelB'}\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 156.7269251346588,
+          "timestamp": 1792295271.952351,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 12408,
+        "completion_tokens": 33,
+        "cached_tokens": 0,
+        "total_tokens": 12441
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 156.52345490455627,
+        "timestamp": 1792295271.7488809,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 20,
+      "source": "agent",
+      "message": "The reproduction script now passes!\n\nLet's double check if there are any other potential issues.\nThe root cause analysis mentioned `deep_dict_update` combining `anyOf` segments.\nBy using `copy.deepcopy(additional_response)`, we ensure that `process_response['content']` is a new object for each route, so `deep_dict_update` will not affect other routes.\n\nWait, if `additional_response` is defined at the app level, it's shared across all routes.\n`route.responses` is a reference to `app.responses`.\n\nSo for each route, we now create a deep copy of the app-level responses.\nThis means each route gets its own copy of the response definition, and any modifications made during OpenAPI generation for that route won't affect other routes.\n\nThis seems correct.\n\nOne more thing: the reproduction script had 3 routes.\nRoute 1: 2 elements in `anyOf`.\nRoute 2: 2 elements in `anyOf`.\nRoute 3: 2 elements in `anyOf`.\n\nBefore the fix, it was 6 elements for all of them because they were all sharing the same `content` dict and `deep_dict_update` was appending to it.\n\nNow they are separate.\n\nI'll run the reproduction script one more time just to be sure.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_49",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "python3 repro.py"
+          },
+          "extra": {
+            "elapsed_s": 167.99503636360168,
+            "timestamp": 1792295283.2204623,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"Number of anyOf elements: 2\\n0: {'$ref': '#/components/schemas/ModelA'}\\n1: {'$ref': '#/components/schemas/ModelB'}\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 168.195130109787,
+          "timestamp": 1792295283.420556,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 12520,
+        "completion_tokens": 315,
+        "cached_tokens": 0,
+        "total_tokens": 12835
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 167.99503636360168,
+        "timestamp": 1792295283.2204623,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 21,
+      "source": "agent",
+      "message": "Everything looks good. I'll submit the patch.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_52",
+          "function_name": "submit_patch",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 169.21556782722473,
+            "timestamp": 1792295284.4409938,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"patch_size\": 1806, \"files_changed\": 2}",
+        "extra": {
+          "tool_name": "submit_patch",
+          "elapsed_s": 169.22652745246887,
+          "timestamp": 1792295284.4519534,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 12914,
+        "completion_tokens": 25,
+        "cached_tokens": 0,
+        "total_tokens": 12939
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 169.21556782722473,
+        "timestamp": 1792295284.4409938,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 22,
+      "source": "agent",
+      "message": "Wait, `files_changed: 2`? I only edited `fastapi/openapi/utils.py`.\nAh, maybe I created `repro.py`? No, `submit_patch` should only include changes to the repository files.\nWait, `submit_patch` uses `git diff`. `repro.py` is an untracked file, so it shouldn't be in the diff.\n\nLet me check what was changed.\nActually, I don't have a tool to see the diff of `submit_patch` but I can check with `git diff`.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_55",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "git diff"
+          },
+          "extra": {
+            "elapsed_s": 174.45574235916138,
+            "timestamp": 1792295289.6811683,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"diff --git a/fastapi/openapi/utils.py b/fastapi/openapi/utils.py\\nindex 75ff2610..d56027b5 100644\\n--- a/fastapi/openapi/utils.py\\n+++ b/fastapi/openapi/utils.py\\n@@ -1,3 +1,4 @@\\n+import copy\\n import http.client\\n import inspect\\n import warnings\\n@@ -377,7 +378,7 @@ def get_openapi_path(\\n                     additional_status_code,\\n                     additional_response,\\n                 ) in route.responses.items():\\n-                    process_response = additional_response.copy()\\n+                    process_response = copy.deepcopy(additional_response)\\n                     process_response.pop(\\\"model\\\", None)\\n                     status_code_key = str(additional_status_code).upper()\\n                     if status_code_key == \\\"DEFAULT\\\":\\ndiff --git a/repro.py b/repro.py\\nnew file mode 100644\\nindex 00000000..f700a469\\n--- /dev/null\\n+++ b/repro.py\\n@@ -0,0 +1,42 @@\\n+from fastapi import FastAPI\\n+from pydantic import BaseModel\\n+import json\\n+\\n+class ModelA(BaseModel):\\n+    a: str\\n+\\n+class ModelB(BaseModel):\\n+    b: str\\n+\\n+app = FastAPI(\\n+    responses={\\n+        500: {\\n+            'model': ModelA | ModelB,\\n+            'content': {\\\"application/json\\\": {\\n+                'examples': {\\\"Case A\\\": {\\\"value\\\": \\\"a\\\"}}\\n+            }}\\n+        }\\n+    }\\n+)\\n+\\n+@app.get('/route1')\\n+def route1():\\n+    return \\\"test\\\"\\n+\\n+@app.get('/route2')\\n+def route2():\\n+    return \\\"test\\\"\\n+\\n+@app.get('/route3')\\n+def route3():\\n+    return \\\"test\\\"\\n+\\n+openapi_schema = app.openapi()\\n+responses_500 = openapi_schema[\\\"paths\\\"][\\\"/route1\\\"][\\\"get\\\"][\\\"responses\\\"][\\\"500\\\"]\\n+any_of = responses_500[\\\"content\\\"][\\\"application/json\\\"][\\\"schema\\\"][\\\"anyOf\\\"]\\n+\\n+print(f\\\"Number of anyOf elements: {len(any_of)}\\\")\\n+for i, item in enumerate(any_of):\\n+    print(f\\\"{i}: {item}\\\")\\n+\\n+assert len(any_of) == 2, f\\\"Expected 2 elements in anyOf, got {len(any_of)}\\\"\\n\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 174.4609625339508,
+          "timestamp": 1792295289.6863885,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 12976,
+        "completion_tokens": 147,
+        "cached_tokens": 0,
+        "total_tokens": 13123
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 174.45574235916138,
+        "timestamp": 1792295289.6811683,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 23,
+      "source": "agent",
+      "message": "Ah, `repro.py` is included because it's a new file in the workspace. I should probably remove it before submitting, or just ignore it if the grader ignores untracked files. But the instructions say \"Never modify, create or delete test files or test configuration (anything under tests/, test_*.py, *_test.py, conftest.py, pytest.ini, setup.cfg, tox.ini, pyproject.toml)\". `repro.py` is not in `tests/` and doesn't match those patterns.\n\nHowever, it's cleaner to remove it.\n\nWait, `submit_patch` captures the current working tree modifications.\n\nLet me remove `repro.py` and call `submit_patch` again.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_58",
+          "function_name": "run_command",
+          "arguments": {
+            "command": "rm repro.py"
+          },
+          "extra": {
+            "elapsed_s": 181.76083946228027,
+            "timestamp": 1792295296.9862654,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"stdout\": \"\", \"stderr\": \"\", \"exit_code\": 0}",
+        "extra": {
+          "tool_name": "run_command",
+          "elapsed_s": 181.7635440826416,
+          "timestamp": 1792295296.98897,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 13844,
+        "completion_tokens": 184,
+        "cached_tokens": 0,
+        "total_tokens": 14028
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 181.76083946228027,
+        "timestamp": 1792295296.9862654,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 24,
+      "source": "agent",
+      "message": "Now submit again.",
+      "model_name": "/home/jc/g4/model",
+      "tool_calls": [
+        {
+          "tool_call_id": "call_61",
+          "function_name": "submit_patch",
+          "arguments": {},
+          "extra": {
+            "elapsed_s": 182.51866102218628,
+            "timestamp": 1792295297.744087,
+            "author": "swe_single_agent",
+            "model_version": "/home/jc/g4/model"
+          }
+        }
+      ],
+      "observation": {
+        "content": "{\"status\": \"ok\", \"patch_size\": 745, \"files_changed\": 1}",
+        "extra": {
+          "tool_name": "submit_patch",
+          "elapsed_s": 182.52985906600952,
+          "timestamp": 1792295297.755285,
+          "author": "swe_single_agent"
+        }
+      },
+      "metrics": {
+        "prompt_tokens": 14062,
+        "completion_tokens": 18,
+        "cached_tokens": 0,
+        "total_tokens": 14080
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 182.51866102218628,
+        "timestamp": 1792295297.744087,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 25,
+      "source": "agent",
+      "message": "Now it's 1 file changed. Perfect.",
+      "model_name": "/home/jc/g4/model",
+      "metrics": {
+        "prompt_tokens": 14116,
+        "completion_tokens": 124,
+        "cached_tokens": 0,
+        "total_tokens": 14240
+      },
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "thinking",
+        "elapsed_s": 187.081876039505,
+        "timestamp": 1792295302.307302,
+        "author": "swe_single_agent"
+      }
+    },
+    {
+      "step_id": 26,
+      "source": "agent",
+      "message": "The issue was caused by a shallow copy of the `additional_response` dictionary in `fastapi/openapi/utils.py`, which led to shared mutable state across routes when both `model` and `content` were specified in app-level responses. This resulted in duplicate `$ref` entries in the `anyOf` array of the generated OpenAPI schema as more routes were added. I fixed this by replacing the shallow copy with `copy.deepcopy()`, ensuring that each route has its own independent copy of the response definition.",
+      "model_name": "/home/jc/g4/model",
+      "llm_call_count": 1,
+      "extra": {
+        "event_type": "final",
+        "elapsed_s": 187.081876039505,
+        "timestamp": 1792295302.307302,
+        "author": "swe_single_agent"
+      }
+    }
+  ],
+  "final_metrics": {
+    "total_prompt_tokens": 224322,
+    "total_completion_tokens": 5092,
+    "total_cached_tokens": 0,
+    "total_tokens": 229414,
+    "total_steps": 26
+  }
+}
