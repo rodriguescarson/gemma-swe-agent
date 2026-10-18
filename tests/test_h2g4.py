@@ -1,0 +1,134 @@
+"""h2g4: Harness² (google-research/harness2 @ 1cfe254) driving the competition's agent (GAPS 'Harness² pilot pre-registration',
+2026-10-18). Pinned here, before any rollout: a tree composes into a bundle the official compiler accepts and whose prompt is
+the tree's always-on text; the surface rejects what this runtime cannot carry; the fixed files (model, tools, 5-minute cap,
+sampling) are never on the surface; the renderer reads a real held-out ATIF trace; the improver never sees gold; the launcher
+stages the candidate and calls the race runner one task at a time; score() reads the box's verdict."""
+import json
+import os
+import shutil
+from pathlib import Path
+
+import pytest
+
+pytest.importorskip("harness2")
+
+from harness2.core import tree as HT  # noqa: E402
+
+from h2g4.adk import ADK_SURFACE, ALWAYS_ON_MAX, BASE_BUNDLE, FIXED, compose_bundle, render_atif, tree_problems, validate_bundle  # noqa: E402
+from h2g4.swe import RaceLauncher, SweAdapter, _records  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
+V12_PROMPT = (BASE_BUNDLE / "prompts" / "system.md").read_text(encoding="utf-8")
+TRACE = ROOT / "eval/a6000/results/p2/items/v4h2/attrs_af9c510/traces/trace_attrs_af9c510.json"
+ROW = ROOT / "eval/a6000/results/p3/items/v7/arrow_197bd64__s2"
+HAS_HELDOUT = (ROOT / "data/heldout1k/tasks.jsonl").is_file()
+
+
+def test_base_tree_composes_to_v12_and_compiles(tmp_path):
+    b = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "b")
+    assert (b / "prompts" / "system.md").read_text() == V12_PROMPT.strip() + "\n"
+    for rel in FIXED:
+        assert (b / rel).read_bytes() == (BASE_BUNDLE / rel).read_bytes(), rel
+    out = validate_bundle(b)
+    assert "tools=['run_command', 'read_file', 'edit_file', 'write_file', 'get_status', 'submit_patch']" in out
+
+
+def test_always_on_files_join_in_order_and_skills_are_declared(tmp_path):
+    tree = {"systemprompt.md": V12_PROMPT, "guardrails.md": "- Never edit test files.\n",
+            "tool_descriptions/tool_guidance.md": "- Prefer git grep -n.\n",
+            "skills/repro-check/SKILL.md": "---\nname: repro-check\ndescription: run a one-line reproduction\n---\nUse it.\n",
+            "skills/repro-check/scripts/check.py": "import sys\nprint('ok', sys.argv[1:])\n"}
+    b = compose_bundle(tree, tmp_path / "b")
+    body = (b / "prompts" / "system.md").read_text()
+    assert body.index(V12_PROMPT.strip()[:40]) < body.index("Never edit test files") < body.index("Prefer git grep")
+    assert (b / "agent.yaml").read_text().rstrip().endswith("skills: [skills/repro-check]")
+    assert (b / "skills/repro-check/scripts/check.py").is_file()
+    validate_bundle(b)
+
+
+def test_surface_rejects_what_the_runtime_cannot_carry():
+    errs = " | ".join(tree_problems({"systemprompt.md": "Fix {thing}.", "scripts/helper.py": "x = 1\n",
+                                     "sub_agents/a/AGENT.md": "a", "plugin/p.ts": "x", "skills/s/data.bin": "x"}))
+    for needle in ("top-level scripts", "sub-agents", "plugins", "skill files must be", "brace"):
+        assert needle in errs, needle
+    assert "all empty" in " ".join(tree_problems({"guardrails.md": "  "}))
+    assert "over the" in " ".join(tree_problems({"systemprompt.md": "x" * (ALWAYS_ON_MAX + 1)}))
+
+
+def test_fixed_files_are_not_on_the_editable_surface():
+    for rel in FIXED + ("prompts/system.md",):
+        assert not HT.is_allowed(ADK_SURFACE, rel), rel
+    assert HT.is_allowed(ADK_SURFACE, "guardrails.md") and HT.is_allowed(ADK_SURFACE, "skills/x/SKILL.md")
+
+
+@pytest.mark.skipif(not TRACE.is_file(), reason="needs a held-out trace from the box")
+def test_renderer_reads_a_real_heldout_trace():
+    out = render_atif(TRACE, obs_trunc=20_000, max_chars=60_000)
+    assert "[ACTION] run_command(" in out and "[OBSERVATION ERROR]" in out
+    short = render_atif(TRACE, obs_trunc=200, max_chars=1_000)
+    assert len(short) < 1_200 and "render truncation" in short
+    assert render_atif(TRACE.with_name("missing.json"), obs_trunc=1, max_chars=1).startswith("(failed to read")
+
+
+@pytest.mark.skipif(not HAS_HELDOUT, reason="needs data/heldout1k/tasks.jsonl")
+def test_adapter_stream_domains_and_no_gold_in_prompts(tmp_path, monkeypatch):
+    monkeypatch.delenv("HARNESS2_IMPROVER_MODEL", raising=False)
+    monkeypatch.delenv("HARNESS2_IMPROVER_KIND", raising=False)
+    ad = SweAdapter(tmp_path, launcher=RaceLauncher(tmp_path, dry=True, stage_root=tmp_path / "subs"))
+    ids = ad.tasks()
+    assert len(ids) >= 150 and len(set(ids)) == len(ids)
+    public = set((ROOT / "data" / "kaggle_valid_ids.txt").read_text().split())
+    assert not public & set(ids)                                        # refinement never touches the public 74
+    full = [json.loads(l) for l in open(ROOT / "data/heldout1k/tasks.jsonl") if json.loads(l)["instance_id"] in set(ids[:25])]
+    for r in full:
+        t = r["instance_id"]
+        p = ad.task_prompt(t)
+        assert r["problem_statement"][:80] in p
+        assert r["patch"][:200] not in p and r["test_patch"][:200] not in p and "FAIL_TO_PASS" not in p
+        assert ad.domain_of(t) == r["repo"].split("/")[-1]
+    assert set(_records()[ids[0]]) == {"repo", "problem_statement"}          # gold is never even held in memory
+
+
+def test_launcher_stages_once_and_calls_the_race_runner_per_run(tmp_path):
+    from harness2.substrate.base import Install, RunRequest
+    stage = tmp_path / "subs"
+    src = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "staged")
+    L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=stage)
+    inst = Install(staging_dir=src, fingerprint="ab" * 32)
+    dirs = L(RunRequest(task_ref="tomlkit_abc1234", run_ids=("r1", "r2"), timeout=600), inst)
+    assert (stage / "_staging" / ("h2_" + "ab" * 6) / "agent.yaml").is_file()
+    assert [d.name for d in dirs] == ["tomlkit_abc1234", "tomlkit_abc1234"]
+    assert dirs[0].parent.name == "h2_" + "ab" * 6 and dirs[0].parents[3].name == "r1"
+    assert len(L.calls) == 2
+    cmd = L.calls[0]
+    assert cmd[1].endswith("scripts/a6000/p2_race.py") and cmd[cmd.index("--conc") + 1] == "1"
+    assert cmd[cmd.index("--arms") + 1] == "_staging/h2_" + "ab" * 6 and "--keep" in cmd
+    assert (Path(cmd[2]) / "ids.txt").read_text() == "tomlkit_abc1234\n"
+
+
+@pytest.mark.skipif(not ROW.is_dir(), reason="needs a race item from the box")
+def test_score_and_delivered_read_the_box_verdict(tmp_path):
+    ad = SweAdapter(tmp_path, launcher=RaceLauncher(tmp_path, dry=True, stage_root=tmp_path / "subs"))
+    s = ad.score(ROW, "arrow_197bd64")
+    assert s == {"n_passed": 0, "n_criteria": 1, "all_pass": False, "raw": s["raw"]} and s["raw"]["instance_id"] == "arrow_197bd64"
+    assert ad.score(ROW, "some_other_task") is None
+    assert ad.delivered(ROW) is True and "diff --git" in ad.deliverable_text(ROW)
+    assert ad.score(tmp_path / "nothing", "x") is None and ad.delivered(tmp_path / "nothing") is False
+
+
+def test_base_harness_is_v12s_prompt_and_validates(tmp_path):
+    ad = SweAdapter(tmp_path, launcher=RaceLauncher(tmp_path, dry=True, stage_root=tmp_path / "subs"))
+    tree = HT.read_tree(ADK_SURFACE, ad.base_harness())
+    assert tree["systemprompt.md"] == V12_PROMPT
+    ad.validate_tree(tree)
+    with pytest.raises(ValueError, match="brace"):
+        ad.validate_tree({"systemprompt.md": "Fix {x}"})
+
+
+def test_improver_channel_needs_kind_and_model_together(monkeypatch):
+    from h2g4.swe import improver_channel
+    monkeypatch.setenv("HARNESS2_IMPROVER_MODEL", "vllm/gemma-4-31b")
+    monkeypatch.delenv("HARNESS2_IMPROVER_KIND", raising=False)
+    assert improver_channel().kind == "opencode"
+    monkeypatch.setenv("HARNESS2_IMPROVER_MODEL", "claude-sonnet-5-5")
+    assert improver_channel().kind == "claude_cli"

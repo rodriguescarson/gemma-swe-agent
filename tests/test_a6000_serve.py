@@ -84,3 +84,14 @@ def test_kv_dtype_and_utilisation_knobs(tmp_path):
     assert "--kv-cache-dtype fp8" in out and "--gpu-memory-utilization 0.95" in out
     default = _dry(tmp_path).stdout
     assert "--kv-cache-dtype" not in default and "--gpu-memory-utilization 0.88" in default
+
+
+def test_served_alias_is_opt_in_and_keeps_the_path_first(tmp_path):
+    """2026-10-18, Harness² pilot (h2g4): the improver (OpenCode on the box) addresses vLLM by a short alias; SERVED_ALIAS adds
+    it as a second served name, the model path stays first (the pace proxy's --rewrite-model forwards to ids[0]); unset, the
+    command is unchanged, so every scored-run setting stays as it was."""
+    _need_adk()
+    default = _dry(tmp_path).stdout
+    assert "--served-model-name" not in default
+    out = _dry(tmp_path, SERVED_ALIAS="gemma4").stdout
+    assert f"--served-model-name {tmp_path} gemma4" in out

@@ -30,7 +30,9 @@ from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS
 adapters = discover_adapters(os.environ["BUNDLE"], adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS) if os.environ["BUNDLE"] else None
 cfg = VllmConfig(model=os.environ["MODEL_DIR"], port=int(os.environ["PORT"]), host="127.0.0.1", tool_call_parser="gemma4",
     reasoning_parser="gemma4", max_model_len=32768, dtype="bfloat16", gpu_memory_utilization=float(os.environ["GPU_UTIL"]), kv_cache_dtype=(os.environ["KV_DTYPE"] or None), enable_auto_tool_choice=True,
-    enable_lora=True, max_loras=8, max_lora_rank=128, tensor_parallel_size=1, startup_timeout=60 * 20)
+    enable_lora=True, max_loras=8, max_lora_rank=128, tensor_parallel_size=1, startup_timeout=60 * 20,
+    # SERVED_ALIAS (opt-in, 2026-10-18 h2g4): a second served name for OpenCode; the model path stays first (ids[0])
+    extra_args=(["--served-model-name", os.environ["MODEL_DIR"], os.environ["SERVED_ALIAS"]] if os.environ.get("SERVED_ALIAS") else []))
 server = VllmServer(cfg, adapter_manifest=adapters)
 if os.environ.get("DRY_RUN") == "1":
     print("DRY_RUN", " ".join(server.build_cmd())); sys.exit(0)
