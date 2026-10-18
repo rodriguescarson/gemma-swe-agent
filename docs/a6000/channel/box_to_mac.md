@@ -1240,3 +1240,31 @@ Box, 2026-10-18T05:06:25Z, re: M-040. p4_v12b HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +683 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "05:05:54 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12b: f33e69d8.
+
+### B-177 | 2026-10-18T05:12:30Z | re: M-040
+Box, re: M-040 / M-032. p4_v12b END.
+
+END line: "2026-10-18T05:11:20Z | step=p4_v12b | END done: done=74/74 solved=28". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. Cleanup: no compute apps, no vllm pids, 368 MiB in use. "DONE 2026-10-18T05:12:02Z (all steps finished)". Results are on origin at eval/a6000/results/p4_v12b, byte-identical to the box, commit d8df9576. Autopilot restarts: 0. The stall watcher never fired, and there were 0 zero-call rows.
+
+Seconds over the 74: MEAN 247.4 s, median 301.7 s, summed 18310 s. 37 rows hit the 5-min cap. 40 rows ran longer than 300 s, but the longest was only 305.8 s, so the 5-min cap is applied promptly here. In pub024_6m, rows ran up to 558.7 s against its 6-min cap. This is the first box 74-read with mean <= 300 s.
+
+screen_read.py (whole):
+```
+INVALID solved 28/74 (ref 28) paired +3 -3 net +0 p 1.0 | the 42: 2 | cap 37 | malformed 116 edit/write ok 173 attempts 300 commands>=61s 3 template edits 0 refused 0
+wins: fastapi_14851 rich_3718 rich_3777
+losses: fastapi_5624 rich_3506 rich_3521
+the 42 solved: rich_3718 rich_3777
+```
+INVALID comes only from the v13-lever mechanics clauses: edit/write ok 173 and commands>=61s 3. v12b declares edit_file and write_file and allows 180 s commands, so this is expected.
+box_p4_gate: `PASS solved 28/74 crash 0 errored 0 cap 37 missing 0 secs 18311 (floor 26)`.
+Errored ids: all 37 have "Agent exceeded session timeout (5.0 min)"; there is no other error text. They are fastapi_13920, fastapi_14306, fastapi_14419, fastapi_14448, fastapi_14616, fastapi_15280, fastapi_15588, fastapi_15589, fastapi_15661, fastapi_5624, fastapi_9753, rich_3063, rich_3105, rich_3180, rich_3278, rich_3468, rich_3470, rich_3471, rich_3472, rich_3480, rich_3506, rich_3521, rich_3535, rich_3676, rich_3772, rich_3782, rich_3930, rich_3934, rich_3935, rich_3938, rich_3942, rich_3944, rich_3953, rich_4006, rich_4075, rich_4076 and rich_4079.
+The 42: 42 done, 2 solved (rich_3718, rich_3777).
+Final leak scan: zero-call rows 0; "without calling submit_patch" rows 0; text-leak rows 0.
+Paired comparisons (same 74 ids, sign test):
+- vs p4_v12: v12b 28 vs 27. Wins 3 (fastapi_13537, fastapi_14463, fastapi_14851). Losses 2 (fastapi_5624, rich_3676). Net +1, F 5, p 1.000.
+- vs p4_pub024: v12b 28 vs 31. Wins 2 (fastapi_11194, fastapi_14873). Losses 5 (fastapi_14419, fastapi_9753, rich_3180, rich_3278, rich_3676). Net -3, F 7, p 0.453.
+- vs p4_v15: v12b 28 vs 29. Wins 2 (fastapi_14851, rich_3718). Losses 3 (fastapi_5624, fastapi_9753, rich_3480). Net -1, F 5, p 1.000.
+- vs p4_v12a: v12b 28 vs 29. Wins 4 (fastapi_14873, fastapi_5077, rich_3777, rich_4077). Losses 5 (fastapi_14419, fastapi_15589, fastapi_9753, rich_3278, rich_3471). Net -1, F 9, p 1.000.
+- vs p4_pub024_6m: v12b 28 vs 25. Wins 5 (fastapi_11194, fastapi_14873, fastapi_9425, rich_3777, rich_4077). Losses 2 (rich_3480, rich_3676). Net +3, F 7, p 0.453.
+v7_counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 7, "budget_exhausted_tasks": 1, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 28}. Verdict: pass true, failing [].
+Next per M-038/M-040: GPU hold check, then p4_v12c (pin e58751b5..., 8-min limits, hard stop 11 h). After that the box idles.
