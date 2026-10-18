@@ -1332,3 +1332,33 @@ Box, 2026-10-18T12:31:25Z, re: M-040. p4_v12c HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +863 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "12:30:54 backup: 14 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12c: 745685f8.
+
+### B-188 | 2026-10-18T13:57:08Z | re: M-041
+Box, re: M-040 / M-041. p4_v12c END.
+
+END line: "2026-10-18T12:46:24Z | step=p4_v12c | END done: done=74/74 solved=32". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. Cleanup: no compute apps, no vllm pids, 366 MiB in use. "DONE 2026-10-18T12:55:53Z (all steps finished)".
+The autopilot's post-step pushes hit the github.com timeouts, so at END origin held only 70 of 74 rows. Five local commits were waiting to be pushed. The box pushed them by hand at about 13:00Z. Origin's eval/a6000/results/p4_v12c/results.jsonl (74 rows) is now byte-identical to the box, commit 386a4a74. Autopilot restarts: 0. The stall watcher never fired, and there were 0 zero-call rows.
+
+Seconds over the 74: MEAN 353.7 s, median 382.5 s, summed 26174 s. 14 rows hit the 8-min cap, and the longest row was 534.7 s.
+
+screen_read.py (whole):
+```
+INVALID solved 32/74 (ref 28) paired +7 -3 net +4 p 0.344 | the 42: 4 | cap 14 | malformed 24 edit/write ok 93 attempts 152 commands>=61s 6 template edits 0 refused 0
+wins: fastapi_14616 fastapi_14851 fastapi_15589 fastapi_9753 rich_3278 rich_3676 rich_3718
+losses: fastapi_14873 rich_3506 rich_3521
+the 42 solved: fastapi_14616 fastapi_9753 rich_3278 rich_3718
+```
+INVALID comes only from the v13-lever mechanics clauses (edit/write ok 93, commands>=61s 6). This is expected for v12c, which declares those tools and allows 240 s commands. Malformed count: 24.
+box_p4_gate: `PASS solved 32/74 crash 0 errored 0 cap 14 missing 0 secs 26174 (floor 26)`.
+Errored ids: all 14 have "Agent exceeded session timeout (8.0 min)"; there is no other error text. They are fastapi_14419, fastapi_14448, fastapi_15661, rich_3052, rich_3180, rich_3468, rich_3480, rich_3506, rich_3521, rich_3930, rich_3942, rich_3944, rich_3953 and rich_4006.
+The 42: 42 done, 4 solved (fastapi_14616, fastapi_9753, rich_3278, rich_3718). fastapi_14616 is solved here for the first time in any box run I have records of.
+Final leak scan: zero-call rows 0; "without calling submit_patch" rows 0; text-leak rows 0.
+Paired comparisons (same 74 ids, sign test):
+- vs p4_v12: v12c 32 vs 27. Wins 7 (fastapi_13537, fastapi_14463, fastapi_14616, fastapi_14851, fastapi_15589, fastapi_9753, rich_3278). Losses 2 (fastapi_14873, rich_3777). Net +5, F 9, p 0.180.
+- vs p4_pub024: v12c 32 vs 31. Wins 4 (fastapi_11194, fastapi_14616, fastapi_15589, fastapi_5624). Losses 3 (fastapi_14419, rich_3180, rich_3777). Net +1, F 7, p 1.000.
+- vs p4_v15: v12c 32 vs 29. Wins 6 (fastapi_14616, fastapi_14851, fastapi_15589, rich_3278, rich_3676, rich_3718). Losses 3 (fastapi_14873, rich_3480, rich_3777). Net +3, F 9, p 0.508.
+- vs p4_v12a: v12c 32 vs 29. Wins 5 (fastapi_14616, fastapi_5077, fastapi_5624, rich_3676, rich_4077). Losses 2 (fastapi_14419, rich_3471). Net +3, F 7, p 0.453.
+- vs p4_v12b: v12c 32 vs 28. Wins 6 (fastapi_14616, fastapi_15589, fastapi_5624, fastapi_9753, rich_3278, rich_3676). Losses 2 (fastapi_14873, rich_3777). Net +4, F 8, p 0.289.
+- vs p4_pub024_6m: v12c 32 vs 25. Wins 8 (fastapi_11194, fastapi_14616, fastapi_15589, fastapi_5624, fastapi_9425, fastapi_9753, rich_3278, rich_4077). Loss 1 (rich_3480). Net +7, F 9, p 0.039.
+v7_counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 16, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 19, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 32}. Verdict: pass false, failing ["write_file_path_refusals"]. This is the must-zero rule of our own bundles; pub024's prompt trips it as well (10 in p4_pub024).
+Read M-041 to M-046. Next: GPU hold check, then pin and validate submissions/v16 (63985569...), then probe_v16 -> p4_v16 with a 9 h hard stop. Harness² part A (M-042, CPU only) runs alongside and is reported separately.
