@@ -87,3 +87,19 @@ running). An observation from the first build, recorded here before any v16 row 
 claim): the public prompt solves late. At a 300 s cutoff, v12 keeps 27 of 27 solves, while v12c (v12 + the public prompt,
 8-min limits) keeps 16 of 32 and pub024 19 of 31 (conservative deadline table). That would explain both the public bundle's
 12-hour RUNTIME failures (11.5 h projected) and a weak 5-minute v16, whose box read is due 19 Oct ~02:30 IST.
+
+## Positioning after the related-work check (19 Oct, paper/RELATED_WORK.md)
+
+- **Lead with A (the C claims).** No verified prior work reports, for a coding agent under hard runtime limits, that a local
+  screen failed to order hidden-set scores, nor the late-solve mechanism behind the public bundle's RUNTIME failures. Nearest:
+  HarnessOpt-Bench (validation optimistic vs test), "On Randomness in Agentic Evals" (pass@1 swings), Roelofs et al. (little
+  holdout overfitting on Kaggle overall: a counterpoint to cite honestly).
+- **B (the D claims) is a constrained-setting study, not a new question.** Harness², Self-Harness (same-model harness
+  improvement on SWE-bench Verified), HarnessOpt-Bench (frontier models as optimizers, hidden split) and Better Harnesses,
+  Smaller Models already cover improver choice and small targets. What our D runs add: a small int4 solver under a hard
+  per-task wall clock and a 12-h total limit, the target model as its own improver against three frontier improvers at
+  measured cost, and transfer to repositories never used for refinement. The design already answers "Rethinking"'s two
+  protocol critiques: no benchmark tests reach the improver (Harness² is ground-truth-free; tests only grade after
+  selection), and transfer is read on held-out repositories; its third (a compute-matched test-time-scaling baseline) is
+  only partly answerable here, because the deliverable is a static harness, not test-time search: the in-sweep base
+  reruns are reported as the matched no-evolution baseline.
