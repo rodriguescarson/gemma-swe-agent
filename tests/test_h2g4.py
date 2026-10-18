@@ -323,3 +323,64 @@ def test_the_adk_surface_text_matches_what_validation_enforces():
     assert "sub_agents/" in SURFACE_ADK and "plugin/" in SURFACE_ADK and "16,000 characters" in SURFACE_ADK
     errs = " | ".join(tree_problems({"systemprompt.md": "x", "sub_agents/a/AGENT.md": "a", "scripts/h.py": "x", "plugin/p.ts": "x"}))
     assert "sub-agents" in errs and "top-level scripts" in errs and "plugins" in errs
+
+
+def test_every_opencode_session_starts_on_a_seeded_migrated_database(tmp_path, monkeypatch):
+    """2026-10-19 (box B-204, reproduced 3 of 3): harness2 starts each OpenCode improver session with XDG_DATA_HOME and
+    XDG_STATE_HOME inside a fresh session dir; the pinned OpenCode runs a one-time database migration there and then hangs
+    without calling the model, while a second start in a migrated dir answers in 11 s. h2g4 copies a once-migrated template
+    into the session dir before OpenCode starts."""
+    from harness2.core.proposer import Proposer
+    from harness2.core.spec import ChannelSpec
+    from h2g4.run import LocalClaudeProposer, seed_opencode_state
+    tpl = tmp_path / "tpl"
+    (tpl / ".ocdata" / "opencode").mkdir(parents=True)
+    (tpl / ".ocdata" / "opencode" / "opencode-local.db").write_bytes(b"SQLite format 3\x00migrated")
+    (tpl / ".ocstate" / "opencode").mkdir(parents=True)
+    seen = {}
+
+    def fake_opencode(self, cwd, mission, system, wall):
+        seen["db"] = (cwd / ".ocdata" / "opencode" / "opencode-local.db").read_bytes()
+        seen["state"] = (cwd / ".ocstate" / "opencode").is_dir()
+        return "READY", 0.0, ""
+
+    monkeypatch.setattr(Proposer, "_opencode", fake_opencode)
+    monkeypatch.setenv("H2G4_OC_TEMPLATE", str(tpl))
+    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
+    session = tmp_path / "session"
+    session.mkdir()
+    assert prop._opencode(session, "m", "", 60) == ("READY", 0.0, "")
+    assert seen == {"db": b"SQLite format 3\x00migrated", "state": True}
+    other = tmp_path / "other"
+    (other / ".ocdata").mkdir(parents=True)
+    (other / ".ocdata" / "keep.txt").write_text("x")
+    seed_opencode_state(other, tpl)                                   # an existing data dir is never overwritten
+    assert not (other / ".ocdata" / "opencode").exists()
+
+
+def test_without_a_template_an_opencode_session_is_refused_not_left_to_hang(tmp_path, monkeypatch):
+    from harness2.core.spec import ChannelSpec
+    from h2g4.run import LocalClaudeProposer
+    monkeypatch.setenv("H2G4_OC_TEMPLATE", str(tmp_path / "missing"))
+    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
+    (tmp_path / "s").mkdir()
+    with pytest.raises(RuntimeError, match="make-oc-template"):
+        prop._opencode(tmp_path / "s", "m", "", 60)
+
+
+def test_make_template_keeps_the_migrated_database_from_a_run_that_hangs(tmp_path, monkeypatch):
+    import subprocess as sp
+    from harness2.core.proposer import Proposer
+    from harness2.core.spec import ChannelSpec
+    from h2g4.run import LocalClaudeProposer, make_opencode_template
+
+    def hanging_opencode(self, cwd, mission, system, wall):                # migrates, then hangs until the timeout
+        d = cwd / ".ocdata" / "opencode"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "opencode-local.db").write_bytes(b"SQLite format 3\x00migrated")
+        raise sp.TimeoutExpired(cmd="bun", timeout=wall)
+
+    monkeypatch.setattr(Proposer, "_opencode", hanging_opencode)
+    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
+    tpl = make_opencode_template(prop, tmp_path / "tpl", wall=5)
+    assert (tpl / ".ocdata" / "opencode" / "opencode-local.db").read_bytes().startswith(b"SQLite format 3")
