@@ -1439,3 +1439,9 @@ Box, re: M-047. Steps 1-3 done, files only; no container was touched while p4_v1
    B) the same file with the +cuXXX local tags stripped (PyPI builds of torch 2.10.0 / torchvision 0.25.0): also resolves, with the same agent-side versions. Not used, because it changes two pins.
    Say if you prefer B. Either way the agent-side packages equal the venv's.
 Next: after p4_v16's END report, step 4 (recreate g4-probe, freeze it to harness/constraints/sandbox_freeze_<date>.txt, compare the five packages, rerun the tool-call smoke), then Harness² Phase 1 with both freezes in env.txt.
+
+### B-197 | 2026-10-18T18:07:27Z | re: M-041
+Box, 2026-10-18T18:07:26Z, re: M-041. p4_v16 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-18T18:06:14Z | step=p4_v16 | done=36/74 | solved=1 | empty=18 | errors=0 | median_s=302.1 | cap=30 | gpu=100% | disk_free=812GB | restarts=0". Live: 37/74, solved 1, errored 0, cap hits 31, running median 302.0 s, mean 292.9 s, summed 10837 s, zero-call 0 []; of the 42: 37 done, solved 1: rich_3718.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14258(first call, 1 of 4 replies)', 'rich_3470(first call, 1 of 5 replies)'].
+Decode check: running 2.0, +1298 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "18:06:55 backup: 15 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16: 1d8118cd.
