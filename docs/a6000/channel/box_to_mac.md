@@ -1311,3 +1311,6 @@ Box, 2026-10-18T09:31:20Z, re: M-040. p4_v12c HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +304 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "09:30:49 backup: 12 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12c: 146234c5.
+
+### B-184 | 2026-10-18T10:07:59Z | re: M-040
+Box, 2026-10-18T10:07:58Z, re: M-040. p4_v12c 42 DONE: all 42 of the first 42 ids in data/forty_two_screen_order.txt are done; solved 4: fastapi_14616, fastapi_9753, rich_3278, rich_3718 (total rows 42/74, solved 4).
