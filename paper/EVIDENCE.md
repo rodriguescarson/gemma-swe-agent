@@ -78,3 +78,12 @@ past rows (correct with a new row).
 - **Two evidence streams, joined only by claim ids:** submission and box-screen results are C claims; Harness² results are D
   claims. A verifier pass establishes integrity, not truth: negative results, failed submissions (sub18, sub19 RUNTIME), budget
   stops and transfer regressions are reported alongside any gain.
+
+## Tables (regenerated, never typed)
+
+`python paper/make_tables.py` rebuilds paper/tables/{box_runs, paired, aa, deadline, calibration}.md from the result files,
+each stamped with the commit and inputs. Only complete 74-reads enter. First build 19 Oct 01:10 IST (12 of 13 runs; p4_v16
+running). An observation from the first build, recorded here before any v16 row is final (post hoc, not a pre-registered
+claim): the public prompt solves late. At a 300 s cutoff, v12 keeps 27 of 27 solves, while v12c (v12 + the public prompt,
+8-min limits) keeps 16 of 32 and pub024 19 of 31 (conservative deadline table). That would explain both the public bundle's
+12-hour RUNTIME failures (11.5 h projected) and a weak 5-minute v16, whose box read is due 19 Oct ~02:30 IST.
