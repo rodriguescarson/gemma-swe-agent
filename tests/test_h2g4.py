@@ -134,16 +134,61 @@ def test_improver_channel_needs_kind_and_model_together(monkeypatch):
     assert improver_channel().kind == "claude_cli"
 
 
-def test_budget_guard_counts_from_the_sweeps_own_start_and_refuses_at_the_cap(tmp_path):
-    from harness2.core.proposer import ProposerError
-    from h2g4.run import BudgetGuard
-    usage = iter([100.0, 104.0, 109.9, 110.0])
-    g = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: next(usage))
-    assert g.start == 100.0 and g.check("a") == 4.0 and g.check("b") == pytest.approx(9.9)
-    with pytest.raises(ProposerError, match="budget reached"):
-        g.check("c")
-    g2 = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: 105.0)        # a restarted sweep keeps its own start
+def test_budget_guard_counts_from_the_sweeps_own_start_and_stops_with_a_margin(tmp_path):
+    from h2g4.run import BudgetGuard, BudgetStop
+    usage = iter([100.0, 104.0, 106.9, 107.0])
+    g = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: next(usage), available=lambda: 90.0, margin_usd=3.0)
+    assert g.start == 100.0 and g.check("a") == 4.0 and g.check("b") == pytest.approx(6.9)   # 6.9 + 3 < 10
+    with pytest.raises(BudgetStop, match="margin"):
+        g.check("c")                                                                          # 7.0 + 3 >= 10
+    g2 = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: 105.0, available=lambda: 90.0)   # restart keeps its start
     assert g2.start == 100.0 and g2.spent() == 5.0
+
+
+def test_budget_guard_margin_grows_with_the_costliest_session(tmp_path):
+    from h2g4.run import BudgetGuard, BudgetStop
+    g = BudgetGuard(20.0, tmp_path / "b.json", usage=lambda: 0.0, available=lambda: 90.0, margin_usd=1.0)
+    assert g.record(2.0, 6.0) == 4.0 and g.max_session == 4.0
+    g.usage = lambda: 11.5                                       # 11.5 + 2 x 4 = 19.5 < 20 passes; 12.0 + 8 = 20 stops
+    g.check("ok")
+    g.usage = lambda: 12.0
+    with pytest.raises(BudgetStop):
+        g.check("stop")
+
+
+def test_budget_guard_stops_on_low_account_credit_and_on_blind_accounting(tmp_path):
+    from h2g4.run import BudgetGuard, BudgetStop
+    g = BudgetGuard(50.0, tmp_path / "b.json", usage=lambda: 0.0, available=lambda: 9.0, reserve_usd=10.0)
+    with pytest.raises(BudgetStop, match="reserve"):
+        g.check("x")
+    def boom():
+        raise OSError("network down")
+    g.available = boom
+    with pytest.raises(BudgetStop, match="spending blind"):
+        g.check("y")
+    with pytest.raises(BudgetStop, match="spending blind"):
+        BudgetGuard(5.0, tmp_path / "fresh.json", usage=boom, available=lambda: 50.0)
+
+
+def test_budget_stop_escapes_harness2s_exception_handlers():
+    from h2g4.run import BudgetStop
+    assert not issubclass(BudgetStop, Exception)
+    with pytest.raises(BudgetStop):
+        try:
+            raise BudgetStop("x")
+        except Exception:                                          # what every Harness² stage and task handler catches
+            pytest.fail("BudgetStop must not be caught as an Exception")
+
+
+def test_evaluate_runs_each_task_once_with_a_fixed_harness(tmp_path, capsys):
+    from h2g4.run import evaluate
+    L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=tmp_path / "subs")
+    ad = SweAdapter(tmp_path / "runs", launcher=L)
+    rc = evaluate(ad, None, "base", ["arrow_06fe693", "attrs_af9c510"])
+    assert rc == 0 and len(L.calls) == 2
+    assert [Path(c[2]).name for c in L.calls] == ["eval-base-arrow_06fe693", "eval-base-attrs_af9c510"]
+    table = json.loads((tmp_path / "runs" / "eval_base.json").read_text())
+    assert table["harness"] == "base" and [r["solved"] for r in table["rows"]] == [None, None]   # dry: no verdict, not a zero
 
 
 def test_improver_steps_default_and_override(monkeypatch):
@@ -153,3 +198,17 @@ def test_improver_steps_default_and_override(monkeypatch):
     assert improver_channel().steps == 60
     monkeypatch.setenv("H2G4_IMPROVER_STEPS", "30")
     assert improver_channel().steps == 30 and improver_channel().kind == "opencode"
+
+
+def test_final_harness_is_the_last_adopted_tree_in_stream_order(tmp_path):
+    from harness2.cli import _common as C
+    from harness2.core import library as LIB
+    from h2g4.run import final_harness
+    ad = SweAdapter(tmp_path / "runs", launcher=RaceLauncher(tmp_path / "runs", dry=True, stage_root=tmp_path / "subs"))
+    assert final_harness(ad, 1, None, "seq", "arrow") is None
+    lib = LIB.Library(root=C.library_root_for(ad, 1, seed=None) / "seq", domain="arrow", surface=ADK_SURFACE)
+    arrow = [t for t in ad.tasks() if ad.domain_of(t) == "arrow"]
+    for t, body in ((arrow[0], "first"), (arrow[2], "third")):
+        HT.write_tree(ADK_SURFACE, {"systemprompt.md": body}, lib.entry_dir(t) / "harness")
+    h = final_harness(ad, 1, None, "seq", "arrow")
+    assert h == lib.entry_dir(arrow[2]) / "harness" and HT.read_tree(ADK_SURFACE, h)["systemprompt.md"] == "third"
