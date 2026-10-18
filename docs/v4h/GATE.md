@@ -4039,3 +4039,12 @@ DROP: solved 27 < 37; net -7 < +3`
 
 #### P3
 not run (no capture)
+
+### P4 A6000 screen RESULT: v16 on the public 74 (2026-10-18 20:52 UTC)
+**A6000 screen, never a Kaggle result:** int4 checkpoint, bf16 KV at 0.95, the bundle's own (not stretched) budgets, sequential, pace proxy; the A6000 is slower than the L4 model, so a miss is pessimistic.
+
+- solved 22/74 (L4 reference v4h2g: 34/74); keep rule (solved >= 37 and paired wins - losses >= +3 vs eval/kaggle/g4-l4-v4h2g-p312): **DROP**
+  `solved 22/74 (base 34/74) | wins 0 losses 12 net -12 | rule: solved >= 37 and net >= +3
+lost: fastapi_11194 fastapi_14616 fastapi_14851 fastapi_5624 fastapi_9425 fastapi_9753 requests_6644 rich_2725 rich_3006 rich_3063 rich_3506 rich_3521
+DROP: solved 22 < 37; net -12 < +3`
+- helper reachability: 0/74 tasks with a can't-open; cap hits 46; errored rows 0; median task seconds 302; S(1) over clean windows = 1.22; over the whole log 1.22 (1759 calls; 0 of 35 ten-minute windows were contended by another GPU workload and are left out of the clean figure)
