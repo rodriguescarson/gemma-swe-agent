@@ -39,3 +39,24 @@ past rows (correct with a new row).
 
 - Outside reviews pasted into the session (18 Oct) named related work (Self-Harness, MESH-Harness, Meta-Harness) and model
   release dates; none has been read or verified here yet. Verify each paper before it enters related work.
+
+## Integrity rules (18 Oct, after an outside review)
+
+1. **Present, not listed.** An archive counts as saved only after `python eval/analysis/verify_h2_archive.py <archive>
+   --prereg "<GAPS heading>"` prints VERIFIED (manifest hashes, env with the harness2 pin and pip freeze, per-call proxy rows,
+   summaries + improver transcripts + library + rollouts with traces + judge files, or for transfer both base runs and a
+   frozen tree per candidate, and no key material). tests/test_verify_h2_archive.py. Each verification output is saved
+   next to the archive as VERIFY.txt.
+2. **Pre-registered vs observed.** GAPS sections are append-only. A reading rule changes only by a new, dated amendment
+   committed before the result it governs; the verifier's `prereg` check proves the order from git ancestry. Results that no
+   rule anticipated are labelled "observed, not pre-registered" in the paper (example: sub18's RUNTIME outcome, a state the
+   sub18 rule did not foresee).
+3. **One in-place edit, disclosed.** On 16 Oct three GAPS headings had their IST timestamps corrected in place (11:40 /
+   12:30 / 12:45 -> 11:20 / 11:28 / 11:31, matching the channel's UTC stamps); content unchanged; the correction is itself a
+   GAPS entry ('v12 ablations pre-registration', clock note). No other pre-registration text has been edited.
+4. **Frozen before transfer.** Transfer candidates are frozen copies with fingerprints; transfer outcomes feed no harness and
+   no selection (h2g4/run.py evaluate; test_evaluate_freezes_the_harness_and_refuses_a_swap_under_the_same_label).
+5. **Scope of claims.** C1-C8 are findings about THIS setup: one fixed model (Gemma 4 31B int4), this harness, the 74
+   public tasks, one A6000 box paced to the scorer's 4xL4, and about 58 hidden public tasks. The paper states them as such
+   ("in our setup, a 74-task local screen did not order hidden scores"), never as properties of agent benchmarks in general;
+   the hidden-side n (one or two draws per bundle) is stated next to every comparison.
