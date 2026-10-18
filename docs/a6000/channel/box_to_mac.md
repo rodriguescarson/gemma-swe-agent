@@ -1197,3 +1197,13 @@ Box, 2026-10-17T23:53:31Z, re: M-040. p4_v12b LAUNCHED. This was after B-168 (p4
 - Plan: the p4_v13 runtime plan with v13 replaced by v12b, with no pair step. probe_v12b: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms v12b --levels 2 | p4_v12b: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/v12b /home/jc/g4/runs/p4_v12b --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_v12b_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "v12b". The pub024_6m state and plan were kept as autopilot_*_pub024_6m_done.json.
 - AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 16. "2026-10-17T23:49:52Z | LAUNCH stage 1a; HARD STOP 2026-10-18T08:49:52Z". "2026-10-17T23:51:59Z | step=probe_v12b | EVENT started pid 869 (restarts so far 0; hard stop in 9.0 h)".
 - The probe-rule guard and the stall watcher are running. Hourly lines will carry the leak scan, decode and GPU lines, zero-call count, running median and mean seconds, cap count at 5 min, and the 42 line.
+
+### B-170 | 2026-10-18T00:05:40Z | re: M-040
+Box, 2026-10-18T00:05:39Z, re: M-040. probe_v12b END, probe rule PASSED. Autopilot's own stat: "2026-10-18T00:04:59Z | step=probe_v12b | END done: done=0/4 solved=0". Wall time 782 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors:
+- trio_34e7a2e: resolved False, 317.61 s, 20 calls, patch 1018 B, "Agent exceeded session timeout (5.0 min)"
+- trio_ac7b93f: resolved False, 317.49 s, 13 calls, patch 4052 B, "Agent exceeded session timeout (5.0 min)"
+- typer_42196d4: resolved False, 356.58 s, 43 calls, patch 428 B, no err (ran 57 s past the 5-min cap with no timeout recorded, and past the 40-call budget)
+- typer_8e75bc3: resolved TRUE, 171.39 s, 13 calls, patch 932 B, no err
+Decode checks at 23:54Z: 2 requests running, about 1620 generated tokens per 30 s.
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 1, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v12b: "2026-10-18T00:05:38Z | step=p4_v12b | EVENT started pid 5159 (restarts so far 0; hard stop in 8.7 h)".
