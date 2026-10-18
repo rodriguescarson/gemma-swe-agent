@@ -325,62 +325,24 @@ def test_the_adk_surface_text_matches_what_validation_enforces():
     assert "sub-agents" in errs and "top-level scripts" in errs and "plugins" in errs
 
 
-def test_every_opencode_session_starts_on_a_seeded_migrated_database(tmp_path, monkeypatch):
-    """2026-10-19 (box B-204, reproduced 3 of 3): harness2 starts each OpenCode improver session with XDG_DATA_HOME and
-    XDG_STATE_HOME inside a fresh session dir; the pinned OpenCode runs a one-time database migration there and then hangs
-    without calling the model, while a second start in a migrated dir answers in 11 s. h2g4 copies a once-migrated template
-    into the session dir before OpenCode starts."""
-    from harness2.core.proposer import Proposer
-    from harness2.core.spec import ChannelSpec
-    from h2g4.run import LocalClaudeProposer, seed_opencode_state
-    tpl = tmp_path / "tpl"
-    (tpl / ".ocdata" / "opencode").mkdir(parents=True)
-    (tpl / ".ocdata" / "opencode" / "opencode-local.db").write_bytes(b"SQLite format 3\x00migrated")
-    (tpl / ".ocstate" / "opencode").mkdir(parents=True)
-    seen = {}
-
-    def fake_opencode(self, cwd, mission, system, wall):
-        seen["db"] = (cwd / ".ocdata" / "opencode" / "opencode-local.db").read_bytes()
-        seen["state"] = (cwd / ".ocstate" / "opencode").is_dir()
-        return "READY", 0.0, ""
-
-    monkeypatch.setattr(Proposer, "_opencode", fake_opencode)
-    monkeypatch.setenv("H2G4_OC_TEMPLATE", str(tpl))
-    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
-    session = tmp_path / "session"
-    session.mkdir()
-    assert prop._opencode(session, "m", "", 60) == ("READY", 0.0, "")
-    assert seen == {"db": b"SQLite format 3\x00migrated", "state": True}
-    other = tmp_path / "other"
-    (other / ".ocdata").mkdir(parents=True)
-    (other / ".ocdata" / "keep.txt").write_text("x")
-    seed_opencode_state(other, tpl)                                   # an existing data dir is never overwritten
-    assert not (other / ".ocdata" / "opencode").exists()
-
-
-def test_without_a_template_an_opencode_session_is_refused_not_left_to_hang(tmp_path, monkeypatch):
-    from harness2.core.spec import ChannelSpec
-    from h2g4.run import LocalClaudeProposer
-    monkeypatch.setenv("H2G4_OC_TEMPLATE", str(tmp_path / "missing"))
-    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
-    (tmp_path / "s").mkdir()
-    with pytest.raises(RuntimeError, match="make-oc-template"):
-        prop._opencode(tmp_path / "s", "m", "", 60)
-
-
-def test_make_template_keeps_the_migrated_database_from_a_run_that_hangs(tmp_path, monkeypatch):
+def test_h2g4_detaches_stdin_so_opencode_never_waits_for_eof(tmp_path):
+    """2026-10-19 (box B-205): `opencode run` appends stdin to its message whenever stdin is not a TTY and waits for EOF;
+    harness2 launches it without stdin=, so a launcher holding stdin open (a pipe that never closes) made every improver
+    session wait forever. h2g4.run detaches its own stdin to /dev/null at start, so every child sees EOF at once. This runs a
+    parent with an open stdin pipe that calls detach_stdin() and then starts a child that reads stdin to EOF."""
     import subprocess as sp
-    from harness2.core.proposer import Proposer
-    from harness2.core.spec import ChannelSpec
-    from h2g4.run import LocalClaudeProposer, make_opencode_template
-
-    def hanging_opencode(self, cwd, mission, system, wall):                # migrates, then hangs until the timeout
-        d = cwd / ".ocdata" / "opencode"
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "opencode-local.db").write_bytes(b"SQLite format 3\x00migrated")
-        raise sp.TimeoutExpired(cmd="bun", timeout=wall)
-
-    monkeypatch.setattr(Proposer, "_opencode", hanging_opencode)
-    prop = LocalClaudeProposer(ChannelSpec("opencode", "boxvllm/gemma4"), audit_dir=tmp_path / "a")
-    tpl = make_opencode_template(prop, tmp_path / "tpl", wall=5)
-    assert (tpl / ".ocdata" / "opencode" / "opencode-local.db").read_bytes().startswith(b"SQLite format 3")
+    import sys as _sys
+    script = (
+        "import subprocess, sys\n"
+        f"sys.path.insert(0, {str(ROOT)!r})\n"
+        "from h2g4.run import detach_stdin\n"
+        "detach_stdin()\n"
+        "r = subprocess.run([sys.executable, '-c', 'import sys; sys.stdin.read(); print(\"EOF\")'], capture_output=True, text=True, timeout=10)\n"
+        "print(r.stdout.strip())\n"
+    )
+    p = sp.Popen([_sys.executable, "-c", script], stdin=sp.PIPE, stdout=sp.PIPE, text=True)   # stdin stays open: never closed
+    try:
+        out = p.stdout.read()          # the parent exits within ~10 s either way (its child read has a 10 s timeout)
+    finally:
+        p.kill()
+    assert out.strip() == "EOF", out

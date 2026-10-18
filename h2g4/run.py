@@ -12,7 +12,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -104,40 +103,19 @@ class BudgetGuard:
         return cost
 
 
-def oc_template_dir() -> Path:
-    return Path(os.environ.get("H2G4_OC_TEMPLATE") or (Path.home() / "g4" / "h2" / "oc_template"))
-
-
-def seed_opencode_state(cwd: Path, template: Path | None = None) -> None:
-    """Copy a once-migrated OpenCode data/state dir into a fresh improver session dir (box B-204: on an empty XDG_DATA_HOME the
-    pinned OpenCode migrates its database and then hangs without calling the model; in a migrated dir it answers in seconds).
-    An existing dir is never overwritten. The template holds only OpenCode's own database, not anything the improver reads."""
-    template = Path(template or oc_template_dir())
-    for sub in (".ocdata", ".ocstate"):
-        src, dst = template / sub, Path(cwd) / sub
-        if src.is_dir() and not dst.exists():
-            shutil.copytree(src, dst)
-
-
-def make_opencode_template(prop: "Proposer", template: Path, wall: int = 180) -> Path:
-    """Start OpenCode once in `template` with a trivial mission through harness2's own launch method, let it migrate (it may
-    then hang: the timeout ends it), kill any leftover session process, and keep the migrated database as the template."""
-    template = Path(template)
-    shutil.rmtree(template, ignore_errors=True)
-    template.mkdir(parents=True)
+def detach_stdin() -> None:
+    """Point this process's stdin at /dev/null, so every child inherits EOF. `opencode run` reads stdin to EOF whenever it is
+    not a TTY (opencode src/cli/cmd/run.ts: `if (!process.stdin.isTTY) message += ... await Bun.stdin.text()`), and harness2
+    launches it without stdin=; under a launcher that holds stdin open, every improver session waited forever (box B-205).
+    h2g4.run never reads stdin, so this changes nothing else."""
     try:
-        Proposer._opencode(prop, template, "Reply with exactly the word READY.", "", wall)
-    except subprocess.TimeoutExpired:
+        if os.isatty(0):
+            return
+    except OSError:
         pass
-    finally:
-        kill_improver_sessions()
-    dbs = list((template / ".ocdata").rglob("*.db"))
-    if not dbs:
-        raise RuntimeError(f"no OpenCode database under {template}/.ocdata after {wall} s; the template is not usable")
-    for junk in ("MISSION.md", "opencode.json", "output"):
-        p = template / junk
-        shutil.rmtree(p, ignore_errors=True) if p.is_dir() else p.unlink(missing_ok=True)
-    return template
+    fd = os.open(os.devnull, os.O_RDONLY)
+    os.dup2(fd, 0)
+    os.close(fd)
 
 
 IMPROVER_MARKERS = ("src/index.ts", "/opencode", "/claude", "claude ")      # an OpenCode (bun) or Claude CLI session process
@@ -191,15 +169,6 @@ class LocalClaudeProposer(Proposer):
             e.pop(k, None)
         return e
 
-    def _opencode(self, cwd, mission, system, wall):
-        tpl = oc_template_dir()
-        has_db = (tpl / ".ocdata").is_dir() and any((tpl / ".ocdata").rglob("*.db"))
-        if not has_db:
-            raise RuntimeError(f"no migrated OpenCode template at {tpl}: run `python -m h2g4.run <root> --make-oc-template` "
-                               f"first (a fresh OpenCode data dir hangs after its first migration, box B-204)")
-        seed_opencode_state(Path(cwd), tpl)
-        return super()._opencode(cwd, mission, system, wall)
-
     def call(self, mission, context_dir, label, **kw):
         if self.guard is None:
             return super().call(mission, context_dir, label, **kw)
@@ -248,8 +217,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="print the task stream; no rollouts, no sessions")
     p.add_argument("--judge", action="store_true", help="grade the runs selection chose (test verdicts), then summarise")
     p.add_argument("--smoke", action="store_true", help="one improver session with a trivial mission; prints the reply")
-    p.add_argument("--make-oc-template", action="store_true", help="build the migrated OpenCode template (H2G4_OC_TEMPLATE, "
-                   "default ~/g4/h2/oc_template) every improver session is seeded from; run once per machine")
     p.add_argument("--evaluate", metavar="HARNESS_DIR", help="no improvement: run this harness tree once on every task of the "
                    "stream and record the box's verdicts ('base' = the unedited harness); the transfer test")
     p.add_argument("--label", default="", help="name of an --evaluate run (rollouts eval-<label>-<task>, table eval_<label>.json)")
@@ -306,12 +273,8 @@ def evaluate(adapter: SweAdapter, harness: Path | None, label: str, tasks: list[
 
 def main(argv=None) -> int:
     a = build_parser().parse_args(argv)
+    detach_stdin()
     adapter = SweAdapter(a.runs_root)
-    if a.make_oc_template:
-        prop = LocalClaudeProposer(adapter.spec.channels["proposer"], audit_dir=a.runs_root / "_audit_template")
-        t = make_opencode_template(prop, oc_template_dir())
-        print(f"OpenCode template ready at {t}: {[str(p.relative_to(t)) for p in t.rglob('*') if p.is_file()]}")
-        return 0
     if a.smoke:
         prop = LocalClaudeProposer(adapter.spec.channels["proposer"], audit_dir=a.runs_root / "_audit_smoke")
         rep = prop.call("Reply with exactly the word READY and nothing else.", None, "smoke", timeout=600, max_attempts=1)
