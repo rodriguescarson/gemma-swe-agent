@@ -7,8 +7,9 @@ Checks (each prints PASS/FAIL; exit 1 if any FAIL):
   manifest   MANIFEST.sha256 lists every file and every hash matches
   env        env.txt names the harness2 pin (1cfe254) and holds a pip freeze
   proxy      proxy.jsonl has per-call rows (t, latency_s)
-  sweep      root/adapt (summaries), root/adapt/_audit (improver sessions), root/library, root/rollouts (results + traces in
-             equal numbers), judged.json and base_judged.json
+  sweep      root/adapt (summaries), root/adapt/_audit (improver sessions), root/library, the rollouts (results + traces in
+             equal numbers; under root/race/items/<arm>/<task> each with a staged.json naming its run and fingerprint, or the
+             pre-B-208 root/rollouts/<run>/items/<arm>/<task>), judged.json and base_judged.json
   transfer   eval_base_a.json and eval_base_b.json, and a frozen/<label>/ tree for every non-base eval_<label>.json
   secrets    no OpenRouter key material ("sk-or-") anywhere
   prereg     (optional) the commit that added the GAPS section titled HEADING is an ancestor of the first commit that added
@@ -74,10 +75,29 @@ def check_proxy(d: Path) -> tuple[bool, str]:
     return ok, f"{len(rows)} per-call rows" if ok else f"{len(rows)} rows, some without t/latency_s"
 
 
+def _rollouts(r: Path) -> list[tuple[str, str | None, Path]]:
+    """(task, run_id, item dir) for every result. Since 19 Oct (box B-208) the launcher writes root/race/items/<arm>/<task>
+    with the run id in the item's staged.json (None if the record is missing); before that, root/rollouts/<run>/items/<arm>/
+    <task> with the run id in the path."""
+    out = []
+    race = r / "race" / "items"
+    for res in sorted(race.rglob("task_results.jsonl")) if race.is_dir() else []:
+        try:
+            rid = json.loads((res.parent / "staged.json").read_text()).get("run_id")
+        except (OSError, ValueError):
+            rid = None
+        out.append((res.parent.name, rid, res.parent))
+    old = r / "rollouts"
+    for res in sorted(old.rglob("task_results.jsonl")) if old.is_dir() else []:
+        parts = res.parent.relative_to(old).parts
+        out.append((res.parent.name, "/".join(parts[:parts.index("items")]) if "items" in parts else None, res.parent))
+    return out
+
+
 def _rollouts_by_task(r: Path) -> dict[str, list[Path]]:
     out: dict[str, list[Path]] = {}
-    for res in (r / "rollouts").rglob("task_results.jsonl"):
-        out.setdefault(res.parent.name, []).append(res.parent)
+    for task, _, p in _rollouts(r):
+        out.setdefault(task, []).append(p)
     return out
 
 
@@ -112,6 +132,9 @@ def check_sweep(d: Path, expected: dict | None = None) -> tuple[bool, str]:
         untraced = [x for x in runs if not list((x / "traces").glob("trace_*.json"))]
         if untraced:
             problems.append(f"{t}: {len(untraced)} rollouts without a trace")
+        unrecorded = [x for x in runs if "race" in x.relative_to(r).parts[:1] and not (x / "staged.json").is_file()]
+        if unrecorded:
+            problems.append(f"{t}: {len(unrecorded)} rollouts without staged.json")
         if t not in judged:
             problems.append(f"{t}: no judged row")
     if not tasks:
@@ -136,14 +159,14 @@ def check_transfer(d: Path, expected: dict | None = None) -> tuple[bool, str]:
     exp = expected or EXPECTED["transfer"]
     evals = {p.stem.removeprefix("eval_"): p for p in d.rglob("eval_*.json")}
     problems = [f"missing eval_{lbl}.json" for lbl in exp["required_labels"] if lbl not in evals]
-    roll = _rollouts_by_task(d / "root")
+    roll = _rollouts(d / "root")
     for lbl, p in sorted(evals.items()):
         rows = {row["task"]: row for row in json.loads(p.read_text()).get("rows", [])}
         for t in exp["tasks"]:
             if t not in rows:
                 problems.append(f"{lbl}: no row for {t}")
                 continue
-            mine = [x for x in roll.get(t, []) if f"eval-{lbl}-{t}" in str(x)]
+            mine = [x for task, rid, x in roll if task == t and rid == f"eval-{lbl}-{t}"]
             if not mine:
                 problems.append(f"{lbl}/{t}: rollout not in the archive")
             elif not list((mine[0] / "traces").glob("trace_*.json")):

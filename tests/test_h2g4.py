@@ -3,6 +3,7 @@
 the tree's always-on text; the surface rejects what this runtime cannot carry; the fixed files (model, tools, 5-minute cap,
 sampling) are never on the surface; the renderer reads a real held-out ATIF trace; the improver never sees gold; the launcher
 stages the candidate and calls the race runner one task at a time; score() reads the box's verdict."""
+import hashlib
 import json
 import os
 import shutil
@@ -89,22 +90,94 @@ def test_adapter_stream_domains_and_no_gold_in_prompts(tmp_path, monkeypatch):
     assert set(_records()[ids[0]]) == {"repo", "problem_statement"}          # gold is never even held in memory
 
 
-def test_launcher_stages_once_and_calls_the_race_runner_per_run(tmp_path):
+def test_launcher_stages_per_rollout_and_calls_the_race_runner_per_run(tmp_path):
     from harness2.substrate.base import Install, RunRequest
     stage = tmp_path / "subs"
     src = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "staged")
     L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=stage)
     inst = Install(staging_dir=src, fingerprint="ab" * 32)
     dirs = L(RunRequest(task_ref="tomlkit_abc1234", run_ids=("r1", "r2"), timeout=600), inst)
-    arm = "_h2_" + "ab" * 6
-    assert (stage / arm / "agent.yaml").is_file()
+    arms = [L.arm(inst, "r1"), L.arm(inst, "r2")]
+    assert arms[0] != arms[1] and all(a.startswith("_h2_" + "ab" * 6 + "_") for a in arms)
+    assert all((stage / a / "agent.yaml").is_file() for a in arms)
     assert [d.name for d in dirs] == ["tomlkit_abc1234", "tomlkit_abc1234"]
-    assert dirs[0].parent.name == arm and dirs[0].parents[2].name == "r1"
+    assert [d.parent.name for d in dirs] == arms and all(d.parents[2] == L.out for d in dirs)
     assert len(L.calls) == 2
     cmd = L.calls[0]
     assert cmd[1].endswith("scripts/a6000/p2_race.py") and cmd[cmd.index("--conc") + 1] == "1"
-    assert cmd[cmd.index("--arms") + 1] == arm and "--keep" in cmd
-    assert (Path(cmd[2]) / "ids.txt").read_text() == "tomlkit_abc1234\n"
+    assert cmd[2] == str(L.out) and cmd[cmd.index("--label") + 1] == L.label
+    assert cmd[cmd.index("--arms") + 1] == arms[0] and "--keep" in cmd
+    assert Path(cmd[cmd.index("--ids") + 1]).read_text() == "tomlkit_abc1234\n"
+
+
+def test_two_trees_and_one_tree_twice_never_share_an_arm_or_a_result(tmp_path):
+    """2026-10-19 (box B-208): every candidate of task 1 ran as the base arm, and results landed in the rollout smoke's folder.
+    Two different trees and the same tree twice must give three arms, three staged bundles and three item dirs, all under this
+    root's race dir, each with a staged.json naming the fingerprint that ran."""
+    from harness2.substrate.base import Install, RunRequest
+    stage = tmp_path / "subs"
+    a = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "a")
+    b = compose_bundle({"systemprompt.md": V12_PROMPT, "guardrails.md": "- Edit early.\n"}, tmp_path / "b")
+    L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=stage)
+    ia, ib = Install(staging_dir=a, fingerprint="aa" * 32), Install(staging_dir=b, fingerprint="bb" * 32)
+    dirs = []
+    for inst, rid in ((ia, "base-0"), (ib, "inv1-0"), (ia, "base-1")):
+        d = L(RunRequest(task_ref="arrow_06fe693", run_ids=(rid,), timeout=600), inst)[0]
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "task_results.jsonl").write_text("{}\n")
+        dirs.append(d)
+    assert len({d.parent.name for d in dirs}) == 3 and len({str(d) for d in dirs}) == 3
+    assert all(str(d).startswith(str((tmp_path / "runs" / "race").resolve())) for d in dirs)
+    assert len(list(stage.glob("_h2_*"))) == 3
+    L(RunRequest(task_ref="arrow_06fe693", run_ids=("inv1-0",), timeout=600), ib)        # a rerun writes the record
+    rec = json.loads((dirs[1] / "staged.json").read_text())
+    assert rec["fingerprint"] == "bb" * 32 and rec["run_id"] == "inv1-0" and rec["arm"] == dirs[1].parent.name
+    assert rec["system_md_sha256"] == hashlib.sha256((stage / rec["arm"] / "prompts" / "system.md").read_bytes()).hexdigest()
+
+
+def test_container_label_is_stable_within_a_root_and_differs_across_roots(tmp_path):
+    a1 = RaceLauncher(tmp_path / "pilot1", dry=True)
+    a2 = RaceLauncher(tmp_path / "pilot1", dry=True)
+    b = RaceLauncher(tmp_path / "rollout_smoke", dry=True)
+    assert a1.label == a2.label != b.label and a1.label.startswith("h2")
+    assert a1.out == (tmp_path / "pilot1" / "race").resolve()
+
+
+def _fake_bin(path: Path, body: str) -> str:
+    path.write_text("#!/bin/sh\n" + body)
+    path.chmod(0o755)
+    return str(path)
+
+
+def test_a_rollout_whose_result_lands_elsewhere_raises(tmp_path):
+    from harness2.substrate.base import Install, RunRequest
+    src = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "staged")
+    L = RaceLauncher(tmp_path / "runs", dry=False, stage_root=tmp_path / "subs")
+    L.docker = _fake_bin(tmp_path / "docker", "exit 1\n")                                 # no container
+    elsewhere = tmp_path / "rollout_smoke" / "race"
+    L.command = lambda ids_file, arm: ["/bin/sh", "-c", f'mkdir -p "{elsewhere}/items/{arm}/t1" && '
+                                                        f'echo "{{}}" > "{elsewhere}/items/{arm}/t1/task_results.jsonl"']
+    with pytest.raises(RuntimeError, match="no result"):
+        L(RunRequest(task_ref="t1", run_ids=("r1",), timeout=60), Install(staging_dir=src, fingerprint="ab" * 32))
+    L.command = lambda ids_file, arm: ["/bin/sh", "-c", f'mkdir -p "{L.out}/items/{arm}/t1" && '
+                                                        f'echo "{{}}" > "{L.out}/items/{arm}/t1/task_results.jsonl"']
+    d = L(RunRequest(task_ref="t1", run_ids=("r2",), timeout=60), Install(staging_dir=src, fingerprint="ab" * 32))[0]
+    assert json.loads((d / "staged.json").read_text())["run_id"] == "r2"
+
+
+def test_a_live_container_mounted_on_another_folder_is_removed_not_reused(tmp_path):
+    log = tmp_path / "docker.log"
+    L = RaceLauncher(tmp_path / "runs", dry=False, stage_root=tmp_path / "subs")
+    L.docker = _fake_bin(tmp_path / "docker", f'echo "$@" >> "{log}"\n'
+                         f'[ "$1" = inspect ] && echo "{tmp_path}/pilot1_failed_reuse/race"\nexit 0\n')
+    L.ensure_container_mount()
+    calls = log.read_text().splitlines()
+    assert calls[0].startswith("inspect") and calls[1] == f"rm -f g4-{L.label}"
+    log.write_text("")
+    M = RaceLauncher(tmp_path / "runs2", dry=False)
+    M.docker = _fake_bin(tmp_path / "docker2", f'echo "$@" >> "{log}"\n[ "$1" = inspect ] && echo "{M.out}"\nexit 0\n')
+    M.ensure_container_mount()
+    assert [c.split()[0] for c in log.read_text().splitlines()] == ["inspect"]          # its own folder: kept
 
 
 def test_the_race_command_survives_the_containers_own_copies(tmp_path):
@@ -114,7 +187,7 @@ def test_the_race_command_survives_the_containers_own_copies(tmp_path):
     Both copies are replayed here against the real repo layout."""
     from harness2.substrate.base import Install
     L = RaceLauncher(tmp_path / "runs", dry=True)
-    cmd = L.command(tmp_path / "out", tmp_path / "ids.txt", L.arm(Install(staging_dir=tmp_path, fingerprint="cd" * 32)))
+    cmd = L.command(tmp_path / "ids.txt", L.arm(Install(staging_dir=tmp_path, fingerprint="cd" * 32), "inv1-0"))
     harness = cmd[cmd.index("--harness") + 1]
     arm = cmd[cmd.index("--arms") + 1]
     assert not harness.startswith("/") and (ROOT / harness / "manifest.json").is_file(), harness   # /g4/$HARNESS exists
@@ -202,7 +275,10 @@ def test_evaluate_runs_each_task_once_with_a_fixed_harness(tmp_path, capsys):
     ad = SweAdapter(tmp_path / "runs", launcher=L)
     rc = evaluate(ad, None, "base", ["arrow_06fe693", "attrs_af9c510"])
     assert rc == 0 and len(L.calls) == 2
-    assert [Path(c[2]).name for c in L.calls] == ["eval-base-arrow_06fe693", "eval-base-attrs_af9c510"]
+    arms = [c[c.index("--arms") + 1] for c in L.calls]
+    assert [a[-6:] for a in arms] == [hashlib.sha1(f"eval-base-{t}".encode()).hexdigest()[:6]
+                                      for t in ("arrow_06fe693", "attrs_af9c510")]                 # one arm per run id
+    assert [Path(c[c.index("--ids") + 1]).read_text() for c in L.calls] == ["arrow_06fe693\n", "attrs_af9c510\n"]
     table = json.loads((tmp_path / "runs" / "eval_base.json").read_text())
     assert table["harness"] == "base" and [r["solved"] for r in table["rows"]] == [None, None]   # dry: no verdict, not a zero
 

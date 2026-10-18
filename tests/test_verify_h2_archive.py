@@ -25,21 +25,28 @@ def manifest(d: Path):
     (d / "MANIFEST.sha256").write_text("\n".join(lines) + "\n")
 
 
-def rollout(r: Path, run_id: str, task: str, traced=True):
-    item = r / "rollouts" / run_id / "items" / "_staging" / "h2_ab" / task
-    write(item / "task_results.jsonl", json.dumps({"instance_id": task, "resolved": False}) + "\n")
+def item(r: Path, run_id: str, task: str) -> Path:
+    """Where h2g4's launcher puts a rollout since B-208: race/items/_h2_<fp12>_<sha1(run_id)[:6]>/<task>."""
+    return r / "race" / "items" / f"_h2_{'ab' * 6}_{hashlib.sha1(run_id.encode()).hexdigest()[:6]}" / task
+
+
+def rollout(r: Path, run_id: str, task: str, traced=True, legacy=False):
+    it = r / "rollouts" / run_id / "items" / "_staging" / "h2_ab" / task if legacy else item(r, run_id, task)
+    write(it / "task_results.jsonl", json.dumps({"instance_id": task, "resolved": False}) + "\n")
+    if not legacy:
+        write(it / "staged.json", json.dumps({"run_id": run_id, "arm": it.parent.name, "fingerprint": "ab" * 32}))
     if traced:
-        write(item / "traces" / f"trace_{task}.json", '{"steps": []}')
+        write(it / "traces" / f"trace_{task}.json", '{"steps": []}')
 
 
-def sweep_archive(tmp: Path, name="h2_argon", tasks=None) -> Path:
+def sweep_archive(tmp: Path, name="h2_argon", tasks=None, legacy=False) -> Path:
     d = tmp / name
     r = d / "root"
     tasks = tasks or EXP["pilot"]["tasks"]
     for t in tasks:
         write(r / "adapt" / "swe-g4-adk-agg1" / t / "summary.json", "{}")
         for k in range(EXP["pilot"]["min_rollouts_per_task"]):
-            rollout(r, f"{t}-r{k}", t)
+            rollout(r, f"{t}-r{k}", t, legacy=legacy)
     write(r / "adapt" / "swe-g4-adk-agg1" / "judged.json", json.dumps([{"task_id": t} for t in tasks]))
     write(r / "adapt" / "swe-g4-adk-agg1" / "base_judged.json", "[]")
     write(r / "adapt" / "_audit" / "propose-general.json", '{"mission": "m", "reply": "r"}')
@@ -61,16 +68,16 @@ def test_each_task_level_omission_fails(tmp_path):
     tasks = EXP["pilot"]["tasks"]
     d = sweep_archive(tmp_path / "a")                                  # a whole task missing (summary, rollouts, judged row)
     shutil.rmtree(d / "root" / "adapt" / "swe-g4-adk-agg1" / tasks[3])
-    for x in list((d / "root" / "rollouts").glob(f"{tasks[3]}-r*")):
-        shutil.rmtree(x)
+    for k in range(EXP["pilot"]["min_rollouts_per_task"]):
+        shutil.rmtree(item(d / "root", f"{tasks[3]}-r{k}", tasks[3]))
     ok, msg = V.check_sweep(d)
     assert not ok and tasks[3] in msg
     d = sweep_archive(tmp_path / "b")                                  # one rollout short
-    shutil.rmtree(d / "root" / "rollouts" / f"{tasks[0]}-r3")
+    shutil.rmtree(item(d / "root", f"{tasks[0]}-r3", tasks[0]))
     ok, msg = V.check_sweep(d)
     assert not ok and "3 rollouts < 4" in msg
     d = sweep_archive(tmp_path / "c")                                  # a rollout without its trace
-    shutil.rmtree(next((d / "root" / "rollouts" / f"{tasks[1]}-r0").rglob("traces")))
+    shutil.rmtree(item(d / "root", f"{tasks[1]}-r0", tasks[1]) / "traces")
     ok, msg = V.check_sweep(d)
     assert not ok and "without a trace" in msg
     d = sweep_archive(tmp_path / "d")                                  # judged.json lacks a task
@@ -80,6 +87,16 @@ def test_each_task_level_omission_fails(tmp_path):
     d = sweep_archive(tmp_path / "e")                                  # library or transcripts missing
     shutil.rmtree(d / "root" / "library")
     assert not V.check_sweep(d)[0]
+    d = sweep_archive(tmp_path / "f")                                  # a result with no record of what ran
+    (item(d / "root", f"{tasks[2]}-r1", tasks[2]) / "staged.json").unlink()
+    ok, msg = V.check_sweep(d)
+    assert not ok and "without staged.json" in msg
+
+
+def test_a_pre_b208_archive_still_verifies(tmp_path):
+    d = sweep_archive(tmp_path, legacy=True)
+    ok, msg = V.check_sweep(d)
+    assert ok and "32 rollouts" in msg, msg
 
 
 def test_a_budget_stop_limits_the_expected_tasks_to_the_finished_ones(tmp_path):
@@ -128,7 +145,7 @@ def test_transfer_checks_every_label_task_pair(tmp_path):
     ok, msg = V.check_transfer(d)
     assert ok, msg
     t = EXP["transfer"]["tasks"][5]
-    shutil.rmtree(d / "root" / "rollouts" / f"eval-fable-{t}")
+    shutil.rmtree(item(d / "root", f"eval-fable-{t}", t))
     ok, msg = V.check_transfer(d)
     assert not ok and f"fable/{t}" in msg
     d = transfer_archive(tmp_path / "b", labels=("base_a", "fable"))

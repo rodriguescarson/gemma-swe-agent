@@ -10,6 +10,7 @@ Rollouts run on the box through scripts/a6000/p2_race.py (the faithful Docker sa
 a lock (one model, and the scorer is sequential)."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -92,50 +93,95 @@ def improver_channel() -> ChannelSpec:
     return resolve_channel_model(kind, model, effort="high", steps=int(os.environ.get("H2G4_IMPROVER_STEPS") or 60))
 
 
+DOCKER = "/usr/bin/docker"                    # as in scripts/a6000/p2_race.py
+
+
 class RaceLauncher:
-    """One rollout = one scripts/a6000/p2_race.py call for one task, the candidate bundle staged as
-    submissions/_h2_<fingerprint12> (flat, git-ignored); serialised behind a lock."""
+    """One rollout = one scripts/a6000/p2_race.py call for one task. Layout per sweep root, from p2_race's own behaviour
+    (box B-206, B-208):
+    - ONE output dir <runs_root>/race and ONE container g4-<label>, the label derived from runs_root. p2_race --keep reuses a
+      live container whose /out mount was fixed when it was created, so a container must never be shared across output dirs
+      (B-208: a container created by the rollout smoke swallowed every later sweep result).
+    - ONE staged bundle per ROLLOUT, submissions/_h2_<fp12>_<run6> (flat: p2_race copies /g4/submissions/<arm> to
+      /tmp/bundle_<arm>; unique per run: p2_race skips items whose results already exist, so two rollouts of one harness on one
+      task must not share an item dir).
+    - --harness repo-relative (p2_race copies "/g4/$HARNESS").
+    - After each call the result must exist at <runs_root>/race/items/<arm>/<task>, or the rollout raises (recorded by
+      harness2 as a dead rollout, never as a silent miss); staged.json beside it records run_id, arm, fingerprint and the
+      sha256 of the staged prompts/system.md, so the archive proves which harness ran.
+    Rollouts are serialised behind a lock (one model; the scorer is sequential)."""
 
     def __init__(self, runs_root: Path, *, harness: Path = HARNESS, port: int = 8001, python: str = sys.executable,
                  dry: bool = False, stage_root: Path = ROOT / "submissions"):
         self.runs_root, self.harness, self.port, self.python, self.dry = Path(runs_root), Path(harness), port, python, dry
         self.stage_root = Path(stage_root)            # p2_race resolves an arm as submissions/<arm>; tests pass a tmp dir
+        self.out = (self.runs_root / "race").resolve()
+        self.label = "h2" + hashlib.sha1(str(self.runs_root.resolve()).encode()).hexdigest()[:8]
         self.lock = threading.Lock()
         self.calls: list[list[str]] = []
+        self.docker = DOCKER
+        self._mount_checked = False
 
-    def arm(self, install: Install) -> str:
-        # flat: p2_race copies /g4/submissions/<arm> to /tmp/bundle_<arm> inside its container, so a slash in the name breaks it
-        return f"_h2_{install.fingerprint[:12]}"
+    def container_out(self) -> str | None:
+        """Host path mounted at /out in the live g4-<label> container, or None if there is no such container."""
+        r = subprocess.run([self.docker, "inspect", "-f", '{{range .Mounts}}{{if eq .Destination "/out"}}{{.Source}}{{end}}{{end}}',
+                            f"g4-{self.label}"], capture_output=True, text=True, check=False)
+        if r.returncode != 0:
+            return None
+        return r.stdout.strip() or None
+
+    def ensure_container_mount(self) -> None:
+        """A bind mount follows the directory, not its path: after `mv root root_failed` a live container with this root's label
+        still writes into root_failed/race. Remove any g4-<label> container whose /out is not this root's race dir."""
+        if self._mount_checked:
+            return
+        src = self.container_out()
+        if src is not None and Path(src).resolve() != self.out:
+            subprocess.run([self.docker, "rm", "-f", f"g4-{self.label}"], capture_output=True, check=False)
+        self._mount_checked = True
+
+    def arm(self, install: Install, run_id: str) -> str:
+        return f"_h2_{install.fingerprint[:12]}_{hashlib.sha1(run_id.encode()).hexdigest()[:6]}"
 
     def harness_arg(self) -> str:
-        # repo-relative: p2_race copies "/g4/$HARNESS" inside its container, with the repo mounted at /g4 (box B-206)
         return str(Path(self.harness).resolve().relative_to(ROOT.resolve()))
 
-    def command(self, out: Path, ids_file: Path, arm: str) -> list[str]:
-        return [self.python, str(ROOT / "scripts" / "a6000" / "p2_race.py"), str(out), "--harness", self.harness_arg(),
+    def command(self, ids_file: Path, arm: str) -> list[str]:
+        return [self.python, str(ROOT / "scripts" / "a6000" / "p2_race.py"), str(self.out), "--harness", self.harness_arg(),
                 "--ids", str(ids_file), "--arms", arm, "--conc", "1", "--port", str(self.port), "--keep",
-                "--label", "h2"]
+                "--label", self.label]
 
     def __call__(self, req: RunRequest, install: Install) -> list[Path]:
-        arm = self.arm(install)
-        dest = self.stage_root / arm
         dirs = []
         with self.lock:
-            if not dest.is_dir():
-                shutil.copytree(install.staging_dir, dest)
             for run_id in req.run_ids:
-                out = self.runs_root / "rollouts" / run_id
-                run_dir = out / "items" / arm / req.task_ref
+                arm = self.arm(install, run_id)
+                dest = self.stage_root / arm
+                if not dest.is_dir():
+                    shutil.copytree(install.staging_dir, dest)
+                run_dir = self.out / "items" / arm / req.task_ref
                 if not (run_dir / "task_results.jsonl").is_file():
-                    out.mkdir(parents=True, exist_ok=True)
-                    ids_file = out / "ids.txt"
+                    self.out.mkdir(parents=True, exist_ok=True)
+                    ids_file = self.out / f"ids_{arm}.txt"
                     ids_file.write_text(req.task_ref + "\n", encoding="utf-8")
-                    cmd = self.command(out, ids_file, arm)
+                    cmd = self.command(ids_file, arm)
                     self.calls.append(cmd)
                     if not self.dry:
-                        with open(out / "launch.log", "a", encoding="utf-8") as log:
+                        self.ensure_container_mount()
+                        with open(self.out / "launch.log", "a", encoding="utf-8") as log:
+                            log.write(f"== {run_id} {arm} {req.task_ref}\n")
+                            log.flush()
                             subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                            timeout=int(req.timeout) + 900, check=False)
+                        if not (run_dir / "task_results.jsonl").is_file():
+                            raise RuntimeError(f"rollout {run_id}: no result at {run_dir}; see {self.out}/race.log and launch.log")
+                if run_dir.is_dir():
+                    sysmd = dest / "prompts" / "system.md"
+                    (run_dir / "staged.json").write_text(json.dumps({
+                        "run_id": run_id, "arm": arm, "fingerprint": install.fingerprint,
+                        "system_md_sha256": hashlib.sha256(sysmd.read_bytes()).hexdigest() if sysmd.is_file() else None,
+                        "skills": sorted(x.name for x in (dest / "skills").iterdir()) if (dest / "skills").is_dir() else []},
+                        indent=1), encoding="utf-8")
                 dirs.append(run_dir)
         return dirs
 
