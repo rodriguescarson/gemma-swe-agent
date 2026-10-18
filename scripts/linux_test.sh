@@ -60,6 +60,7 @@ pip -q install pytest >/dev/null 2>&1
 if [ "${V10_HARNESS:-1}" = 1 ]; then
   pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo "WARN harness wheels not installed: sandbox/flow tests will skip"
   pip -q install mcp==1.30.0 litellm==1.102.1 >/dev/null 2>&1 || echo "WARN mcp/litellm pins not installed"   # the Mac venv pins (2026-10-18: a fresh resolution broke litellm's mcp import)
+  pip freeze > /out/pip_freeze_v10.txt 2>/dev/null || true   # the resolved environment of this run (2026-10-18)
 fi
 git config --global user.email a@b; git config --global user.name a
 echo "LINUX_V10 TMPDIR=${TMPDIR-unset} TEST_TMPDIR=${TEST_TMPDIR-unset} nproc=$(nproc) G4_NIGHTLY=${G4_NIGHTLY-} G4_BUNDLE=${G4_BUNDLE-} python=$(python -V 2>&1)"
@@ -87,6 +88,7 @@ $(cat <<'SH'
 pip -q install pytest pyarrow >/dev/null 2>&1
 pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo 'WARN harness wheels not installed: harness tests will fail'
 pip -q install mcp==1.30.0 litellm==1.102.1 >/dev/null 2>&1 || echo 'WARN mcp/litellm pins not installed'   # the Mac venv pins (see the V10 branch)
+pip freeze > /out/pip_freeze_full.txt 2>/dev/null || true   # the resolved environment of this run (2026-10-18)
 pip -q install peft==0.21.0 >/dev/null 2>&1 || echo 'WARN peft not installed: train/qlora tests will fail'   # the Mac venv pin
 git config --global user.email a@b; git config --global user.name a
 PYTHONDONTWRITEBYTECODE=1 python -m pytest -q -p no:cacheprovider ${TESTS:-tests} -k 'not shellcheck and not official_compiler' -rfE > /tmp/full.log 2>&1

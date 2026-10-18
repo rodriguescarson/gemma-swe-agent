@@ -23,6 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 PIN = "1cfe254"
+EXPECTED = json.loads((ROOT / "eval" / "analysis" / "h2_expected.json").read_text())
 
 
 def sha256(p: Path) -> str:
@@ -73,25 +74,85 @@ def check_proxy(d: Path) -> tuple[bool, str]:
     return ok, f"{len(rows)} per-call rows" if ok else f"{len(rows)} rows, some without t/latency_s"
 
 
-def check_sweep(d: Path) -> tuple[bool, str]:
+def _rollouts_by_task(r: Path) -> dict[str, list[Path]]:
+    out: dict[str, list[Path]] = {}
+    for res in (r / "rollouts").rglob("task_results.jsonl"):
+        out.setdefault(res.parent.name, []).append(res.parent)
+    return out
+
+
+def check_sweep(d: Path, expected: dict | None = None) -> tuple[bool, str]:
+    """Task-level completeness against the pre-registered list: every expected task (or, after a BudgetStop, every task its
+    record lists as finished) has a summary, at least min_rollouts rollouts each with a result AND a trace, and a judged
+    row; plus the improver transcripts and the library."""
+    exp = expected or EXPECTED[EXPECTED["sweeps"].get(d.name, "pilot")]
     r = d / "root"
-    summaries = list((r / "adapt").glob("*/*/summary.json"))
+    stops = sorted((r / "adapt").rglob("_sweeps/budget-stop-*.json"))
+    tasks = list(exp["tasks"])
+    note = ""
+    if stops:
+        finished = set(json.loads(stops[-1].read_text()).get("finished_task_summaries", []))
+        tasks = [t for t in tasks if t in finished]
+        note = f"; BUDGET STOP after {len(tasks)} of {len(exp['tasks'])} tasks"
+    summaries = {p.parent.name for p in (r / "adapt").glob("*/*/summary.json")}
+    roll = _rollouts_by_task(r)
+    judged = []
+    for j in (r / "adapt").rglob("judged.json"):
+        try:
+            judged += [row.get("task_id") for row in json.loads(j.read_text())]
+        except (ValueError, AttributeError):
+            pass
+    problems = []
+    for t in tasks:
+        if t not in summaries:
+            problems.append(f"{t}: no summary")
+        runs = roll.get(t, [])
+        if len(runs) < exp["min_rollouts_per_task"]:
+            problems.append(f"{t}: {len(runs)} rollouts < {exp['min_rollouts_per_task']}")
+        untraced = [x for x in runs if not list((x / "traces").glob("trace_*.json"))]
+        if untraced:
+            problems.append(f"{t}: {len(untraced)} rollouts without a trace")
+        if t not in judged:
+            problems.append(f"{t}: no judged row")
+    if not tasks:
+        problems.append("no task to verify")
     audit = files_under(r / "adapt" / "_audit") if (r / "adapt" / "_audit").is_dir() else []
+    if not audit:
+        problems.append("no improver-session transcripts (adapt/_audit)")
+    if not (r / "library").is_dir():
+        problems.append("no library/")
+    if not list((r / "adapt").rglob("base_judged.json")):
+        problems.append("no base_judged.json")
     lib = list((r / "library").rglob("harnesses/*/harness")) if (r / "library").is_dir() else []
-    results = list((r / "rollouts").rglob("task_results.jsonl"))
-    traces = list((r / "rollouts").rglob("traces/trace_*.json"))
-    judged = list((r / "adapt").rglob("judged.json")) and list((r / "adapt").rglob("base_judged.json"))
-    ok = bool(summaries) and bool(audit) and (r / "library").is_dir() and bool(results) and len(traces) == len(results) and bool(judged)
-    return ok, (f"{len(summaries)} task summaries, {len(audit)} improver-session files, {len(lib)} adopted harnesses, "
-                f"{len(results)} rollouts with {len(traces)} traces, judged files {'present' if judged else 'MISSING'}")
+    ok = not problems
+    head = (f"{len(tasks)} tasks checked, {sum(len(roll.get(t, [])) for t in tasks)} rollouts, {len(audit)} session files, "
+            f"{len(lib)} adopted harnesses{note}")
+    return ok, head if ok else head + "; " + "; ".join(problems[:6]) + ("..." if len(problems) > 6 else "")
 
 
-def check_transfer(d: Path) -> tuple[bool, str]:
+def check_transfer(d: Path, expected: dict | None = None) -> tuple[bool, str]:
+    """Every required label (both base runs) and every candidate that was evaluated has a row for each of the 12 tasks,
+    each row's rollout is in the archive with a result and a trace, and each non-base candidate has its frozen tree."""
+    exp = expected or EXPECTED["transfer"]
     evals = {p.stem.removeprefix("eval_"): p for p in d.rglob("eval_*.json")}
-    need = {"base_a", "base_b"}
-    frozen_missing = sorted(lbl for lbl in evals if not lbl.startswith("base") and not any(d.rglob(f"frozen/{lbl}/systemprompt.md")))
-    ok = need <= set(evals) and not frozen_missing
-    return ok, f"evals {sorted(evals)}; base runs present: {need <= set(evals)}; frozen trees missing for {frozen_missing}"
+    problems = [f"missing eval_{lbl}.json" for lbl in exp["required_labels"] if lbl not in evals]
+    roll = _rollouts_by_task(d / "root")
+    for lbl, p in sorted(evals.items()):
+        rows = {row["task"]: row for row in json.loads(p.read_text()).get("rows", [])}
+        for t in exp["tasks"]:
+            if t not in rows:
+                problems.append(f"{lbl}: no row for {t}")
+                continue
+            mine = [x for x in roll.get(t, []) if f"eval-{lbl}-{t}" in str(x)]
+            if not mine:
+                problems.append(f"{lbl}/{t}: rollout not in the archive")
+            elif not list((mine[0] / "traces").glob("trace_*.json")):
+                problems.append(f"{lbl}/{t}: no trace")
+        if not lbl.startswith("base") and not any(d.rglob(f"frozen/{lbl}/systemprompt.md")):
+            problems.append(f"{lbl}: no frozen tree")
+    ok = not problems
+    head = f"labels {sorted(evals)} x {len(exp['tasks'])} tasks"
+    return ok, head if ok else head + "; " + "; ".join(problems[:6]) + ("..." if len(problems) > 6 else "")
 
 
 def check_secrets(d: Path) -> tuple[bool, str]:

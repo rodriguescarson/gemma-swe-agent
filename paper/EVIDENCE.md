@@ -60,3 +60,21 @@ past rows (correct with a new row).
    public tasks, one A6000 box paced to the scorer's 4xL4, and about 58 hidden public tasks. The paper states them as such
    ("in our setup, a 74-task local screen did not order hidden scores"), never as properties of agent benchmarks in general;
    the hidden-side n (one or two draws per bundle) is stated next to every comparison.
+
+## Chronology and completeness, as checks (18 Oct, after a second outside review)
+
+- **Completeness at task and rollout level:** eval/analysis/h2_expected.json (committed before any Harness² rollout) lists
+  every pre-registered task, the minimum rollouts per task (4 for k = 1) and the transfer labels; verify_h2_archive.py checks
+  each task's summary, rollouts with traces and judged row, and each transfer label x task pair, truncating to the finished
+  tasks only when a budget-stop record says so (tests/test_verify_h2_archive.py, 6 tests).
+- **Chronology per claim:** eval/analysis/claims.json maps every claim id to its governing GAPS section and its results;
+  eval/analysis/check_claims.py resolves each section to the commit that first added it and proves it is an ancestor of the
+  commit that first added each result (or older than each Kaggle submission). Output: eval/analysis/out/claims_chronology.md
+  (18 Oct: C2, C3, C6, C7, C7b ok; C1, C4, C5, C8 post hoc; D1-D5 pending with their rules already committed). The 16 Oct
+  timestamp correction is listed there as the one disclosed exception, with its commit.
+- **Dependency drift record:** the 18 Oct Linux failure (litellm vs mcp under a fresh resolution), its pin (6e9ef737), the
+  passing flow-test run (eval/linux_test_out/flow_check_2026-10-18.log: 12 passed), and from now on every Linux run's full
+  resolved environment (eval/linux_test_out/pip_freeze_v10.txt, pip_freeze_full.txt).
+- **Two evidence streams, joined only by claim ids:** submission and box-screen results are C claims; Harness² results are D
+  claims. A verifier pass establishes integrity, not truth: negative results, failed submissions (sub18, sub19 RUNTIME), budget
+  stops and transfer regressions are reported alongside any gain.

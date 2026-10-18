@@ -143,3 +143,13 @@ def test_both_container_branches_pin_mcp_and_litellm_to_the_mac_venv():
     full = t[t.index('bash -c "$V10_SCRIPT"'):]
     assert want in v10.split("\n", 2)[1] or want in v10.split("\n", 1)[0], v10[:300]
     assert f"pip -q install {want}" in full, full[:600]
+
+
+def test_both_container_branches_record_the_resolved_environment():
+    """2026-10-18 (outside review): pins alone do not prove what a fresh environment resolved; every Linux run writes the
+    container's full pip freeze next to its pytest log, so a later drift is visible by diffing two runs' freezes."""
+    t = S.read_text()
+    v10 = t[t.index('pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo "WARN harness wheels'):t.index('bash -c "$V10_SCRIPT"')]
+    full = t[t.index('bash -c "$V10_SCRIPT"'):]
+    assert "pip freeze > /out/pip_freeze_v10.txt" in v10
+    assert "pip freeze > /out/pip_freeze_full.txt" in full
