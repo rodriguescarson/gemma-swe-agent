@@ -212,3 +212,83 @@ def test_final_harness_is_the_last_adopted_tree_in_stream_order(tmp_path):
         HT.write_tree(ADK_SURFACE, {"systemprompt.md": body}, lib.entry_dir(t) / "harness")
     h = final_harness(ad, 1, None, "seq", "arrow")
     assert h == lib.entry_dir(arrow[2]) / "harness" and HT.read_tree(ADK_SURFACE, h)["systemprompt.md"] == "third"
+
+
+def _fake_session_proposer(tmp_path, monkeypatch, *, sleep_s, on_start=None):
+    """A LocalClaudeProposer whose parent call() starts a child that looks like an OpenCode session (its argv carries
+    src/index.ts) and waits for it, as Proposer._opencode does with subprocess.run."""
+    import subprocess as sp
+    import sys as _sys
+    from harness2.core.proposer import Proposer, Reply
+    from harness2.core.spec import ChannelSpec
+    from h2g4.run import LocalClaudeProposer
+
+    def fake_call(self, mission, context_dir, label, **kw):
+        if on_start:
+            on_start(label)
+        t0 = time.time()
+        p = sp.run([_sys.executable, "-c", f"import time; time.sleep({sleep_s})", "src/index.ts", "run", label])
+        return Reply(label=label, text="" if p.returncode else "done", ok=p.returncode == 0, wall_s=round(time.time() - t0, 2))
+
+    monkeypatch.setattr(Proposer, "call", fake_call)
+    prop = LocalClaudeProposer(ChannelSpec("opencode", "openrouter/x/y"), audit_dir=tmp_path / "_audit")
+    prop.poll_s = 0.2
+    return prop
+
+
+import time  # noqa: E402
+
+
+def test_watchdog_kills_a_runaway_session_at_the_cap(tmp_path, monkeypatch):
+    from h2g4.run import BudgetGuard, BudgetStop
+    t0 = [None]
+    prop = _fake_session_proposer(tmp_path, monkeypatch, sleep_s=30, on_start=lambda _: t0.__setitem__(0, time.time()))
+    rate = 2.0                                                    # dollars per second while the session runs: a runaway
+    usage = lambda: 0.0 if t0[0] is None else rate * (time.time() - t0[0])   # noqa: E731
+    prop.guard = BudgetGuard(5.0, tmp_path / "b.json", usage=usage, available=lambda: 90.0, margin_usd=1.0)
+    start = time.time()
+    with pytest.raises(BudgetStop, match="DURING session"):
+        prop.call("m", None, "expensive")
+    wall = time.time() - start
+    assert wall < 6, wall                                          # killed near the cap (2.5 s of spend), not after 30 s
+    overshoot = usage() - 5.0
+    assert overshoot < rate * 1.5, overshoot                       # roughly one poll interval plus the kill and join
+
+
+def test_concurrent_sessions_cannot_both_pass_on_the_same_spend(tmp_path, monkeypatch):
+    import threading as th
+    from h2g4.run import BudgetGuard, BudgetStop
+    spent = [0.0]
+    prop = _fake_session_proposer(tmp_path, monkeypatch, sleep_s=0.3, on_start=lambda _: spent.__setitem__(0, spent[0] + 8.0))
+    prop.guard = BudgetGuard(10.0, tmp_path / "b.json", usage=lambda: spent[0], available=lambda: 90.0, margin_usd=1.0)
+    out = {}
+
+    def go(name):
+        try:
+            out[name] = prop.call("m", None, name).ok
+        except BudgetStop as e:
+            out[name] = f"stop: {e}"
+
+    ts = [th.Thread(target=go, args=(n,)) for n in ("a", "b")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert sorted(v is True for v in out.values()) == [False, True], out    # one ran ($8), the other was refused
+    assert spent[0] == 8.0
+    rows = [json.loads(l) for l in (tmp_path / "_spend.jsonl").read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]["session_usd"] == 8.0
+
+
+def test_evaluate_freezes_the_harness_and_refuses_a_swap_under_the_same_label(tmp_path):
+    from h2g4.adk import fingerprint
+    from h2g4.run import evaluate
+    L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=tmp_path / "subs")
+    ad = SweAdapter(tmp_path / "runs", launcher=L)
+    cand = HT.write_tree(ADK_SURFACE, {"systemprompt.md": V12_PROMPT, "guardrails.md": "- Check edits.\n"}, tmp_path / "cand")
+    assert evaluate(ad, cand, "fable", ["boltons_139d5dc"]) == 0
+    frozen = tmp_path / "runs" / "frozen" / "fable"
+    table = json.loads((tmp_path / "runs" / "eval_fable.json").read_text())
+    assert table["harness"] == str(frozen) and table["fingerprint"] == fingerprint(HT.read_tree(ADK_SURFACE, cand))
+    (cand / "guardrails.md").write_text("- Something else.\n")              # the source changes after freezing
+    assert evaluate(ad, cand, "fable", ["boltons_139d5dc"]) == 1              # refused: a different tree under the label

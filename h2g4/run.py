@@ -12,7 +12,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
+import subprocess
 import sys
+import threading
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -100,12 +103,50 @@ class BudgetGuard:
         return cost
 
 
+IMPROVER_MARKERS = ("src/index.ts", "/opencode", "/claude", "claude ")      # an OpenCode (bun) or Claude CLI session process
+
+
+def _children(pid: int) -> list[int]:
+    r = subprocess.run(["pgrep", "-P", str(pid)], capture_output=True, text=True)
+    return [int(x) for x in r.stdout.split()]
+
+
+def _cmdline(pid: int) -> str:
+    return subprocess.run(["ps", "-o", "command=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+
+
+def kill_improver_sessions(root: int | None = None) -> list[int]:
+    """SIGKILL every child of this process that is an improver session (and that child's descendants); rollouts (p2_race)
+    are other children and are left alone. Returns the pids signalled."""
+    hit = []
+    for c in _children(root or os.getpid()):
+        if any(m in _cmdline(c) for m in IMPROVER_MARKERS):
+            stack, tree = [c], []
+            while stack:
+                p = stack.pop()
+                tree.append(p)
+                stack.extend(_children(p))
+            for p in reversed(tree):
+                try:
+                    os.kill(p, signal.SIGKILL)
+                    hit.append(p)
+                except ProcessLookupError:
+                    pass
+    return hit
+
+
 class LocalClaudeProposer(Proposer):
     """Harness²'s Proposer with its Vertex routing removed, so the claude_cli / opencode channels use the local login and
-    the provider config already on the machine; optionally capped by a BudgetGuard (attribute `guard`), with every
-    session's label, wall time and the key's spend so far appended to <audit_dir>/../_spend.jsonl."""
+    the provider config already on the machine. With a BudgetGuard (attribute `guard`): improver sessions run one at a time
+    (a class-wide lock, so no two sessions pass the pre-check on the same spend figure), the guard is checked before each,
+    and a watchdog polls live spend every `poll_s` seconds DURING the session and kills the session process the moment spend
+    reaches the cap, then the sweep ends with BudgetStop. Overshoot is bounded by about one poll interval of spending plus
+    OpenRouter's reporting lag, not by the session's length. Every session's label, cost and running spend go to
+    <audit_dir>/../_spend.jsonl."""
 
     guard = None
+    poll_s = float(os.environ.get("H2G4_WATCH_S") or 20)
+    _lock = threading.Lock()
 
     def env(self) -> dict[str, str]:
         e = super().env()
@@ -116,16 +157,38 @@ class LocalClaudeProposer(Proposer):
     def call(self, mission, context_dir, label, **kw):
         if self.guard is None:
             return super().call(mission, context_dir, label, **kw)
-        before = self.guard.check(label)
-        rep = super().call(mission, context_dir, label, **kw)
-        after = self.guard.spent()
-        cost = self.guard.record(before, after)
-        if self.audit_dir is not None:
-            row = {"t": time.time(), "label": label, "ok": rep.ok, "wall_s": rep.wall_s, "session_usd": round(cost, 4),
-                   "spent_usd": round(after, 4)}
-            with open(Path(self.audit_dir).parent / "_spend.jsonl", "a", encoding="utf-8") as f:
-                f.write(json.dumps(row) + "\n")
-        return rep
+        with LocalClaudeProposer._lock:
+            before = self.guard.check(label)
+            done, tripped = threading.Event(), []
+
+            def watch():
+                while not done.wait(self.poll_s):
+                    try:
+                        spent = self.guard.spent()
+                        why = f"spend ${spent:.2f} reached the ${self.guard.budget:.2f} cap" if spent >= self.guard.budget else ""
+                    except BudgetStop as e:
+                        why = str(e)
+                    if why:
+                        tripped.append(why)
+                        kill_improver_sessions()
+
+            w = threading.Thread(target=watch, name="h2g4-budget-watchdog", daemon=True)
+            w.start()
+            try:
+                rep = super().call(mission, context_dir, label, **kw)
+            finally:
+                done.set()
+                w.join()
+            if tripped:
+                raise BudgetStop(f"h2g4 budget stop DURING session {label!r}: {tripped[0]}; session killed")
+            after = self.guard.spent()
+            cost = self.guard.record(before, after)
+            if self.audit_dir is not None:
+                row = {"t": time.time(), "label": label, "ok": rep.ok, "wall_s": rep.wall_s, "session_usd": round(cost, 4),
+                       "spent_usd": round(after, 4)}
+                with open(Path(self.audit_dir).parent / "_spend.jsonl", "a", encoding="utf-8") as f:
+                    f.write(json.dumps(row) + "\n")
+            return rep
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -161,7 +224,23 @@ def final_harness(adapter: SweAdapter, k: int, seed, mode: str, domain: str) -> 
 
 
 def evaluate(adapter: SweAdapter, harness: Path | None, label: str, tasks: list[str]) -> int:
-    """Run one harness once per task, with no improvement, and record the box's verdicts: the transfer test (GAPS, 18 Oct)."""
+    """Run one harness once per task, with no improvement, and record the box's verdicts: the transfer test (GAPS, 18 Oct).
+    The harness is frozen first: copied to <runs_root>/frozen/<label>/ (refused if a different tree is already frozen under
+    that label) and evaluated from the copy, with its fingerprint in the table. No improver is involved, so the transfer
+    tasks never reach a Proposer, a library or a selection."""
+    from harness2.core import tree as HT
+    from .adk import ADK_SURFACE, fingerprint
+    fp = "base"
+    if harness is not None:
+        tree = HT.read_tree(ADK_SURFACE, harness)
+        frozen = Path(adapter.runs_root) / "frozen" / label
+        if frozen.is_dir():
+            if fingerprint(HT.read_tree(ADK_SURFACE, frozen)) != fingerprint(tree):
+                print(f"error: a different harness is already frozen as {label!r} at {frozen}", file=sys.stderr)
+                return 1
+        else:
+            HT.write_tree(ADK_SURFACE, tree, frozen, stubs=False)
+        harness, fp = frozen, fingerprint(tree)
     rows = []
     for t in tasks:
         rd = adapter.execute(t, harness, f"eval-{label}-{t}")
@@ -170,7 +249,8 @@ def evaluate(adapter: SweAdapter, harness: Path | None, label: str, tasks: list[
                      "delivered": adapter.delivered(rd)})
         print(f"{label} {t}: solved={rows[-1]['solved']} delivered={rows[-1]['delivered']}", flush=True)
     out = Path(adapter.runs_root) / f"eval_{label}.json"
-    out.write_text(json.dumps({"label": label, "harness": str(harness or "base"), "rows": rows}, indent=2), encoding="utf-8")
+    out.write_text(json.dumps({"label": label, "harness": str(harness or "base"), "fingerprint": fp, "rows": rows}, indent=2),
+                   encoding="utf-8")
     graded = [r for r in rows if r["solved"] is not None]
     print(f"{label}: solved {sum(r['solved'] for r in graded)}/{len(graded)} graded of {len(rows)}; table {out}")
     return 0
