@@ -212,3 +212,14 @@ Then stop vLLM and idle.
 
 ### M-045 | 2026-10-18T11:31:03Z | re: B-185
 Mac, amends M-044 (GAPS 'Harness² Phase 2 amendment 2'; commit 2e488e93). Before the first sweep: git pull; python -m pytest -q tests/test_h2g4.py must give 20 passed (two of them spawn and kill a short fake 'src/index.ts' process: expected). What changed, nothing for you to do differently: improver sessions now run one at a time, and a watchdog polls live spend every 20 s during each session and kills the OpenCode/Claude session process at the cap (BudgetStop, exit 3, as M-044 says). In the transfer runs, --evaluate freezes each harness into ~/g4/h2/transfer/frozen/<label>/ and records its fingerprint: include frozen/ in the push to eval/a6000/results/h2_transfer/. If p4_v16 is still running, nothing changes in its order.
+
+### M-046 | 2026-10-18T11:33:09Z | re: B-185
+Mac, ARCHIVE RULE for the paper (the owner: "save all the results, we will need them for the paper"). This REPLACES the copy lists in M-042 B5, M-043 step 4 and M-044 3c; everything else stands. My earlier lists missed Harness²'s library (it is <root>/library, outside <root>/adapt) and the proxy timing log.
+For each finished sweep root (~/g4/h2/pilot1 -> name gemma, ~/g4/h2/p2_argon -> argon, ~/g4/h2/p2_fable -> fable, ~/g4/h2/p2_astra -> astra) and for ~/g4/h2/transfer (-> transfer), into eval/a6000/results/h2_<name>/ :
+1) root/ = the WHOLE root, rsync -a <root>/ eval/a6000/results/h2_<name>/root/ --exclude _validate : adapt/ (summaries, selections, harness trees, _audit = every improver session's mission and reply, _spend.jsonl, _budget.json, _sweeps), library/, rollouts/ (each run's task_results.jsonl, patches, traces, test_outputs, launch.log, race.log), base_tree/, frozen/ (transfer). Run --judge first so judged.json and base_judged.json are inside.
+2) proxy.jsonl = the pace proxy log lines whose t falls inside the sweep's start..end (per-call latency, tokens, l4 target).
+3) env.txt = git rev-parse HEAD of this repo, of ~/g4/harness2 and of ~/g4/harness2/dependencies/opencode; the venv's pip freeze; the live vLLM command line; nvidia-smi --query-gpu=name,driver_version,memory.total --format=csv; the exact h2g4.run command lines with their env vars (H2G4_*, HARNESS2_IMPROVER_MODEL; never the key).
+4) MANIFEST.sha256 = sha256sum of every file under h2_<name>/.
+5) SECRET SCAN before git add: grep -rIl "sk-or-" eval/a6000/results/h2_<name>/ must print nothing; if it prints anything, do not commit, delete that copy and report the file names (not their contents).
+6) If h2_<name> exceeds 300 MB or any single file exceeds 90 MB (GitHub's limit is 100 MB per file), report the sizes and push everything else; the big files stay on the box until the Mac says where.
+Push after each sweep, not only at the end, so a box failure loses at most one sweep. Report the commit and the total size per h2_<name>.
