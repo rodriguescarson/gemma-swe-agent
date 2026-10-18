@@ -88,7 +88,7 @@ def improver_channel() -> ChannelSpec:
     OpenCode model, a bare one a Claude CLI model). Both unset = Harness²'s defaults (an empty model the Proposer refuses)."""
     model = os.environ.get("HARNESS2_IMPROVER_MODEL") or None
     kind = os.environ.get("HARNESS2_IMPROVER_KIND") or (None if model is None else ("opencode" if "/" in model else "claude_cli"))
-    return resolve_channel_model(kind, model, effort="high")
+    return resolve_channel_model(kind, model, effort="high", steps=int(os.environ.get("H2G4_IMPROVER_STEPS") or 60))
 
 
 class RaceLauncher:

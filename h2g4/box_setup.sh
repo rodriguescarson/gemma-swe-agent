@@ -5,7 +5,9 @@
 #  2. its pinned OpenCode checkout + its compatibility patch, through harness2.install (the same calls harness2-setup makes),
 #     and bun 1.3.11 under dependencies/tools, then `bun install` in the checkout;
 #  3. an OpenCode provider "boxvllm" pointing at the box's own vLLM (127.0.0.1:8000) with model "gemma4", the alias serve.sh
-#     adds when SERVED_ALIAS=gemma4 is set (scripts/a6000/serve.sh; the model path stays the first served name).
+#     adds when SERVED_ALIAS=gemma4 is set (scripts/a6000/serve.sh; the model path stays the first served name), and the
+#     three Phase 2 improvers under OpenCode's "openrouter" provider, keyed by OPENROUTER_API_KEY from the environment (the
+#     owner puts that key in ~/g4/.h2_openrouter_env, mode 600; it never enters git or the channel).
 # Ends by printing the paths Harness² will use; `python -m h2g4.run <dir> --smoke` then proves an improver session works.
 set -euo pipefail
 G4=${G4:-$HOME/g4}
@@ -36,6 +38,14 @@ cat > "$CFG" <<'JSON'
       "name": "box vLLM (Gemma 4 31B)",
       "options": { "baseURL": "http://127.0.0.1:8000/v1", "apiKey": "EMPTY" },
       "models": { "gemma4": { "name": "Gemma 4 31B on the box", "limit": { "context": 32768, "output": 8192 } } }
+    },
+    "openrouter": {
+      "options": { "apiKey": "{env:OPENROUTER_API_KEY}" },
+      "models": {
+        "anthropic/claude-fable-5.1": { "name": "Claude Fable 5.1" },
+        "openai/gpt-6-astra": { "name": "GPT-6 Astra" },
+        "google/gemini-4-argon": { "name": "Gemini 4 Argon" }
+      }
     }
   }
 }

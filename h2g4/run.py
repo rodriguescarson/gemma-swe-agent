@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -19,7 +22,7 @@ from harness2.cli import _common as C
 from harness2.cli.judge import collect_selections, judge_bases
 from harness2.core import judge as J
 from harness2.core import schedule
-from harness2.core.proposer import Proposer
+from harness2.core.proposer import Proposer, ProposerError
 
 from .swe import SweAdapter
 
@@ -27,15 +30,60 @@ VERTEX_ENV = ("CLAUDE_CODE_USE_VERTEX", "ANTHROPIC_VERTEX_PROJECT_ID", "CLOUD_ML
               "GOOGLE_VERTEX_LOCATION", "VERTEXAI_LOCATION")
 
 
+def openrouter_usage() -> float:
+    """Live dollars used by the OPENROUTER_API_KEY on this machine (OpenRouter's /api/v1/key)."""
+    req = urllib.request.Request("https://openrouter.ai/api/v1/key",
+                                 headers={"Authorization": "Bearer " + os.environ["OPENROUTER_API_KEY"]})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return float(json.load(resp)["data"]["usage"])
+
+
+class BudgetGuard:
+    """A per-sweep dollar cap on improver sessions (Phase 2, OpenRouter): before every session, refuse once the key's usage
+    has grown by `budget` since this sweep's first session. The starting usage is kept in <runs_root>/_budget.json, so a
+    restarted sweep keeps counting from its own start. The key's own limit stays the hard, server-side cap."""
+
+    def __init__(self, budget_usd: float, state: Path, usage=openrouter_usage):
+        self.budget, self.state, self.usage = float(budget_usd), Path(state), usage
+        if self.state.is_file():
+            self.start = float(json.loads(self.state.read_text())["start_usage"])
+        else:
+            self.start = self.usage()
+            self.state.parent.mkdir(parents=True, exist_ok=True)
+            self.state.write_text(json.dumps({"start_usage": self.start, "budget_usd": self.budget, "t": time.time()}))
+
+    def spent(self) -> float:
+        return self.usage() - self.start
+
+    def check(self, label: str = "") -> float:
+        spent = self.spent()
+        if spent >= self.budget:
+            raise ProposerError(f"h2g4 budget reached before session {label!r}: ${spent:.2f} of ${self.budget:.2f}")
+        return spent
+
+
 class LocalClaudeProposer(Proposer):
     """Harness²'s Proposer with its Vertex routing removed, so the claude_cli / opencode channels use the local login and
-    the provider config already on the machine."""
+    the provider config already on the machine; optionally capped by a BudgetGuard (attribute `guard`), with every
+    session's label, wall time and the key's spend so far appended to <audit_dir>/../_spend.jsonl."""
+
+    guard = None
 
     def env(self) -> dict[str, str]:
         e = super().env()
         for k in VERTEX_ENV:
             e.pop(k, None)
         return e
+
+    def call(self, mission, context_dir, label, **kw):
+        if self.guard is not None:
+            self.guard.check(label)
+        rep = super().call(mission, context_dir, label, **kw)
+        if self.guard is not None and self.audit_dir is not None:
+            row = {"t": time.time(), "label": label, "ok": rep.ok, "wall_s": rep.wall_s, "spent_usd": round(self.guard.spent(), 4)}
+            with open(Path(self.audit_dir).parent / "_spend.jsonl", "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        return rep
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,6 +138,9 @@ def main(argv=None) -> int:
         print(f"judged {len(rows)} selections: chosen run solved {chosen}; base runs in {ns_dir / 'base_judged.json'}")
         return 0
     prop = LocalClaudeProposer(adapter.spec.channels["proposer"], audit_dir=runs_root / "_audit")
+    if os.environ.get("H2G4_BUDGET_USD"):
+        prop.guard = BudgetGuard(float(os.environ["H2G4_BUDGET_USD"]), runs_root / "_budget.json")
+        print(f"budget guard: ${prop.guard.budget:.2f} on top of key usage ${prop.guard.start:.2f}", flush=True)
     adapter.substrate.preflight()
     rep = schedule.run_sweep(a.k, adapter=adapter, prop=prop, runs_root=runs_root, library_root=library_root, split="all",
                              modes=modes, seed=a.seed, tag="", domain_parallel=1, only_domains=only, max_tasks=a.max_tasks,

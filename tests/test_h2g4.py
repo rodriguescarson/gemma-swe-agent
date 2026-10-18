@@ -132,3 +132,24 @@ def test_improver_channel_needs_kind_and_model_together(monkeypatch):
     assert improver_channel().kind == "opencode"
     monkeypatch.setenv("HARNESS2_IMPROVER_MODEL", "claude-sonnet-5-5")
     assert improver_channel().kind == "claude_cli"
+
+
+def test_budget_guard_counts_from_the_sweeps_own_start_and_refuses_at_the_cap(tmp_path):
+    from harness2.core.proposer import ProposerError
+    from h2g4.run import BudgetGuard
+    usage = iter([100.0, 104.0, 109.9, 110.0])
+    g = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: next(usage))
+    assert g.start == 100.0 and g.check("a") == 4.0 and g.check("b") == pytest.approx(9.9)
+    with pytest.raises(ProposerError, match="budget reached"):
+        g.check("c")
+    g2 = BudgetGuard(10.0, tmp_path / "_budget.json", usage=lambda: 105.0)        # a restarted sweep keeps its own start
+    assert g2.start == 100.0 and g2.spent() == 5.0
+
+
+def test_improver_steps_default_and_override(monkeypatch):
+    from h2g4.swe import improver_channel
+    monkeypatch.setenv("HARNESS2_IMPROVER_MODEL", "openrouter/anthropic/claude-fable-5.1")
+    monkeypatch.delenv("H2G4_IMPROVER_STEPS", raising=False)
+    assert improver_channel().steps == 60
+    monkeypatch.setenv("H2G4_IMPROVER_STEPS", "30")
+    assert improver_channel().steps == 30 and improver_channel().kind == "opencode"
