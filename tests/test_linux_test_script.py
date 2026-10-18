@@ -129,3 +129,17 @@ def test_the_container_pytest_log_is_copied_to_the_host():
     full = t[t.index('bash -c "$V10_SCRIPT"'):]
     assert "cp /tmp/v10_pytest.log /out/v10_pytest.log" in v10 and "cp /tmp/full.log /out/full.log" in full
     assert "linux_test_out" in (S.parents[1] / ".gitignore").read_text()
+
+
+def test_both_container_branches_pin_mcp_and_litellm_to_the_mac_venv():
+    """2026-10-18: the v12b ship's Linux stage failed 12 ADK flow tests with litellm's 'cannot import name CacheableResult
+    from mcp.types': the container resolves the harness wheels' dependencies from PyPI on every run, and a fresh resolution
+    paired an mcp and a litellm that do not import together. Both container branches pin them to the versions the Mac
+    venv (where the suite passes) runs, read live here so a deliberate upgrade only needs the venv and the script to agree."""
+    import importlib.metadata as m
+    t = S.read_text()
+    want = f"mcp=={m.version('mcp')} litellm=={m.version('litellm')}"
+    v10 = t[t.index('pip -q install harness/wheels/*.whl >/dev/null 2>&1 || echo "WARN harness wheels'):]
+    full = t[t.index('bash -c "$V10_SCRIPT"'):]
+    assert want in v10.split("\n", 2)[1] or want in v10.split("\n", 1)[0], v10[:300]
+    assert f"pip -q install {want}" in full, full[:600]
