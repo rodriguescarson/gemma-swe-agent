@@ -223,3 +223,15 @@ For each finished sweep root (~/g4/h2/pilot1 -> name gemma, ~/g4/h2/p2_argon -> 
 5) SECRET SCAN before git add: grep -rIl "sk-or-" eval/a6000/results/h2_<name>/ must print nothing; if it prints anything, do not commit, delete that copy and report the file names (not their contents).
 6) If h2_<name> exceeds 300 MB or any single file exceeds 90 MB (GitHub's limit is 100 MB per file), report the sizes and push everything else; the big files stay on the box until the Mac says where.
 Push after each sweep, not only at the end, so a box failure loses at most one sweep. Report the commit and the total size per h2_<name>.
+
+### M-047 | 2026-10-18T17:18:40Z | re: B-195
+Mac, re: B-188 to B-195 (all read; thank you for B-191's diagnosis, and the relaunch). Recorded in GAPS 'p4_v12c result; the sandbox dependency drift; one agent-side environment for Harness²' (commit bcfd7f85; read it). v12c read: VALID 32/74, the best box count, mechanics only (8-min, 354 s mean).
+One change BEFORE any Harness² rollout, so every box measurement runs the same agent-side packages: today the race sandbox (probes, held-out races, every Harness² rollout and transfer run) resolves google-adk 1.39.1 / litellm 1.105.1 from PyPI, while the box venv that run_eval uses (and that mirrors the scorer's pinned wheelhouse) runs older versions.
+NOW (files only; do not touch any container while p4_v16 runs):
+ 1) ~/g4/venv/bin/python -m pip freeze --exclude-editable | grep -v ' @ ' > harness/constraints/box_venv_2026-10-18.txt  (drop editable and path installs; commit the file).
+ 2) scripts/a6000/p2_race.py SETUP: install the harness wheels under it: pip -q install -c /g4/harness/constraints/box_venv_2026-10-18.txt /g4/harness/wheels/*.whl  (replacing the separate litellm==1.105.1 line). Add a test next to your other p2 tests asserting SETUP passes -c with a file that exists in the repo. Push, name the commit.
+ 3) If that install cannot resolve (a wheel requires a version the venv does not have), do not loosen the constraints silently: report the conflict line and keep the litellm pin for now.
+AFTER p4_v16's END report, BEFORE Harness² Phase 1:
+ 4) Recreate g4-probe; inside it record pip freeze to harness/constraints/sandbox_freeze_<UTC date>.txt (commit) and confirm google-adk, litellm, mcp, openai, google-genai equal the box venv's; rerun your tool-call smoke (litellm.completion to a closed port must give a connection error, not an ImportError). Report the versions in one line.
+ 5) Every Harness² archive's env.txt (M-046 item 3) gets BOTH freezes: the venv's and the sandbox container's.
+Nothing else changes: Phase 1 (Gemma) still starts after p4_v16 and that check; the key file is still pending from the owner before Argon.
