@@ -14,8 +14,8 @@ def git(*a):
     return subprocess.run(["git", "-C", str(ROOT), *a], capture_output=True, text=True).stdout.strip()
 
 
-def first_commit_adding(text=None, path=None):
-    args = ["log", "--reverse", "--format=%H %ct"] + (["-S", text, "--", GAPS] if text else ["--diff-filter=A", "--", path])
+def first_commit_adding(text=None, path=None, rule_file=GAPS):
+    args = ["log", "--reverse", "--format=%H %ct"] + (["-S", text, "--", rule_file] if text else ["--diff-filter=A", "--", path])
     line = (git(*args).splitlines() or [""])[0]
     return (line.split()[0], int(line.split()[1])) if line else (None, None)
 
@@ -30,7 +30,7 @@ def main():
     bad = 0
     print("| claim | kind | rule commit | results (first commit) | order |\n|---|---|---|---|---|")
     for cid, c in spec["claims"].items():
-        rc, rt = first_commit_adding(text=c["rule"]) if c["rule"] else (None, None)
+        rc, rt = first_commit_adding(text=c["rule"], rule_file=c.get("rule_file", GAPS)) if c["rule"] else (None, None)
         if c["rule"] and not rc:
             print(f"| {cid} | {c['kind']} | NOT FOUND: {c['rule']!r} | | FAIL |"); bad += 1; continue
         cells, verdicts = [], []
