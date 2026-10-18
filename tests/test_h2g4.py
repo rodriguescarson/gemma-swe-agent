@@ -292,3 +292,34 @@ def test_evaluate_freezes_the_harness_and_refuses_a_swap_under_the_same_label(tm
     assert table["harness"] == str(frozen) and table["fingerprint"] == fingerprint(HT.read_tree(ADK_SURFACE, cand))
     (cand / "guardrails.md").write_text("- Something else.\n")              # the source changes after freezing
     assert evaluate(ad, cand, "fable", ["boltons_139d5dc"]) == 1              # refused: a different tree under the label
+
+
+def test_every_improver_prompt_builds_for_the_adk_surface():
+    """2026-10-18 (box B-203): every Propose stage failed with "no prompt surface for 'adk'" because harness2's prompts keep a
+    per-substrate text and h2g4 never registered one; the 20 tests above never built an improver prompt. This builds every
+    prompt the recursion and selection use, in both prompt packs, through the real harness2 functions."""
+    import dataclasses
+    from harness2.core import prompts as P
+    from h2g4.adk import ADK_SURFACE
+    from h2g4.swe import SWE_PROMPTS
+    for bp in (SWE_PROMPTS, dataclasses.replace(SWE_PROMPTS, prompt_pack="tts")):
+        jobs = [P.propose(bp, "INV", ADK_SURFACE), P.propose(bp, "DOM", ADK_SURFACE),
+                P.propose(bp, "INV", ADK_SURFACE, k=2, index=2), P.propose(bp, "DOM", ADK_SURFACE, round_t=1),
+                P.aggregate(bp, ADK_SURFACE), P.compose_round(bp, ADK_SURFACE, t=1, k=1)]
+        for j in jobs:
+            assert isinstance(j, str) and len(j) > 500
+        body = "\n".join(jobs)
+        assert "run_skill_script" in body
+        assert "plugin/<name>.ts" not in body and "`task` tool" not in body and "mode: subagent" not in body
+    st = P._st(ADK_SURFACE)
+    assert "NO CURLY BRACES" in st.surface_md and "5 minutes" in st.surface_md
+    assert "__LOOP_LEVER__" not in st.inv and "__TRIGGER_SENTENCE__" not in st.dom
+
+
+def test_the_adk_surface_text_matches_what_validation_enforces():
+    """The rules the improver is told must be the rules tree_problems and harness2's skill check enforce."""
+    from h2g4.adk import tree_problems
+    from h2g4.prompts_adk import SURFACE_ADK
+    assert "sub_agents/" in SURFACE_ADK and "plugin/" in SURFACE_ADK and "16,000 characters" in SURFACE_ADK
+    errs = " | ".join(tree_problems({"systemprompt.md": "x", "sub_agents/a/AGENT.md": "a", "scripts/h.py": "x", "plugin/p.ts": "x"}))
+    assert "sub-agents" in errs and "top-level scripts" in errs and "plugins" in errs

@@ -15,6 +15,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -202,8 +203,10 @@ class SweAdapter:
     def validate_tree(self, tree: dict[str, str]) -> None:
         errs = tree_problems(tree)
         if not errs:
-            tmp = self.runs_root / "_validate"
-            shutil.rmtree(tmp, ignore_errors=True)
+            # a private directory per call: harness2 validates parallel candidates (INV and DOM) in threads, and a shared
+            # fixed directory let one thread delete what the other was compiling (found by tests/test_h2g4_end_to_end.py)
+            self.runs_root.mkdir(parents=True, exist_ok=True)
+            tmp = Path(tempfile.mkdtemp(prefix="_validate-", dir=self.runs_root))
             try:
                 compose_bundle(tree, tmp)
                 validate_bundle(tmp)

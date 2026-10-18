@@ -227,3 +227,10 @@ class AdkSubstrate:
         missing = [r for r in FIXED if not (self.base / r).is_file()]
         if missing:
             raise RuntimeError(f"base bundle {self.base} is missing {missing}")
+
+
+# The improver prompts need a description of this surface (harness2.core.prompts._SURFACE_TEXTS); register it on import, so
+# any code that uses ADK_SURFACE also has its prompt text (box B-203, 2026-10-18).
+from .prompts_adk import register as _register_prompt_surface  # noqa: E402
+
+_register_prompt_surface()
