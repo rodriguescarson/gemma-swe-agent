@@ -2,7 +2,8 @@
 Guards: .pyc/__pycache__ (sweep v2 died on this), AppleDouble ._ files (smoke run died), non-kebab skill names, unknown tools."""
 import os, re, subprocess, sys, pathlib, pytest
 ROOT = pathlib.Path(__file__).parent.parent
-BUNDLES = sorted(p for p in (ROOT / "submissions").iterdir() if (p / "agent.yaml").exists())
+# _h2_<id>: Harness² candidates the box stages for its race runner (h2g4/swe.py RaceLauncher; git-ignored, never shipped)
+BUNDLES = sorted(p for p in (ROOT / "submissions").iterdir() if (p / "agent.yaml").exists() and not p.name.startswith("_h2_"))
 REAL_TOOLS = {"run_command", "read_file", "edit_file", "write_file", "get_status", "submit_patch", "get_code_neighbors", "search_similar_code", "get_code_subgraph"}
 ALLOWED_EXT = {".yaml", ".yml", ".md", ".txt", ".py", ".json", ".safetensors"}
 

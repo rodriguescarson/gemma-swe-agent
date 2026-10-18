@@ -96,14 +96,30 @@ def test_launcher_stages_once_and_calls_the_race_runner_per_run(tmp_path):
     L = RaceLauncher(tmp_path / "runs", dry=True, stage_root=stage)
     inst = Install(staging_dir=src, fingerprint="ab" * 32)
     dirs = L(RunRequest(task_ref="tomlkit_abc1234", run_ids=("r1", "r2"), timeout=600), inst)
-    assert (stage / "_staging" / ("h2_" + "ab" * 6) / "agent.yaml").is_file()
+    arm = "_h2_" + "ab" * 6
+    assert (stage / arm / "agent.yaml").is_file()
     assert [d.name for d in dirs] == ["tomlkit_abc1234", "tomlkit_abc1234"]
-    assert dirs[0].parent.name == "h2_" + "ab" * 6 and dirs[0].parents[3].name == "r1"
+    assert dirs[0].parent.name == arm and dirs[0].parents[2].name == "r1"
     assert len(L.calls) == 2
     cmd = L.calls[0]
     assert cmd[1].endswith("scripts/a6000/p2_race.py") and cmd[cmd.index("--conc") + 1] == "1"
-    assert cmd[cmd.index("--arms") + 1] == "_staging/h2_" + "ab" * 6 and "--keep" in cmd
+    assert cmd[cmd.index("--arms") + 1] == arm and "--keep" in cmd
     assert (Path(cmd[2]) / "ids.txt").read_text() == "tomlkit_abc1234\n"
+
+
+def test_the_race_command_survives_the_containers_own_copies(tmp_path):
+    """2026-10-19 (box B-206): inside its container p2_race runs `cp -r "/g4/$HARNESS" /root/h` and
+    `cp -r /g4/submissions/$a /tmp/bundle_$a` with the repo mounted at /g4. An absolute --harness became /g4//home/... and every
+    rollout's setup failed; an arm with a slash (the old _staging/h2_x) would fail the second copy for want of a parent dir.
+    Both copies are replayed here against the real repo layout."""
+    from harness2.substrate.base import Install
+    L = RaceLauncher(tmp_path / "runs", dry=True)
+    cmd = L.command(tmp_path / "out", tmp_path / "ids.txt", L.arm(Install(staging_dir=tmp_path, fingerprint="cd" * 32)))
+    harness = cmd[cmd.index("--harness") + 1]
+    arm = cmd[cmd.index("--arms") + 1]
+    assert not harness.startswith("/") and (ROOT / harness / "manifest.json").is_file(), harness   # /g4/$HARNESS exists
+    assert "/" not in arm and arm.startswith("_h2_"), arm                                           # /tmp/bundle_$a is flat
+    assert (ROOT / "submissions").is_dir()                                                          # /g4/submissions/$a
 
 
 @pytest.mark.skipif(not ROW.is_dir(), reason="needs a race item from the box")

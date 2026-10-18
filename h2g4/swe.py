@@ -93,8 +93,8 @@ def improver_channel() -> ChannelSpec:
 
 
 class RaceLauncher:
-    """One rollout = one scripts/a6000/p2_race.py call for one task, the candidate bundle staged under
-    submissions/_staging/h2_<fingerprint12>; serialised behind a lock."""
+    """One rollout = one scripts/a6000/p2_race.py call for one task, the candidate bundle staged as
+    submissions/_h2_<fingerprint12> (flat, git-ignored); serialised behind a lock."""
 
     def __init__(self, runs_root: Path, *, harness: Path = HARNESS, port: int = 8001, python: str = sys.executable,
                  dry: bool = False, stage_root: Path = ROOT / "submissions"):
@@ -104,10 +104,15 @@ class RaceLauncher:
         self.calls: list[list[str]] = []
 
     def arm(self, install: Install) -> str:
-        return f"_staging/h2_{install.fingerprint[:12]}"
+        # flat: p2_race copies /g4/submissions/<arm> to /tmp/bundle_<arm> inside its container, so a slash in the name breaks it
+        return f"_h2_{install.fingerprint[:12]}"
+
+    def harness_arg(self) -> str:
+        # repo-relative: p2_race copies "/g4/$HARNESS" inside its container, with the repo mounted at /g4 (box B-206)
+        return str(Path(self.harness).resolve().relative_to(ROOT.resolve()))
 
     def command(self, out: Path, ids_file: Path, arm: str) -> list[str]:
-        return [self.python, str(ROOT / "scripts" / "a6000" / "p2_race.py"), str(out), "--harness", str(self.harness),
+        return [self.python, str(ROOT / "scripts" / "a6000" / "p2_race.py"), str(out), "--harness", self.harness_arg(),
                 "--ids", str(ids_file), "--arms", arm, "--conc", "1", "--port", str(self.port), "--keep",
                 "--label", "h2"]
 
