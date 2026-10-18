@@ -1371,3 +1371,23 @@ Box, 2026-10-18T14:01:40Z, re: M-041. p4_v16 LAUNCHED. This was after B-188 (p4_
 - Plan: the p4_v13 runtime plan with v13 replaced by v16, with no pair step. probe_v16: scripts/a6000/p2_probe.py /home/jc/g4/runs/p2 --harness data/heldout1k/harness_s200 --ids data/heldout1k/s200_valid_ids.txt --arms v16 --levels 2 | p4_v16: scripts/a6000/run_eval.py /home/jc/g4/gemma-swe-agent/submissions/v16 /home/jc/g4/runs/p4_v16 --ids /home/jc/g4/gemma-swe-agent/data/forty_two_screen_order.txt --port 8002 --resume. Proxy 8002 -> ~/g4/runs/p4_v16_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "v16". The v12c state and plan were kept as autopilot_*_v12c_done.json.
 - AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 34. "2026-10-18T13:57:51Z | LAUNCH stage 1a; HARD STOP 2026-10-18T22:57:51Z". "2026-10-18T14:00:03Z | step=probe_v16 | EVENT started pid 887 (restarts so far 0; hard stop in 9.0 h)".
 - The probe-rule guard and the stall watcher are running. Hourly lines will carry the leak scan, decode and GPU lines, zero-call count, running median and mean seconds, cap count at 5 min, and the 42 line.
+
+### B-190 | 2026-10-18T14:04:47Z | re: M-042
+Box, re: M-042 (part A) / M-045. Harness² part A done; all checks pass. (Correction: B-189, the p4_v16 launch report, went out tagged --re M-040; it answers M-041.)
+- git pull: HEAD 424f1e89 contains c48705e3, 02053a0b, 80258412 and 2e488e93.
+- WSL had no Node.js and no uv. The only npm on PATH was the Windows one under /mnt/c, which the box does not use. Both were installed user-level, with no sudo:
+  - Node.js v20.20.2 / npm 10.8.2 via nvm v0.40.1 (~/.nvm; `. ~/.nvm/nvm.sh` before use; the profile was not modified).
+  - uv 0.6.14 via Astral's standalone installer to ~/.local/bin (UV_NO_MODIFY_PATH=1).
+  box_setup.sh was run with the /mnt/c entries stripped from PATH, so the Windows node and npm cannot be picked up.
+- Before running box_setup.sh, the box checked harness2's pyproject: `dependencies = []`. The editable install into ~/g4/venv therefore adds only harness2 and changes no package that the running p4_v16 (vLLM, run_eval, adk) uses. Run in parallel with p4_v16's probe; no GPU use.
+- `bash h2g4/box_setup.sh`: rc 0. Last lines:
+```
+4755 packages installed [15.34s]
+OPENCODE /home/jc/g4/harness2/dependencies/opencode/packages/opencode/src/index.ts True
+BUN /home/jc/g4/harness2/dependencies/tools/node_modules/.bin/bun True
+h2 setup OK (harness2 1cfe254e8d25b15f37048c3730134686abe60335)
+```
+  ~/.config/opencode/opencode.json is written. No earlier config existed, so nothing was backed up.
+- `python -m pytest -q tests/test_h2g4.py tests/test_a6000_serve.py`: 28 passed. test_h2g4.py alone: 20 passed (the count M-045 expects). The serve dry-run tests all ran here (8 passed), including test_served_alias_is_opt_in_and_keeps_the_path_first PASSED.
+- Key file ~/g4/.h2_openrouter_env: not present yet (checked existence only). Per M-044 the order is Gemma (Phase 1) first, which needs no key. The key must be in place before Argon.
+- Part B waits for p4_v16's END report and the GPU hold check.
