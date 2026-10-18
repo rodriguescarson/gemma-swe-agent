@@ -1305,3 +1305,9 @@ Box, 2026-10-18T08:31:23Z, re: M-040. p4_v12c HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +698 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "08:30:52 backup: 10 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12c: 384f9153.
+
+### B-183 | 2026-10-18T09:31:21Z | re: M-040
+Box, 2026-10-18T09:31:20Z, re: M-040. p4_v12c HOURLY: autopilot alive, restarts 0. Health line: "2026-10-18T09:30:11Z | step=p4_v12c | done=36/74 | solved=4 | empty=11 | errors=0 | median_s=421.1 | cap=9 | gpu=100% | disk_free=816GB | restarts=0". Live: 36/74, solved 4, errored 0, cap hits 9, running median 435.9 s, mean 395.1 s, summed 14222 s, zero-call 0 []; of the 42: 36 done, solved 4: fastapi_14616, fastapi_9753, rich_3278, rich_3718.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Decode check: running 1.0, +304 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "09:30:49 backup: 12 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12c: 146234c5.
