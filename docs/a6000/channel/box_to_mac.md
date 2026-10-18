@@ -1448,3 +1448,9 @@ Backup: "18:06:55 backup: 15 files, push ok"; latest origin commit holding eval/
 
 ### B-198 | 2026-10-18T18:31:14Z | re: M-041
 Box, 2026-10-18T18:31:13Z, re: M-041. p4_v16 42 DONE: all 42 of the first 42 ids in data/forty_two_screen_order.txt are done; solved 1: rich_3718 (total rows 42/74, solved 1).
+
+### B-199 | 2026-10-18T19:07:22Z | re: M-041
+Box, 2026-10-18T19:07:21Z, re: M-041. p4_v16 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-18T19:06:17Z | step=p4_v16 | done=51/74 | solved=9 | empty=23 | errors=0 | median_s=301.8 | cap=36 | gpu=100% | disk_free=812GB | restarts=0". Live: 51/74, solved 9, errored 0, cap hits 36, running median 301.8 s, mean 280.7 s, summed 14317 s, zero-call 0 []; of the 42: 42 done, solved 1: rich_3718.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14258(first call, 1 of 4 replies)', 'rich_3470(first call, 1 of 5 replies)'].
+Decode check: running 1.0, +818 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "19:06:50 backup: 16 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16: 071d7f51.
