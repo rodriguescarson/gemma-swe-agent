@@ -1460,3 +1460,32 @@ Box, 2026-10-18T20:07:20Z, re: M-041. p4_v16 HOURLY: autopilot alive, restarts 0
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14258(first call, 1 of 4 replies)', 'rich_3470(first call, 1 of 5 replies)'].
 Decode check: running 1.0, +838 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "20:06:49 backup: 14 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16: 83f39775.
+
+### B-201 | 2026-10-18T20:53:37Z | re: M-041
+Box, re: M-041. p4_v16 END. The run was NOT stopped and ran to completion (relaunched at 14:51Z after the sandbox fix, B-192).
+
+END line: "2026-10-18T20:52:22Z | step=p4_v16 | END done: done=74/74 solved=22". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. Cleanup: no compute apps, no vllm pids, 366 MiB in use. "DONE 2026-10-18T20:53:05Z (all steps finished)". Results are on origin at eval/a6000/results/p4_v16, byte-identical to the box, commit 52d2a504. Autopilot restarts: 0. The stall watcher never fired, and there were 0 zero-call rows.
+
+Seconds over the 74: MEAN 280.6 s, median 301.8 s, summed 20763 s. 46 rows hit the 5-min cap; the longest was 483.8 s, a single overrun.
+
+screen_read.py (whole):
+```
+INVALID solved 22/74 (ref 28) paired +1 -7 net -6 p 0.07 | the 42: 1 | cap 46 | malformed 21 edit/write ok 88 attempts 125 commands>=61s 1 template edits 0 refused 0
+wins: rich_3718
+losses: fastapi_11194 fastapi_5624 fastapi_9425 rich_2725 rich_3006 rich_3506 rich_3521
+the 42 solved: rich_3718
+```
+INVALID comes from the v13-lever mechanics clauses only (edit/write ok 88, commands>=61s 1); v16 declares edit_file and write_file. Malformed count: 21.
+box_p4_gate: `FAIL solved 22/74 crash 0 errored 0 cap 46 missing 0 secs 20763 (floor 26)`. Crash 0, missing 0.
+Errored ids: all 46 have "Agent exceeded session timeout (5.0 min)"; there is no other error text. They are fastapi_11194, fastapi_13920, fastapi_14306, fastapi_14419, fastapi_14448, fastapi_14616, fastapi_14851, fastapi_14986, fastapi_15280, fastapi_15589, fastapi_15661, fastapi_15800, fastapi_5624, fastapi_9425, fastapi_9753, requests_6644, rich_2725, rich_3006, rich_3052, rich_3061, rich_3063, rich_3105, rich_3180, rich_3278, rich_3468, rich_3470, rich_3471, rich_3472, rich_3480, rich_3506, rich_3521, rich_3675, rich_3676, rich_3772, rich_3777, rich_3782, rich_3930, rich_3934, rich_3935, rich_3938, rich_3942, rich_3944, rich_3953, rich_4006, rich_4075 and rich_4079.
+The 42: 42 done, 1 solved (rich_3718).
+Final leak scan: zero-call rows 0; "without calling submit_patch" rows 0. Text-leak rows 2, both recovered: fastapi_14258 (first call, 1 of 4 replies) and rich_3470 (first call, 1 of 5 replies).
+Paired comparisons (same 74 ids, sign test):
+- vs p4_v12: v16 22 vs 27. Wins 2 (fastapi_13537, fastapi_14463). Losses 7 (fastapi_11194, fastapi_5624, fastapi_9425, rich_2725, rich_3006, rich_3676, rich_3777). Net -5, F 9, p 0.180.
+- vs p4_v12c: v16 22 vs 32. Win 1 (fastapi_14873). Losses 11 (fastapi_11194, fastapi_14616, fastapi_14851, fastapi_15589, fastapi_5624, fastapi_9425, fastapi_9753, rich_2725, rich_3006, rich_3278, rich_3676). Net -10, F 12, p 0.006.
+- vs p4_pub024: v16 22 vs 31. Win 1 (fastapi_14873). Losses 10 (fastapi_14419, fastapi_14851, fastapi_9425, fastapi_9753, rich_2725, rich_3006, rich_3180, rich_3278, rich_3676, rich_3777). Net -9, F 11, p 0.012.
+- vs p4_v12b: v16 22 vs 28. Wins 0. Losses 6 (fastapi_11194, fastapi_14851, fastapi_9425, rich_2725, rich_3006, rich_3777). Net -6, F 6, p 0.031.
+- vs p4_v12a: v16 22 vs 29. Wins 3 (fastapi_14873, fastapi_5077, rich_4077). Losses 10 (fastapi_11194, fastapi_14419, fastapi_14851, fastapi_15589, fastapi_9425, fastapi_9753, rich_2725, rich_3006, rich_3278, rich_3471). Net -7, F 13, p 0.092.
+Many of the losses (fastapi_11194, fastapi_14851, fastapi_9425, rich_2725, rich_3006) are rows solved by most earlier arms that hit the 5-min cap here: pub024's prompt with 5 minutes appears to spend the budget before editing.
+v7_counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 13, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 1, "budget_exhausted_tasks": 2, "helper_unreachable_tasks": 0, "tasks": 74, "solved": 22}. Verdict: pass false, failing ["write_file_path_refusals"]. This is the must-zero rule of our bundles that pub024's prompt trips (10 in p4_pub024, 16 in p4_v12c).
+Next per M-047/M-048: recreate g4-probe under the constraints, freeze it to harness/constraints, compare the five packages, run the tool-call smoke, then Harness² Phase 1 (Gemma).
