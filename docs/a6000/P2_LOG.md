@@ -3379,3 +3379,4 @@ not run (no capture)
 - 2026-10-18T15:05:32Z | step=probe_v16 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
 - 2026-10-18T15:06:08Z | step=p4_v16 | EVENT started pid 14488 (restarts so far 0; hard stop in 8.8 h)
 - 2026-10-18T16:06:08Z | step=p4_v16 | done=12/74 | solved=0 | empty=5 | errors=0 | median_s=302.1 | cap=8 | gpu=100% | disk_free=812GB | restarts=0
+- 2026-10-18T17:06:11Z | step=p4_v16 | done=24/74 | solved=0 | empty=12 | errors=0 | median_s=302.1 | cap=20 | gpu=0% | disk_free=812GB | restarts=0
