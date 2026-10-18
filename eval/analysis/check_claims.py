@@ -47,6 +47,8 @@ def main():
             st = datetime.fromisoformat(s["date"]).replace(tzinfo=timezone.utc).timestamp()
             ok = rt is None or rt < st
             cells.append(f"kaggle {ref}: {iso(st)}"); verdicts.append("ok" if ok else "VIOLATION")
+        if not verdicts:
+            verdicts.append("pending")                     # a rule with no result yet is pending, never ok
         v = "FAIL" if "VIOLATION" in verdicts else ("pending" if "pending" in verdicts else ("post hoc" if rc is None else "ok"))
         bad += v == "FAIL"
         rule = f"{rc[:8]} {iso(rt)}" if rc else "none (observed)"

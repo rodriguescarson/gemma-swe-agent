@@ -14,6 +14,8 @@
 | D3 | pre-registered | 80258412 2026-10-18 11:26Z | h2_transfer: pending | pending |
 | D4 | observed | none (observed) | h2_gemma: pending; h2_argon: pending; h2_fable: pending; h2_astra: pending | pending |
 | D5 | pre-registered | 2e488e93 2026-10-18 11:30Z | h2_argon: pending; h2_fable: pending; h2_astra: pending | pending |
+| C9 | observed | none (observed) | results.jsonl: 9088bb83 2026-10-18 16:06Z; results.jsonl: 77beafad 2026-10-18 06:30Z; results.jsonl: b9dc61d0 2026-10-16 13:09Z | post hoc |
+| C10 | pre-registered | b25f5f95 2026-10-18 20:54Z |  | pending |
 
 Exceptions (disclosed in-place edits):
 - 7712cf82: 16 Oct: three GAPS heading timestamps corrected in place (11:40/12:30/12:45 -> 11:20/11:28/11:31 IST) to match the channel's UTC stamps; content unchanged; disclosed in the same commit's GAPS entry (commit date 2026-10-16 11:39:55 +0530)

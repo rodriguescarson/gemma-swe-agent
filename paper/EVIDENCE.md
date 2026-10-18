@@ -103,3 +103,7 @@ claim): the public prompt solves late. At a 300 s cutoff, v12 keeps 27 of 27 sol
   selection), and transfer is read on held-out repositories; its third (a compute-matched test-time-scaling baseline) is
   only partly answerable here, because the deliverable is a static harness, not test-time search: the in-sweep base
   reruns are reported as the matched no-evolution baseline.
+
+Correction (19 Oct, 02:45 IST): the line above says the late-solve observation was "recorded here before any v16 row is final".
+The chronology checker showed p4_v16 rows were already on origin (first added 16:06Z; 51 of 74 seen by the author) when it was
+written (19:30Z). It is an observation, not a blind prediction; claim C9 in eval/analysis/claims.json says so.
