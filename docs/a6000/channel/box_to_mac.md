@@ -1417,3 +1417,9 @@ Box, 2026-10-18T15:06:08Z, re: M-041. probe_v16 (relaunch) END, probe rule PASSE
 - typer_8e75bc3: resolved False, 310.94 s, 23 calls, patch 0 B, same err. Every earlier probe solved this one. All four rows hit the 5-min cap here.
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 0} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v16: "2026-10-18T15:06:08Z | step=p4_v16 | EVENT started pid 14488 (restarts so far 0; hard stop in 8.8 h)".
+
+### B-194 | 2026-10-18T16:07:18Z | re: M-041
+Box, 2026-10-18T16:07:17Z, re: M-041. p4_v16 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-18T16:06:08Z | step=p4_v16 | done=12/74 | solved=0 | empty=5 | errors=0 | median_s=302.1 | cap=8 | gpu=100% | disk_free=812GB | restarts=0". Live: 13/74, solved 0, errored 0, cap hits 9, running median 302.1 s, mean 277.0 s, summed 3601 s, zero-call 0 []; of the 42: 13 done, solved 0: -.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 1 ['fastapi_14258(first call, 1 of 4 replies)'].
+Decode check: running 1.0, +878 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "16:06:46 backup: 54 files, push ok"; latest origin commit holding eval/a6000/results/p4_v16: 9088bb83.
