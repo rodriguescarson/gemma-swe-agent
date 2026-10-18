@@ -23,6 +23,9 @@ set -euo pipefail
 apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y git patch >/dev/null 2>&1
 pip -q install uv >/dev/null 2>&1
 pip -q install /g4/harness/wheels/*.whl >/dev/null 2>&1
+# 2026-10-18: litellm 1.106.0 (PyPI, unpinned via the harness wheels) imports mcp.types.CacheableResult, which google-adk's
+# mcp<2 cap does not have -> every model call fails (probe_v16, B-191); 1.105.1 tested clean in the sandbox
+pip -q install "litellm==1.105.1" >/dev/null 2>&1
 export PYTHONDONTWRITEBYTECODE=1 UV_LINK_MODE=copy
 ln -sfn /g4/data/raw/wheels /wheels
 python - <<'PY' > /tmp/newest.txt
