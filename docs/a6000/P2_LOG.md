@@ -3374,3 +3374,5 @@ not run (no capture)
 - 2026-10-18T14:00:03Z | step=probe_v16 | EVENT started pid 887 (restarts so far 0; hard stop in 9.0 h)
 - 2026-10-18T14:05:03Z | step=probe_v16 | END done: done=0/4 solved=0
 - 2026-10-18T14:51:26Z | LAUNCH stage 1a; HARD STOP 2026-10-18T23:51:26Z
+- 2026-10-18T14:53:30Z | step=probe_v16 | EVENT started pid 10933 (restarts so far 0; hard stop in 9.0 h)
+- 2026-10-18T15:05:30Z | step=probe_v16 | END done: done=0/4 solved=0
