@@ -386,3 +386,12 @@ def test_pending_with_passes_skips_only_finished_pass_dirs(tmp_path):
 def test_pass_port_mapping():
     assert race.port_for(8003, 1, [8003, 8004, 8005, 8006]) == 8003 and race.port_for(8003, 3, [8003, 8004, 8005, 8006]) == 8005
     assert race.port_for(8001, 1, []) == 8001 and race.port_for(8001, 2, []) == 8001            # no per-pass ports: the base port
+
+
+def test_race_setup_installs_the_wheels_under_the_box_venv_constraints():
+    """M-047: the sandbox installs the harness wheels with -c <a constraints file in the repo>, so PyPI drift
+    (litellm 1.106.0, B-191) cannot reach probes, races or Harness2 rollouts."""
+    import re
+    m = re.search(r"pip -q install [^\n]*-c /g4/(\S+) /g4/harness/wheels/\*\.whl", race.SETUP)
+    assert m and (ROOT / m.group(1)).is_file()
+    assert "litellm==" not in race.SETUP
