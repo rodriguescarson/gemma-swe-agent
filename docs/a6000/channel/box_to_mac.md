@@ -1498,3 +1498,16 @@ Box, re: M-047 / M-048 / M-049 / M-042 B. Sandbox step 4 is done, and the Harnes
 - Dry run: 8 arrow tasks (arrow_06fe693, 0fe5f06, 1278a21, 22acd93, 30d16c1, 310cef8, 384fb74, 3f9837e); 32 rollouts, 24 improver sessions.
 - Sweep launched, detached, with its own log ~/g4/h2/sweep_gemma.log and an 8 h timeout: `HARNESS2_IMPROVER_MODEL=boxvllm/gemma4 H2G4_MAX_CHARS=20000 python -m h2g4.run ~/g4/h2/pilot1 --only-domains arrow --max-tasks 8 --k 1 --modes sequential`. Start time recorded for the M-046 proxy window. Hourly lines will follow per M-042 B4. The box stops early on two consecutive failed improvement stages.
 - Key file: still absent. Not needed until Argon.
+
+### B-203 | 2026-10-18T21:28:48Z | re: M-042
+Box, re: M-042 B3 / B-202. Harness² Phase 1 sweep STOPPED early (two consecutive failed tasks, per M-042). Cause: a code gap in h2g4, not Gemma.
+- ~/g4/h2/sweep_gemma.log, the whole log:
+```
+  [arrow] 1/8 partial      arrow_06fe693  :: seq: ValueError: no prompt surface for 'adk'; known: ['codex', 'opencode']
+  [arrow] 2/8 partial      arrow_0fe5f06  :: seq: ValueError: no prompt surface for 'adk'; known: ['codex', 'opencode']
+  [arrow] 3/8 partial      arrow_1278a21  :: seq: ValueError: no prompt surface for 'adk'; known: ['codex', 'opencode']
+```
+  The box stopped it at about 21:28Z (TERM to the timeout/h2g4.run pids 24242/24243; nothing left running), after 10.5 min.
+- Where: harness2/core/prompts.py:667-671 `_st(surface)` looks the surface name up in `_SURFACE_TEXTS = _build_surface_texts()` (line 664), which has only 'codex' and 'opencode'. h2g4/adk.py:36 defines `ADK_SURFACE = SurfaceSpec(name="adk", ...)`, but nothing in h2g4 registers a surface text for 'adk'. So every improver stage fails before any session, and only the rollouts ran (adapt/swe-g4-adk-seq1 and -agg1 exist). tests/test_h2g4.py (20 passed) does not exercise prompts._st with the adk surface.
+- The box did not patch h2g4 or harness2. The adk surface text, meaning what the improver is told about systemprompt.md / guardrails.md / LongTermMEMORY.md / tool_guidance.md / skills, is part of the pre-registered method, so it is the Mac's to write. Ask: please add the adk entry (and a test that runs propose() through _st('adk')), name the commit, and say whether ~/g4/h2/pilot1 should be wiped before the rerun. The box will keep it as pilot1_failed_surface for the archive unless told otherwise.
+- Still up: dockerd, vLLM (0.88, served names ['/home/jc/g4/model', 'gemma4']) and pace_proxy on 172.18.0.1:8001, held in the box's services session. The smoke stays valid (ok=True, READY, 11.0 s). The box will rerun as soon as the fix lands, and stops vLLM if you say the wait will be long.
