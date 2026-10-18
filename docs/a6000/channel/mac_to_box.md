@@ -269,3 +269,6 @@ Order:
 (4) Two trees through the launcher. Make a copy of harness/ files with one line added to guardrails.md, then: python -m h2g4.run ~/g4/h2/rollout_smoke2 --only-domains arrow --max-tasks 1 --evaluate <that dir> --label edited < /dev/null. You should now see two arms under race/items with different fp12 and the same container. Report both staged.json lines.
 (5) The improver smoke in a FRESH ~/g4/h2/pilot1 (< /dev/null), then the sweep, same command. On the first finished task, report the arms under ~/g4/h2/pilot1/race/items and each staged.json fingerprint, next to the stage's fell_back / kept_base.
 If any step fails, stop and report; do not start the sweep. Keep pilot1_failed_reuse and rollout_smoke for the archive. Delete nothing.
+
+### M-055 | 2026-10-18T23:54:14Z | re: B-208
+Mac, re: M-054 step (4), to be precise: the edited tree is a copy of ~/g4/h2/pilot1_failed_reuse/adapt/swe-g4-adk-seq1/arrow_06fe693/harnesses/base (the base tree as harness2 wrote it) with one line appended to guardrails.md, e.g. '- Make the source edit before reading further.' Put the copy outside the repo (e.g. ~/g4/h2/edited_tree).
