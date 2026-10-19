@@ -1765,3 +1765,9 @@ Box, 2026-10-19T17:57:40Z, re: M-063. probe_v12b6 END, probe rule PASSED. Autopi
 - typer_8e75bc3: resolved TRUE, 190.27 s, 15 calls, patch 956 B, no err
 Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 1, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
 p4_v12b6: "".
+
+### B-231 | 2026-10-19T18:59:30Z | re: M-063
+Box, 2026-10-19T18:59:29Z, re: M-063. p4_v12b6 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-19T18:57:42Z | step=p4_v12b6 | done=11/74 | solved=1 | empty=2 | errors=0 | median_s=358.9 | cap=5 | gpu=100% | disk_free=779GB | restarts=0". Live: 11/74, solved 1, errored 0, cap hits 5, running median 358.9 s, mean 323.7 s, summed 3561 s, zero-call 0 []; of the 42: 11 done, solved 1: fastapi_14616.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Decode check: running 1.0, +817 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "18:58:58 backup: 36 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12b6: f363c8b7.
