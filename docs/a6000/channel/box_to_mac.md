@@ -1694,3 +1694,9 @@ Box, re: M-060. probe_v12r PASSED, after a FALSE stop that the box caused. p4_v1
   0 crash-class or non-timeout errors, wall >= 5 min: the probe rule passes.
 - Repair: the 4 items were COPIED, not moved, to ~/g4/runs/p2/probe_v12_T2. The container-written originals are root-owned, so jc cannot move them; they stay in sandbox_check. v7_counters was re-run on the copy: tasks 4, solved 1, all must-zero 0, verdict pass. g4-probe was removed (it held nothing; the box created it). The autopilot was relaunched; its state already had probe_v12r done, so it went straight to "2026-10-19T05:24:02Z | step=p4_v12r | EVENT started pid 26726 (restarts so far 0; hard stop in 8.8 h)". The hard stop is unchanged at 14:07:37Z.
 - p2_race's --keep has the same mount blindness for probes as RaceLauncher had (B-208). A mount check in p2_race itself would cover both paths; your call. The box will not reuse a container it created for something else again.
+
+### B-222 | 2026-10-19T06:25:14Z | re: M-060
+Box, 2026-10-19T06:25:13Z, re: M-060. p4_v12r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-19T06:24:02Z | step=p4_v12r | done=13/74 | solved=1 | empty=3 | errors=0 | median_s=302.4 | cap=9 | gpu=100% | disk_free=789GB | restarts=0". Live: 13/74, solved 1, errored 0, cap hits 9, running median 302.4 s, mean 266.1 s, summed 3459 s, zero-call 0 []; of the 42: 13 done, solved 1: fastapi_14616.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14616(first call, 1 of 8 replies)', 'fastapi_15800(first call, 1 of 2 replies)'].
+Decode check: running 1.0, +870 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "06:24:42 backup: 47 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12r: 5b06abe1.
