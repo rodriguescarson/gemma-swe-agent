@@ -76,3 +76,8 @@ that decide the paper's positioning were re-opened at arxiv.org/abs here:
   (16 of 21 task-SLM pairs improved). NOT in the abstract: Gemma 4 as a target model, and the cheaper-improver-was-worse
   result; both are body claims from the subagent, unconfirmed here.
 Rule: any number or body-level claim from this file is re-checked against the paper's own text before it enters the writeup.
+
+Main-session check (19 Oct, ~05:35 IST), arxiv.org/abs/2602.07150 "On Randomness in Agentic Evals" (Bjarnason, Silva,
+Monperrus): CONFIRMED in the abstract: 60,000 trajectories on SWE-Bench-Verified (three models, two scaffolds); single-run
+pass@1 varies by 2.2-6.0 points depending on the run selected; standard deviations above 1.5 points even at temperature 0;
+recommends multiple runs per task and statistical power analysis (also pass@k / pass^k). Cited in DRAFT_A sections 3.1 and 6.

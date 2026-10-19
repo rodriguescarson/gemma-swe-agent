@@ -62,7 +62,8 @@ Three configurations that scored went to the hidden set twice (post hoc). They c
 zero to one task apart. That is tighter than our local repeat. A likely reason, which we have not tested, is that the
 scorer runs one task at a time with a fixed sampling seed, so a resubmission replays nearly the same samples. If that is
 right, a hidden repeat measures how repeatable the scorer is, not how much a small change to the prompt reshuffles which
-tasks the model happens to solve. PENDING: sub21 resubmits our baseline (seeded) to test this.
+tasks the model happens to solve. Bjarnason et al. (2026) saw spread even at temperature 0, so the guess needs its test:
+PENDING, sub21 resubmits our seeded baseline.
 
 ### 3.2 Neither local screen ordered the hidden scores
 
@@ -188,8 +189,9 @@ agent's score, which is the premise of this competition. Agentless (Xia et al., 
 can compete with free-form agents, and SWE-Effi (Fan et al., 2025) scores agents against token and time budgets; section
 3.3 is a budget result of the same kind.
 
-Bjarnason et al. (2026) document run-to-run noise in agent evaluation on SWE-bench Verified and recommend several runs per
-task (CHECK their numbers in the body before quoting). Kapoor et al. (2024) argue for reporting cost with accuracy and for
+Bjarnason et al. (2026) ran 60,000 SWE-bench Verified trajectories and found that a single run's pass@1 moves by 2.2 to
+6.0 points depending on which run is picked, with spread even at temperature 0; they recommend several runs per task
+and a power analysis. Kapoor et al. (2024) argue for reporting cost with accuracy and for
 holdout sets that agents cannot overfit, and Zhu et al. (2025) show that benchmark flaws can badly misstate agent
 performance. On leaderboards, Blum and Hardt (2015) show how repeated public queries overfit a holdout, while Roelofs et
 al. (2019) found little such overfitting across more than 100 Kaggle competitions. Our disagreement between a local screen
