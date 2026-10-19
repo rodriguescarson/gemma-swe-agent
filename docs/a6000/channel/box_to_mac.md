@@ -1582,3 +1582,16 @@ Box, re: M-056. Steps 1-3 pass; step 4 is running.
     Record .../race/staged/_h2_3e62a2adb576_8477f0/arrow_06fe693.json: fingerprint "3e62a2adb5763727a9c25e0a168375999a268348c156430369d0682862cffff5", system_md_sha256 "64990b48e6650d96cce3336e2bb6066c35397eda4ca16d5e9ca955b5a85c9b56", skills []. Item dir owner jc.
     Note, as one draw each, not a result: the one-line guardrail "- Make the source edit before reading further." solved arrow_06fe693, where the base delivered nothing in both of its smokes.
 (4) Improver smoke, fresh ~/g4/h2/pilot1: "smoke: ok=True channel=opencode model=boxvllm/gemma4 wall=13.7s reply='READY' error=''". The Phase 1 sweep is launched with the same command (< /dev/null, 8 h timeout, log ~/g4/h2/sweep_gemma.log). The first-task arm and record report, and the hourly lines, follow.
+
+### B-211 | 2026-10-19T01:00:23Z | re: M-056
+Box, re: M-056 step 4. The Phase 1 sweep's first task is finished. The pipeline is working end to end, and the sweep continues.
+- Log: "[arrow] 1/8 partial arrow_06fe693 :: seq: selection failed: no candidate produced an artifact (finals-only pool has no base fallback)". This time it is a real outcome, not a launch gap; details below.
+- Arms under ~/g4/h2/pilot1/race/items, with each record's fingerprint, the stage, and the rollout:
+    agg1/base1 arrow_06fe693: _h2_4eb0d28238fb_7549b9, fp 4eb0d28238fb. Resolved False, 22 calls, patch 0 B, 307.77 s, "Agent exceeded session timeout (5.0 min)".
+    seq1/inv1: _h2_6a9749401920_90f3df, fp 6a9749401920. INV: fell_back false, kept_base FALSE (Gemma proposed a new tree). Resolved False, 31 calls, patch 1738 B, 320.72 s, same err.
+    seq1/dom1: _h2_4eb0d28238fb_d37cd7, fp 4eb0d28238fb. DOM: fell_back false, kept_base true. Resolved False, 22 calls, patch 0 B, 307.89 s.
+    seq1/c1: _h2_4eb0d28238fb_b2f197, fp 4eb0d28238fb. COMPOSE: fell_back false, kept_base true. Resolved False, 22 calls, patch 0 B, 307.73 s.
+    agg1/base1 arrow_0fe5f06: _h2_4eb0d28238fb_43bc9b, staged for task 2, still running.
+- Improver sessions, all ok=True: inv1 146.7 s, dom1 128.1 s, c1 103.9 s.
+- My reading: the compose stage kept the base, so the finals pool held only a base rollout with no patch, hence "no artifact". The one changed tree (inv1) did deliver a patch, but it is not in the finals pool. Whether a finals-only pool without a base fallback is the intended selection rule is your call. The box does not change it.
+Hourly lines follow.
