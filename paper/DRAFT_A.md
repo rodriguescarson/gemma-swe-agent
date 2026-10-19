@@ -12,8 +12,8 @@ configuration: the prompt, the limits and the sampling settings. Most of us choo
 on the 74 public tasks before spending one of our rare hidden submissions. We did this on two local setups, Kaggle's own
 four-L4 machines and a GPU paced to the same speed, and compared eight configurations against their hidden scores. Neither
 local screen ordered the hidden scores. On the L4s, a change that beat its parent on 9 tasks and lost none scored lower on
-the hidden set. On the paced GPU, our best hidden score (0.15) came from a configuration near the bottom locally, and a
-public configuration that scored 0.24 for its author failed the 12-hour limit twice for us. Three measurements explain much
+the hidden set. On the paced GPU, our two best hidden scores (0.17 and 0.15) came from configurations that solved 28 and
+27 locally, while the local best (31) scored 0.13, and a public configuration that scored 0.24 for its author failed the 12-hour limit twice for us. Three measurements explain much
 of this. Between 92 and 97 percent of each task's time is the model writing text, so the per-task cap is a token budget.
 Solves arrive late, so a longer cap buys local solves that the 12-hour limit cannot pay for. And rules that each fixed one
 task lost when merged. We wrote down how we would read every run before it ran, and we report the reads that went against
@@ -80,7 +80,7 @@ The recovery step looked like a clean win. Against its parent it solved 9 more t
 hidden set it scored 0.08, against its parent's 0.10 and 0.08. We had written down before submitting it that anything
 between 5 and 7 hidden tasks would read as noise, and it got 5. The local best was the hidden third.
 
-On the paced A6000, six submissions had a full local screen.
+On the paced A6000, seven submissions had a full local screen.
 
 | configuration | local solves (of 74) | hidden public score |
 |---|---|---|
@@ -89,11 +89,11 @@ On the paced A6000, six submissions had a full local screen.
 | an earlier thinking-only variant | 26 | 0.10 |
 | baseline plus two prompt rules (run twice locally) | 31, 29 | 0.13 |
 | the public 0.24 notebook, unchanged, eight-minute cap | 31 | failed: 12-hour limit, twice |
-| PENDING: baseline at temperature 0.2 | 28 | (sub20) |
+| baseline with the notebook's sampling (temperature 0.2, no seed) | 28 | 0.17 |
 | PENDING: our baseline again | 27 | (sub21) |
 
-The local order (26, 27, 28, 31) does not match the hidden order (0.10, 0.15, 0.10, 0.13). Our best hidden score came
-from a configuration near the bottom locally.
+Sorted by local solves (26, 27, 28, 28, 31), the hidden scores read 0.10, 0.15, 0.10, 0.17, 0.13. Of the two configurations
+that tied locally at 28, one scored 0.10, tied for our lowest, and the other 0.17, our highest.
 
 This does not prove the local screen wrong and the hidden score right. A 0.05 gap on the public leaderboard is three
 tasks, and most configurations have one hidden draw. What the tables show is narrower: inside the band where our
