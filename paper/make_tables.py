@@ -20,10 +20,10 @@ OUT = ROOT / "paper" / "tables"
 RUNS = {"p4_v12": ("v12", 300), "p4_b1024": ("v12-b1024", 300), "p4_v0t2": ("v0-think", 300), "p4_v13": ("v13", 300),
         "p4_v13r": ("v13 (replicate)", 300), "p4_v14": ("v14", 300), "p4_v15": ("v15", 300), "p4_v12b": ("v12b", 300),
         "p4_v16": ("v16", 300), "p4_v12a": ("v12a", 480), "p4_v12c": ("v12c", 480), "p4_pub024": ("pub024", 480),
-        "p4_pub024_6m": ("pub024_6m", 360)}
+        "p4_pub024_6m": ("pub024_6m", 360), "p4_v12r": ("v12 (replicate)", 300)}
 PAIRS = [("p4_v13r", "p4_v13"), ("p4_b1024", "p4_v12"), ("p4_v13", "p4_v12"), ("p4_v14", "p4_v13"), ("p4_v15", "p4_v12"),
          ("p4_v12a", "p4_v12"), ("p4_v12b", "p4_v12"), ("p4_v12c", "p4_v12"), ("p4_v12c", "p4_v12a"), ("p4_pub024", "p4_v12"),
-         ("p4_pub024_6m", "p4_pub024"), ("p4_v16", "p4_v12"), ("p4_v16", "p4_v12c")]
+         ("p4_pub024_6m", "p4_pub024"), ("p4_v16", "p4_v12"), ("p4_v16", "p4_v12c"), ("p4_v12r", "p4_v12")]
 
 
 def commit() -> str:
@@ -78,13 +78,23 @@ def main() -> int:
             lines.append(f"| {a} | {b} | {sum(bool(A[i]['resolved']) for i in ids)} | {sum(bool(B[i]['resolved']) for i in ids)} | "
                          f"{w} | {l} | {w - l:+d} | {w + l} | {sign_p(w, l):.3f} |")
     stamp("paired", sorted({f"eval/a6000/results/{r}/results.jsonl" for p in PAIRS for r in p if r in have}), "\n".join(lines) + "\n")
-    # aa
-    if "p4_v13" in have and "p4_v13r" in have:
-        A, B = have["p4_v13"], have["p4_v13r"]
-        flips = sorted(i for i in A if bool(A[i]["resolved"]) != bool(B[i]["resolved"]))
-        body = (f"Same bundle (v13), same box, same 74 tasks, two runs: {sum(bool(x['resolved']) for x in A.values())} and "
-                f"{sum(bool(x['resolved']) for x in B.values())} solved; {len(flips)} tasks flipped: {', '.join(flips)}.\n")
-        stamp("aa", ["eval/a6000/results/p4_v13/results.jsonl", "eval/a6000/results/p4_v13r/results.jsonl"], body)
+    # aa: the same bundle twice on the box (exact replay = same resolved, calls and patch, seconds within 2 s)
+    body, inputs = "", []
+    for a, b, name in (("p4_v13", "p4_v13r", "v13"), ("p4_v12", "p4_v12r", "v12")):
+        if a in have and b in have:
+            A, B = have[a], have[b]
+            flips = sorted(i for i in A if bool(A[i]["resolved"]) != bool(B[i]["resolved"]))
+            w = sum(bool(B[i]["resolved"]) and not A[i]["resolved"] for i in A)
+            exact = sum(bool(A[i]["resolved"]) == bool(B[i]["resolved"]) and A[i].get("calls") == B[i].get("calls")
+                        and (A[i].get("patch") or "") == (B[i].get("patch") or "") and abs(A[i]["secs"] - B[i]["secs"]) <= 2
+                        for i in A)
+            body += (f"Same bundle ({name}), same box, same 74 tasks, two runs: {sum(bool(x['resolved']) for x in A.values())} and "
+                     f"{sum(bool(x['resolved']) for x in B.values())} solved; {len(flips)} tasks flipped ({w} gained, "
+                     f"{len(flips) - w} lost; sign-test p {sign_p(w, len(flips) - w):.3f}): {', '.join(flips)}; "
+                     f"exact replays {exact} of 74.\n")
+            inputs += [f"eval/a6000/results/{a}/results.jsonl", f"eval/a6000/results/{b}/results.jsonl"]
+    if body:
+        stamp("aa", inputs, body)
     # deadline (conservative: a solve is kept only if its run ended before the deadline)
     lines = ["| run | cap s | " + " | ".join(f"{D} s" for D in (180, 210, 240, 270, 300, 360, 480)) + " |", "|---|---|" + "---|" * 7]
     for r in ("p4_v12", "p4_v12b", "p4_v13", "p4_v12a", "p4_pub024", "p4_v12c"):
@@ -135,7 +145,7 @@ def main() -> int:
           "\n".join(lines) + "\n")
     # hidden_repeats: the same bundle submitted more than once (post hoc; the scorer was rebuilt about 30 Sep)
     reps = {"v4 (old scorer)": ["56591871", "56655519"], "v10.1": ["56690751", "56765412"], "v4h2": ["56788077", "56864298"],
-            "pub024": ["57280385", "57304025"]}
+            "pub024": ["57280385", "57304025"], "v12": ["57070001", "57390142"]}
     lines = ["| bundle | hidden public reads |", "|---|---|"] + [f"| {b} | {', '.join(subs.get(x, '?') for x in refs)} |"
                                                               for b, refs in reps.items()]
     stamp("hidden_repeats", [str(s.relative_to(ROOT)) for s in snaps[-1:]], "\n".join(lines) + "\n")
