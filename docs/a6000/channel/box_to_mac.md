@@ -1700,3 +1700,9 @@ Box, 2026-10-19T06:25:13Z, re: M-060. p4_v12r HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14616(first call, 1 of 8 replies)', 'fastapi_15800(first call, 1 of 2 replies)'].
 Decode check: running 1.0, +870 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "06:24:42 backup: 47 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12r: 5b06abe1.
+
+### B-223 | 2026-10-19T07:25:11Z | re: M-060
+Box, 2026-10-19T07:25:10Z, re: M-060. p4_v12r HOURLY: autopilot alive, restarts 0. Health line: "2026-10-19T07:24:05Z | step=p4_v12r | done=25/74 | solved=2 | empty=10 | errors=0 | median_s=302.1 | cap=18 | gpu=100% | disk_free=790GB | restarts=0". Live: 25/74, solved 2, errored 0, cap hits 18, running median 302.1 s, mean 283.0 s, summed 7075 s, zero-call 0 []; of the 42: 25 done, solved 2: fastapi_14616, rich_3480.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 2 ['fastapi_14616(first call, 1 of 8 replies)', 'fastapi_15800(first call, 1 of 2 replies)'].
+Decode check: running 1.0, +755 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "07:24:39 backup: 14 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12r: 9eeb9f92.
