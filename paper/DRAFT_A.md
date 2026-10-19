@@ -56,14 +56,15 @@ noticed afterwards are marked post hoc.
 
 ### 3.1 How much a repeat moves
 
-The same configuration, run twice on the A6000, solved 31 and 29 of 74. Four tasks flipped between the runs.
+We ran two configurations twice each on the A6000, unchanged. They solved 31 and 29 of 74, and 27 and 29. Between the two
+runs, 4 and 6 tasks flipped, and because flips go both ways, the totals moved by only two each time. Only 13 and 4 of the
+74 runs replayed step for step; the agent usually reached the same outcome by a different path. We had written down before
+the second repeat that more than 8 flips would widen our noise floor. It stayed at 6.
 
-Three configurations that scored went to the hidden set twice (post hoc). They came back 0.12 and 0.12, 0.08 and 0.08, and 0.10 and 0.08, so
-zero to one task apart. That is tighter than our local repeat. A likely reason, which we have not tested, is that the
-scorer runs one task at a time with a fixed sampling seed, so a resubmission replays nearly the same samples. If that is
-right, a hidden repeat measures how repeatable the scorer is, not how much a small change to the prompt reshuffles which
-tasks the model happens to solve. Bjarnason et al. (2026) saw spread even at temperature 0, so the guess needs its test:
-PENDING, sub21 resubmits our seeded baseline.
+Three configurations that scored went to the hidden set twice (post hoc). They came back 0.12 and 0.12, 0.08 and 0.08, and
+0.10 and 0.08, so zero to one task apart. That fits the local repeats: when a few tasks flip in each direction, two totals
+land close together. A small gap between two totals does not mean few tasks changed, and one hidden draw cannot show which
+tasks did. PENDING: sub21 resubmits our baseline as a fourth hidden pair.
 
 ### 3.2 Neither local screen ordered the hidden scores
 

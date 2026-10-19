@@ -114,3 +114,8 @@ written (19:30Z). It is an observation, not a blind prediction; claim C9 in eval
 |---|---|---|---|---|
 | C11 | The same failure on Kaggle's own 4xL4, with no pacing proxy: v4h2g beat v4h2 9-0 on the 74 (sign p 0.004), then read 0.08 hidden against v4h2's 0.10 and 0.08; L4 34 -> 0.08 while L4 32 (v12) -> 0.15 | eval/kaggle/g4-l4-{v4-wh28,v4h2,v4h2g,v12}-p312/results.jsonl; kaggle 56837573 | paper/make_tables.py -> paper/tables/l4_screen.md | docs/v4h/GATE.md 'sub10 read' (sub11 reading rule, committed 4 Oct 22:58Z, before sub11) |
 | C12 | Hidden repeats of one bundle came back 0-1 task apart (v4 0.12/0.12 old scorer; v10.1 0.08/0.08; v4h2 0.10/0.08), tighter than the box A/A (2 tasks, 4 flips). Probable reason, not tested: seeded sampling on a sequential scorer, so a repeat measures scorer repeatability, not how a small change reshuffles solves. sub21 (v12, seed 42, again) tests it | kaggle_submissions_2026-10-18.json | paper/make_tables.py -> paper/tables/hidden_repeats.md | none (observed, post hoc) |
+| C13 | The box noise floor, measured twice: v13 twice 31/29 (4 flips), v12 twice 27/29 (6 flips, 4 gained 2 lost); exact replays 13 and 4 of 74; same outcome 70 and 68 of 74 | eval/a6000/results/p4_v12r, p4_v12, p4_v13, p4_v13r | paper/make_tables.py -> paper/tables/aa.md | 'v12 local replicate (box A/A) pre-registration' (CONFIRMED) |
+
+Correction to C12 (19 Oct 16:30 IST): its "probable reason" (seeded sampling replays samples) is withdrawn. Cross-day trajectories
+rarely replay on the box (C13: 4 and 13 exact of 74), and two box repeats moved their totals by 2 while flipping 4-6 tasks, so
+close hidden totals (0-1 task) are what ordinary flip noise with cancellation gives. The C12 observation itself stands.
