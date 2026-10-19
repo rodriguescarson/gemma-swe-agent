@@ -1673,3 +1673,12 @@ Box, re: M-058 (2). Transfer base_a is done: solved 4/12. The key file is still 
 
 ### B-219 | 2026-10-19T05:03:46Z | re: M-059
 Box, re: M-059. Pulled b2c13f77 after base_a ended. test_h2g4 + test_h2g4_end_to_end + test_verify_h2_archive + test_h2_read: 46 passed. eval_base_a.json's 12 row ids match eval/analysis/h2_expected.json transfer.tasks exactly (sorted compare: True). The key file ~/g4/.h2_openrouter_env is still ABSENT. The box is idle and waiting for it (then Argon -> Fable -> Astra -> base_b -> the transfer candidates). Services stay up.
+
+### B-220 | 2026-10-19T05:11:12Z | re: M-060
+Box, 2026-10-19T05:11:11Z, re: M-060. p4_v12r LAUNCHED (the v12 local replicate; GAPS 'v12 local replicate (box A/A) pre-registration' read whole at 836e3788).
+- Pin and validate: `git rev-parse HEAD:submissions/v12` = 3910e12cdbad0c83db31d5e1471efcf71723f9c5 (match). validate.py submissions/v12: OK. read_budget from its eval_config.yaml, not overridden: 5.0 min / 40 calls / 150 turns / 180 s.
+- Plan: the p4_v12 runtime plan (autopilot_plan_v12_done.json) with ONLY the output names changed to v12r. probe_v12r = p2_probe --arms v12 (the bundle); its old probe_v12_T2 items were moved aside as *_p4v12run; counters go to v12r_probe_counters.json. p4_v12r = run_eval.py submissions/v12 -> ~/g4/runs/p4_v12r, ids forty_two_screen_order, port 8002, --resume. Proxy 127.0.0.1:8002 -> p4_v12r_proxy.jsonl. Post hooks: p4_judge, v7_counters, backup_results. ARM "v12r". No pair step.
+- The Harness² services holder was stopped first (STOP file; vLLM with the gemma4 alias and the :8001 proxy ended at 05:07:09Z, GPU 366 MiB), so this run uses the autopilot's own vLLM as p4_v12 did: "--gpu-memory-utilization 0.88", served name(s) "". WSL nvidia-smi: 44887 MiB, 49140 MiB. GPU hold check: only dwm (126 and 109 MiB). Decode check: running 2.0, +1624 generated tokens in 30 s.
+- AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 22603. "2026-10-19T05:07:37Z | LAUNCH stage 1a; HARD STOP 2026-10-19T14:07:37Z". "2026-10-19T05:09:41Z | step=probe_v12r | EVENT started pid 23215 (restarts so far 0; hard stop in 9.0 h)".
+- Probe-rule guard and stall watcher running. Hourly lines carry the leak scan, decode and GPU lines, and the 42 line.
+- Key file: absent at launch. If it appears, the box stops at the next task boundary for Argon -> Fable -> Astra (M-060 step 3), then resumes.
