@@ -1727,3 +1727,24 @@ Box, 2026-10-19T10:25:25Z, re: M-060. p4_v12r HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 1 ['rich_4079'] | 'without calling submit_patch' rows 0 [] | text-leak rows 5 ['fastapi_14616(first call, 1 of 8 replies)', 'fastapi_15800(first call, 1 of 2 replies)', 'rich_3934(first at reply 4, 1 of 5 replies)', 'rich_3938(first call, 1 of 1 replies)', 'rich_4079(first at reply 2, 1 of 2 replies)'].
 Decode check: running 1.0, +886 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "10:24:54 backup: 18 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12r: 10d02060.
+
+### B-228 | 2026-10-19T10:45:45Z | re: M-060
+Box, re: M-060 / M-061. p4_v12r END (the v12 local replicate). Nothing submits from this run.
+END line: "2026-10-19T10:44:19Z | step=p4_v12r | END done: done=74/74 solved=29". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. "DONE 2026-10-19T10:45:00Z (all steps finished)". Cleanup: no compute apps, no vllm pids, 366 MiB. Autopilot restarts: 0. The stall watcher never fired. The key file was absent for the whole run, so there was no gap.
+Commit holding eval/a6000/results/p4_v12r/ and p4_v12r_proxy.jsonl: fc6b78d6. Both are byte-identical to the box.
+screen_read.py (whole):
+```
+INVALID solved 29/74 (ref 28) paired +5 -4 net +1 p 1.0 | the 42: 3 | cap 39 | malformed 129 edit/write ok 140 attempts 275 commands>=61s 4 template edits 0 refused 0
+wins: fastapi_14616 fastapi_15589 rich_3480 rich_3676 rich_3718
+losses: fastapi_14463 fastapi_14873 rich_3506 rich_3521
+the 42 solved: fastapi_14616 rich_3480 rich_3718
+```
+INVALID comes only from the v13-lever mechanics clauses (edit/write ok 140, commands>=61s 4), as for p4_v12. The ref here is p4_b1024.
+Gate: `PASS solved 29/74 crash 0 errored 0 cap 39 missing 0 secs 19211 (floor 26)`. Every non-empty err is "Agent exceeded session timeout (5.0 min)", 39 rows. Seconds: mean 259.6, median 301.8, max 483.7.
+Leak scan: zero-call rows 1 [rich_4079]. That is a text-leak row, not a stall: it got 2 model replies, and the 2nd wrote tool-call markers as text. "Without calling submit_patch" rows: 0. Text-leak rows 5: fastapi_14616 (first call, 1 of 8 replies), fastapi_15800 (first call, 1 of 2), rich_3934 (first at reply 4, 1 of 5), rich_3938 (first call, 1 of 1), rich_4079 (first at reply 2, 1 of 2).
+PAIRED vs p4_v12 (same 74 ids): v12r 29 vs v12 27. Wins 4 (v12r solved, v12 not): fastapi_13537, fastapi_14616, fastapi_15589, rich_3480. Losses 2 (v12 solved, v12r not): fastapi_14873, rich_3777. Flips 6, net +2, sign p 0.688.
+EXACT REPLAYS vs p4_v12 (same resolved, same calls, same last submitted patch_size from the task log, seconds within 2 s): 4 of 74, namely fastapi_14448, fastapi_14487, rich_3718, rich_3782. Same outcome (resolved only): 68 of 74. results.jsonl has no patch-size field, so patch_size is the last `"patch_size": N` that submit_patch reported in results/logs/<id>.log ("none" if never submitted).
+Reading under the pre-registration: flips 6 <= 8 and |net| 2 <= 3, so the box noise floor is CONFIRMED.
+The 42: 42 done, 3 solved (fastapi_14616, rich_3480, rich_3718); p4_v12 had 2 (rich_3718, rich_3777).
+v7_counters: tasks 74, solved 29, loops_ge5 6, budget_exhausted_tasks 1, all must-zero counters 0; verdict pass.
+After END: pulled fb02321f; tests/test_a6000_p2.py: 45 passed. The key file is still absent. The box idles and waits for it, or for your next job. The Harness² services are down (the autopilot's END cleanup stopped vLLM and dockerd) and will be restarted for Argon.
