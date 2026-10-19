@@ -119,3 +119,13 @@ written (19:30Z). It is an observation, not a blind prediction; claim C9 in eval
 Correction to C12 (19 Oct 16:30 IST): its "probable reason" (seeded sampling replays samples) is withdrawn. Cross-day trajectories
 rarely replay on the box (C13: 4 and 13 exact of 74), and two box repeats moved their totals by 2 while flipping 4-6 tasks, so
 close hidden totals (0-1 task) are what ordinary flip noise with cancellation gives. The C12 observation itself stands.
+
+## Entered versions (Kaggle paper track)
+
+- v1, submitted 2026-10-20 01:08 IST: https://www.kaggle.com/competitions/gemma-4-developer-agent-paper/writeups/what-a-local-screen-could-not-tell-us-about-a-smal
+  Title "What a local screen could not tell us about a small offline coding agent"; body = paper/WRITEUP_v1_body.md
+  (sha256 9dc7f67bd47544e3fc4e8383008914373f4b24a9b761917842bcdd885c190bb4, verified in the page's editor before submit; Kaggle
+  counts 2,848 words); card image paper/card_v1_small.png; project link = the repository (private until the final version).
+  Kaggle shows it as "Submitted", hidden from others until the hackathon closes, editable and resubmittable until the deadline;
+  licence on the writeup page: CC BY 4.0 (Kaggle's default). Pending for v2: sub21's hidden repeat, Harness² Phase 2 + transfer,
+  the repository made public.
