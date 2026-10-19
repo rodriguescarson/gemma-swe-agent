@@ -1571,3 +1571,14 @@ Box, re: M-054 / M-055. Steps 1-2 pass. Steps 3-4 got the new layout right but f
 Cause: the race container runs as root, so p2_race's item dirs come out root-owned with mode 755 (race/items, race/items/<arm>, <arm>/<task> and its files are all root:root 755), while h2g4.run runs as jc. The launcher writes staged.json into a dir the container created after p2_race returns.
 Fix options (your code; not applied): (a) write staged.json BEFORE the rollout into a dir the launcher owns, e.g. <root>/race/staged/<arm>/<task>.json, or create items/<arm>/<task>/ as jc with staged.json before p2_race runs. The container (root) can still write into a jc-owned 755 dir. Update verify_h2_archive to match. (b) After each rollout, `docker exec <container> chown -R <uid>:<gid> /out/items/<arm>`. This also makes the archive copy and cleanup easier. (a) keeps staged.json written before the result exists.
 Nothing deleted. The containers g4-h2d3c0b913 and g4-probe and the services stay up. rollout_smoke2 is kept for the archive.
+
+### B-210 | 2026-10-19T00:31:30Z | re: M-056
+Box, re: M-056. Steps 1-3 pass; step 4 is running.
+(1) Pulled acaca272. test_h2g4 + test_h2g4_end_to_end + test_verify_h2_archive: 37 passed. g4-h2d3c0b913 removed as allowed; rollout_smoke2 kept.
+(2) Rollout smoke, fresh ~/g4/h2/rollout_smoke3, base: rc 0, "smoke arrow_06fe693: solved=False delivered=False" / "smoke: solved 0/1 graded of 1; table /home/jc/g4/h2/rollout_smoke3/eval_smoke.json".
+    Record ~/g4/h2/rollout_smoke3/race/staged/_h2_4eb0d28238fb_8a7e6c/arrow_06fe693.json: {"run_id": "eval-smoke-arrow_06fe693", "arm": "_h2_4eb0d28238fb_8a7e6c", "task": "arrow_06fe693", "fingerprint": "4eb0d28238fb5829c103c10306d0a58c87eec7d6513a1db74b30e0771572440c", "system_md_sha256": "70ee2786835268e8779b1c45b816385fc659710917a9ae9cdb4f5f7ae712af7a", "skills": []}
+    `ls -ld`: "drwxr-xr-x 5 jc jc ... race/items/_h2_4eb0d28238fb_8a7e6c/arrow_06fe693". The owner is jc after the chown.
+(3) Same root, edited tree: rc 0, "edited arrow_06fe693: solved=True delivered=True" / "edited: solved 1/1 graded of 1; table .../eval_edited.json".
+    Record .../race/staged/_h2_3e62a2adb576_8477f0/arrow_06fe693.json: fingerprint "3e62a2adb5763727a9c25e0a168375999a268348c156430369d0682862cffff5", system_md_sha256 "64990b48e6650d96cce3336e2bb6066c35397eda4ca16d5e9ca955b5a85c9b56", skills []. Item dir owner jc.
+    Note, as one draw each, not a result: the one-line guardrail "- Make the source edit before reading further." solved arrow_06fe693, where the base delivered nothing in both of its smokes.
+(4) Improver smoke, fresh ~/g4/h2/pilot1: "smoke: ok=True channel=opencode model=boxvllm/gemma4 wall=13.7s reply='READY' error=''". The Phase 1 sweep is launched with the same command (< /dev/null, 8 h timeout, log ~/g4/h2/sweep_gemma.log). The first-task arm and record report, and the hourly lines, follow.
