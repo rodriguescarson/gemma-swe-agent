@@ -173,14 +173,23 @@ so each one carries a single change with a stated mechanism, never a change chos
 We also repeat configurations on the hidden set on purpose. A second draw of the same thing tells us how far apart two
 hidden scores must be before they mean something, and whether the scorer replays its samples.
 
-## 5. Letting a model improve the harness (PENDING)
+## 5. Letting a model improve the harness
 
-PENDING (claims D1-D5). Google's Harness² refines an agent's harness task by task: it proposes edits from the agent's own
-trajectories, probes them, composes the best, and keeps a library of lessons per repository. We run it with Gemma as the
-fixed solver on eight held-out tasks from one repository, with Gemma itself and then three frontier models as the
-improver, and then test the adopted harnesses on 12 tasks from two repositories they never saw, against two runs of the
-unchanged harness. The reading rules, task lists and spending caps were committed before the first rollout. Results go
-here, with the cost per extra solve, whatever they show.
+Google's Harness² refines an agent's harness task by task. An improver model reads the agent's trajectories, proposes
+edits, tests them in fresh runs, composes a final harness and stores a lesson for the next task. We ran it with Gemma as the
+fixed solver on eight held-out tasks from one repository, with Gemma itself as the improver first, which is Harness²'s
+default. The task list, the reading rules and the spending caps were committed before the first run.
+
+Gemma did not change the harness. It kept the original in 22 of 24 stages, the final harness was the original on all
+eight tasks, and no lesson was stored. Reading its sessions shows why (post hoc): 23 of the 30 ran past Gemma's 32k context
+and were cut down by the coding agent that hosts them, after which they summarised the task and stopped. One ended by
+asking whether it should begin. Of the seven that fit, four replied with the bare words "keep base" and one edited the
+repository instead of the harness. The chosen runs solved two tasks against one for the unchanged harness, but both
+solutions came from the unchanged harness itself, so that gap is noise.
+
+PENDING (claims D2-D5): the same eight tasks with three frontier improvers that have no 32k limit, then a transfer test of
+whatever they adopt on 12 tasks from two repositories they never saw. The unchanged harness solved 4 of those 12 on its
+first run; it runs again after the improvers, so the two base runs bracket them in time.
 
 ## 6. Related work
 
@@ -211,7 +220,8 @@ saw.
 Everything here is about one fixed model, one harness family and the 74 public tasks. The hidden columns have one or two
 draws per configuration on about 58 tasks. The pacing proxy models the scorer's speed; it is not the scorer, which is why
 the L4 table matters. The scorer was rebuilt by the organisers in late September, and we compare hidden scores only within
-one scorer version. Claims 3.3, 3.4, 3.8, the hidden repeats in 3.1 and the A6000 half of 3.2 were noticed after the runs; the rest were read against
+one scorer version. Claims 3.3, 3.4, 3.8, the hidden repeats in 3.1, the A6000 half of 3.2 and the session audit in 5 were noticed after
+the runs; the rest were read against
 rules written before the run.
 
 ## 8. Reproducing the numbers
