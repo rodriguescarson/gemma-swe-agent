@@ -81,6 +81,48 @@ def read(d: Path, mode: str = "seq") -> dict:
             "solved": solved, "base_solved": base_solved, "signal": signal}
 
 
+def sessions(d: Path) -> dict:
+    """Improver-session audit from adapt/_audit/<stage>.*.response.md (post hoc, 19 Oct): per stage, how many sessions
+    overflowed the model's context (OpenCode's compaction notice in the reply), how many answered a bare KEEP_BASE, and how
+    many ended by asking a question instead of acting."""
+    r = _root(Path(d))
+    out = {}
+    for f in sorted((r / "adapt" / "_audit").glob("*.response.md")):
+        stage = f.name.split(".")[0]
+        t = f.read_text(encoding="utf-8", errors="replace")
+        c = out.setdefault(stage, {"sessions": 0, "overflowed": 0, "bare_keep_base": 0, "ended_with_question": 0})
+        c["sessions"] += 1
+        c["overflowed"] += "exceeded the provider's size limit" in t or "was compacted" in t
+        c["bare_keep_base"] += t.strip() == "KEEP_BASE"
+        c["ended_with_question"] += t.strip().endswith("?")
+    return out
+
+
+def replays(d: Path) -> dict:
+    """Same-tree rollouts on the same task (post hoc, box B-216): groups of >= 2 rollouts with one fingerprint, and how many
+    pairs within them repeat exactly (same resolved, llm calls, patch size, and seconds within 2 s)."""
+    r = _root(Path(d))
+    groups = {}
+    for rec in (r / "race" / "staged").glob("*/*.json") if (r / "race" / "staged").is_dir() else []:
+        meta = _load(rec, {})
+        res = r / "race" / "items" / rec.parent.name / rec.stem / "task_results.jsonl"
+        lines = [x for x in res.read_text().splitlines() if x.strip()] if res.is_file() else []
+        if lines and meta.get("fingerprint"):
+            row = json.loads(lines[-1])
+            groups.setdefault((rec.stem, meta["fingerprint"]), []).append(
+                (bool(row.get("resolved")), row.get("total_llm_calls"), row.get("agent_patch_size"),
+                 float(row.get("duration_seconds") or 0)))
+    pairs = same = outcome_same = 0
+    for runs in groups.values():
+        for i in range(len(runs)):
+            for j in range(i + 1, len(runs)):
+                a, b = runs[i], runs[j]
+                pairs += 1
+                outcome_same += a[0] == b[0]
+                same += a[:3] == b[:3] and abs(a[3] - b[3]) <= 2
+    return {"groups": sum(len(v) >= 2 for v in groups.values()), "pairs": pairs, "exact": same, "same_outcome": outcome_same}
+
+
 def render(res: dict) -> str:
     out = ["| task | INV | DOM | COMPOSE | rollouts | crashed | selection | chosen solved | base solved | library |",
            "|---|---|---|---|---|---|---|---|---|---|"]
@@ -111,6 +153,16 @@ def main(argv=None) -> int:
     ap.add_argument("--out", type=Path)
     a = ap.parse_args(argv)
     text = render(read(a.archive, a.mode))
+    ss = sessions(a.archive)
+    if ss:
+        text += "\nImprover sessions (post hoc audit of the replies):\n" + "\n".join(
+            f"  {k}: {v['sessions']} sessions, {v['overflowed']} overflowed the context, {v['bare_keep_base']} bare KEEP_BASE, "
+            f"{v['ended_with_question']} ended with a question" for k, v in sorted(ss.items())) + \
+            f"\n  all: {sum(v['sessions'] for v in ss.values())} sessions, {sum(v['overflowed'] for v in ss.values())} overflowed\n"
+    rp = replays(a.archive)
+    if rp["pairs"]:
+        text += (f"\nSame-tree replays (post hoc): {rp['pairs']} pairs of rollouts of one tree on one task; {rp['exact']} repeat "
+                 f"exactly (outcome, calls, patch size, seconds within 2 s); {rp['same_outcome']} have the same outcome.\n")
     print(text, end="")
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)

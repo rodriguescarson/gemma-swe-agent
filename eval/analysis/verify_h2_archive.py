@@ -1,7 +1,7 @@
 """Verify a Harness² archive the box pushed (paper/EVIDENCE.md D1-D5; the archive rule is channel M-046), so that "the results
 are saved" is a checked fact, not an instruction that was sent.
 
-    python eval/analysis/verify_h2_archive.py eval/a6000/results/h2_argon [--kind sweep|transfer] [--prereg "HEADING TEXT"]
+    python eval/analysis/verify_h2_archive.py eval/a6000/results/h2_argon [--kind sweep|transfer|evidence] [--prereg "HEADING TEXT"]
 
 Checks (each prints PASS/FAIL; exit 1 if any FAIL):
   manifest   MANIFEST.sha256 lists every file and every hash matches
@@ -39,6 +39,13 @@ def files_under(d: Path) -> list[Path]:
     return sorted(p for p in d.rglob("*") if p.is_file())
 
 
+def _load_json(p: Path) -> dict:
+    try:
+        return json.loads(p.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def check_manifest(d: Path) -> tuple[bool, str]:
     m = d / "MANIFEST.sha256"
     if not m.is_file():
@@ -48,7 +55,9 @@ def check_manifest(d: Path) -> tuple[bool, str]:
         if line.strip():
             h, rel = line.split(None, 1)
             listed[rel.strip().lstrip("*").removeprefix("./")] = h
-    present = {str(p.relative_to(d)) for p in files_under(d)} - {"MANIFEST.sha256"}
+    listed.pop("VERIFY.txt", None)
+    present = {str(p.relative_to(d)) for p in files_under(d)} - {"MANIFEST.sha256", "VERIFY.txt"}   # VERIFY.txt is this script's
+    # own output, written after the manifest; listing it in the manifest it verifies would be circular (box B-216)
     missing = sorted(set(listed) - present)
     unlisted = sorted(present - set(listed))
     bad = sorted(rel for rel, h in listed.items() if rel in present and sha256(d / rel) != h)
@@ -147,8 +156,14 @@ def check_sweep(d: Path, expected: dict | None = None) -> tuple[bool, str]:
     audit = files_under(r / "adapt" / "_audit") if (r / "adapt" / "_audit").is_dir() else []
     if not audit:
         problems.append("no improver-session transcripts (adapt/_audit)")
+    carried = [p.parent.name for p in (r / "adapt").glob("*/*/summary.json")
+               if any((sel or {}).get("ok") and (sel or {}).get("experience")
+                      for sel in (_load_json(p).get("selections") or {}).values())]
     if not (r / "library").is_dir():
-        problems.append("no library/")
+        if carried:
+            problems.append(f"no library/ although {len(carried)} selection(s) carried an experience ({carried[:3]})")
+        else:
+            note += "; no library/ (no selection carried an experience, so harness2 wrote none)"
     if not list((r / "adapt").rglob("base_judged.json")):
         problems.append("no base_judged.json")
     lib = list((r / "library").rglob("harnesses/*/harness")) if (r / "library").is_dir() else []
@@ -206,13 +221,17 @@ def check_prereg(d: Path, heading: str) -> tuple[bool, str]:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("archive", type=Path)
-    ap.add_argument("--kind", choices=("sweep", "transfer"), default=None)
+    ap.add_argument("--kind", choices=("sweep", "transfer", "evidence"), default=None,
+                    help="evidence = failed or smoke roots kept for the record: manifest and secrets only")
     ap.add_argument("--prereg", default=None, help="text of the GAPS heading this archive is read against")
     a = ap.parse_args(argv)
     d = a.archive.resolve()
     kind = a.kind or ("transfer" if d.name.endswith("transfer") else "sweep")
-    checks = [("manifest", check_manifest), ("env", check_env), ("proxy", check_proxy),
-              (kind, check_sweep if kind == "sweep" else check_transfer), ("secrets", check_secrets)]
+    if kind == "evidence":
+        checks = [("manifest", check_manifest), ("secrets", check_secrets)]
+    else:
+        checks = [("manifest", check_manifest), ("env", check_env), ("proxy", check_proxy),
+                  (kind, check_sweep if kind == "sweep" else check_transfer), ("secrets", check_secrets)]
     failed = 0
     for name, fn in checks:
         ok, msg = fn(d)

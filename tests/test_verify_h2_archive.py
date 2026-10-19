@@ -85,7 +85,9 @@ def test_each_task_level_omission_fails(tmp_path):
     write(d / "root" / "adapt" / "swe-g4-adk-agg1" / "judged.json", json.dumps([{"task_id": t} for t in tasks[:-1]]))
     ok, msg = V.check_sweep(d)
     assert not ok and "no judged row" in msg
-    d = sweep_archive(tmp_path / "e")                                  # library or transcripts missing
+    d = sweep_archive(tmp_path / "e")                                  # library missing although a lesson was carried
+    write(d / "root" / "adapt" / "swe-g4-adk-agg1" / tasks[0] / "summary.json",
+          json.dumps({"task_id": tasks[0], "selections": {"seq": {"ok": True, "experience": {"cue": "c", "lesson": "l"}}}}))
     shutil.rmtree(d / "root" / "library")
     assert not V.check_sweep(d)[0]
     d = sweep_archive(tmp_path / "f")                                  # a result with no record of what ran
@@ -156,3 +158,37 @@ def test_transfer_checks_every_label_task_pair(tmp_path):
     d = transfer_archive(tmp_path / "c")
     shutil.rmtree(d / "root" / "frozen" / "fable")
     assert not V.check_transfer(d)[0]
+
+
+def test_an_empty_library_passes_only_when_no_selection_carried_an_experience(tmp_path):
+    """2026-10-19 (box B-215/B-216): Phase 1 adopted nothing, so harness2 wrote no library/; that is a result, not a missing
+    copy. A library is required as soon as any successful selection carried an experience (harness2 adds an entry then)."""
+    tasks = EXP["pilot"]["tasks"]
+    d = sweep_archive(tmp_path / "a")
+    shutil.rmtree(d / "root" / "library")
+    for t in tasks:
+        write(d / "root" / "adapt" / "swe-g4-adk-agg1" / t / "summary.json",
+              json.dumps({"task_id": t, "selections": {"seq": {"ok": True, "experience": {}}}}))
+    ok, msg = V.check_sweep(d)
+    assert ok and "no library/ (no selection carried an experience" in msg, msg
+    write(d / "root" / "adapt" / "swe-g4-adk-agg1" / tasks[0] / "summary.json",
+          json.dumps({"task_id": tasks[0], "selections": {"seq": {"ok": True, "experience": {"cue": "c", "lesson": "l"}}}}))
+    ok, msg = V.check_sweep(d)
+    assert not ok and "carried an experience" in msg
+
+
+def test_verify_txt_is_not_part_of_the_manifest(tmp_path):
+    d = sweep_archive(tmp_path)
+    write(d / "VERIFY.txt", "PASS ...")
+    assert V.check_manifest(d)[0]
+
+
+def test_an_evidence_archive_checks_manifest_and_secrets_only(tmp_path, capsys):
+    d = tmp_path / "h2_gemma_failed"
+    write(d / "pilot1_failed_reuse" / "sweep.log", "stopped")
+    manifest(d)
+    assert V.main([str(d), "--kind", "evidence"]) == 0
+    assert "VERIFIED" in capsys.readouterr().out
+    write(d / "pilot1_failed_reuse" / "env", "OPENROUTER_API_KEY=sk-or-v1-x")
+    manifest(d)
+    assert V.main([str(d), "--kind", "evidence"]) == 1

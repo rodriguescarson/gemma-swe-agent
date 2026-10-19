@@ -75,3 +75,21 @@ def test_cli_writes_the_reading(tmp_path, capsys):
     out = tmp_path / "read.md"
     assert R.main([str(d), "--out", str(out)]) == 0
     assert "MECHANICS PASS" in out.read_text() and "MECHANICS PASS" in capsys.readouterr().out
+
+
+def test_session_and_replay_audits(tmp_path):
+    d = archive(tmp_path)
+    audit = d / "root" / "adapt" / "_audit"
+    write(audit / "c1.a1.x.response.md", "## Goal\n... exceeded the provider's size limit ...\nShould I begin?")
+    write(audit / "inv1.a1.y.response.md", "KEEP_BASE\n")
+    ss = R.sessions(d)
+    assert ss["c1"] == {"sessions": 1, "overflowed": 1, "bare_keep_base": 0, "ended_with_question": 1}
+    assert ss["inv1"]["bare_keep_base"] == 1
+    r = d / "root"
+    t = "arrow_3f9837e"
+    for arm, row in (("_h2_a_1", (True, 15, 1442, 325.4)), ("_h2_a_2", (True, 15, 1442, 325.1)), ("_h2_a_3", (False, 30, 0, 300.0))):
+        write(r / "race" / "staged" / arm / f"{t}.json", {"run_id": arm, "arm": arm, "task": t, "fingerprint": "f" * 64})
+        write(r / "race" / "items" / arm / t / "task_results.jsonl", json.dumps(
+            {"resolved": row[0], "total_llm_calls": row[1], "agent_patch_size": row[2], "duration_seconds": row[3]}) + "\n")
+    rp = R.replays(d)
+    assert rp["pairs"] == 3 and rp["exact"] == 1 and rp["same_outcome"] == 1
