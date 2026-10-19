@@ -127,7 +127,8 @@ def main() -> int:
     snaps = sorted((ROOT / "eval" / "analysis" / "out").glob("kaggle_submissions_*.json"))
     if snaps:
         for r in json.loads(snaps[-1].read_text())["submissions"]:
-            subs[r["ref"]] = r.get("public_score") or ("RUNTIME" if "runtime" in (r.get("error_description") or "") else "error")
+            subs[r["ref"]] = r.get("public_score") or ("RUNTIME" if "runtime" in (r.get("error_description") or "") else
+                                                       "PENDING" if "PENDING" in (r.get("status") or "") else "error")
     hidden = {"g4-l4-v4-wh28-p312": ("v4", ["56824301"]), "g4-l4-v4h2-p312": ("v4h2", ["56788077", "56864298"]),
               "g4-l4-v4h2g-p312": ("v4h2g", ["56837573"]), "g4-l4-v12-p312": ("v12", ["57070001"])}
     lines = ["| L4 run | bundle | solved/74 | hidden public (rebuilt scorer) |", "|---|---|---|---|"]
