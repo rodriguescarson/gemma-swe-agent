@@ -1604,3 +1604,24 @@ Box, 2026-10-19T02:32:15Z, re: M-056. Harness² gemma sweep HOURLY (root ~/g4/h2
 
 ### B-214 | 2026-10-19T03:32:06Z | re: M-056
 Box, 2026-10-19T03:32:05Z, re: M-056. Harness² gemma sweep HOURLY (root ~/g4/h2/pilot1, started 2026-10-19T00:31:15Z): tasks done 6/8 ([arrow] 5/8 ok           arrow_30d16c1; [arrow] 6/8 partial      arrow_310cef8  :: seq: selection failed: no candidate produced an); rollouts done 28 of 28 staged, resolved 3, delivered 22; improver sessions ok 25 / failed 0 / retries 1; last error: -. Decode check: running 1.0, +352 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+
+### B-215 | 2026-10-19T04:01:26Z | re: M-056
+Box, re: M-042 B5 / M-046 / M-056. Harness² Phase 1 (Gemma improver) END.
+Sweep: ~/g4/h2/pilot1, 2026-10-19T00:31:15Z -> 04:00:13Z (3 h 29 min), rc 2 ("sweep done: 6 tasks ok, 2 failed; record .../adapt/_sweeps/sweep-20261019T040013Z.json"). The judge ran afterwards with --judge, rc 0: "judged 8 selections: chosen run solved 2".
+Improver sessions: 30, ok 30, failed 0, retries 1 (invalid tree / re-ask); session wall total 4132 s; cost $0.
+Per task (base = the agg1 base1 reference run; chosen = the sweep's selected run; stages INV / DOM / COMPOSE: kept = kept the base, NEW = proposed a changed tree):
+  arrow_06fe693: base 0/1; chosen none (selection failed, no artifact); INV NEW (fp 6a9749401920: guardrails.md, systemprompt.md), DOM kept, COMPOSE kept
+  arrow_0fe5f06: base 0/1; chosen c1 1/1; INV kept, DOM NEW (fp 654c2d0fc459: guardrails.md, systemprompt.md), COMPOSE kept
+  arrow_1278a21: base 0/1; chosen c1 0/1; all three kept
+  arrow_22acd93: base 0/1; chosen c1 0/1; all three kept
+  arrow_30d16c1: base 0/1; chosen c1 0/1; all three kept
+  arrow_310cef8: base 0/1; chosen none (selection failed, no artifact); all three kept
+  arrow_384fb74: base 0/1; chosen c1 0/1; all three kept
+  arrow_3f9837e: base 1/1; chosen c1 1/1; all three kept
+Adopted tree vs the base: NONE. Every chosen c1 tree has the base fingerprint 4eb0d28238fb, and `diff -r` against base is empty in all 8 tasks. Gemma proposed a change in only 2 of 24 stages, both edits to guardrails.md and systemprompt.md (the invariant-or-arrow split of those edits is in the archived trees), and the compose stage kept the base every time. So no harness was adopted and Harness² wrote no library/.
+Reading: the chosen 2/8 vs base 1/8 is run-to-run variance of the SAME base harness (arrow_0fe5f06's c1 rollout ran the base tree and solved it; its base1 run did not), not an effect of an adopted harness. Phase 1 result: Gemma as its own improver leaves the harness unchanged.
+Archive (M-046): eval/a6000/results/h2_gemma/, commit cf0ea513, on origin. 15 MB, 1656 files in MANIFEST.sha256; root/ (whole root minus _validate), proxy.jsonl (1032 calls in the window), env.txt (repo, harness2 and opencode HEADs, the vLLM command, nvidia-smi, node/bun, oc_template file list, the command lines, BOTH freezes), sweep and judge logs. Secret scan: clean. No file over 90 MB.
+verify_h2_archive.py: PASS env, PASS proxy, PASS secrets, FAIL sweep "8 tasks checked, 32 rollouts, 210 session files, 0 adopted harnesses; no library/". The FAIL is the result above (nothing adopted, so there is no library), not a missing copy. Tell me if the verifier should accept an empty library.
+The earlier failed roots (pilot1_failed_surface, _failed_harnesspath, _failed_reuse, the smoke-hang roots, rollout_smoke/2/3) are not yet archived. Say whether they go under h2_gemma/ or a separate h2_gemma_failed/.
+Next per M-044: Argon. The key file ~/g4/.h2_openrouter_env is checked below.
+key file: NOT present
