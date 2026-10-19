@@ -3646,3 +3646,4 @@ not run (no capture)
 - 2026-10-19T05:24:02Z | step=p4_v12r | EVENT started pid 26726 (restarts so far 0; hard stop in 8.8 h)
 - 2026-10-19T06:24:02Z | step=p4_v12r | done=13/74 | solved=1 | empty=3 | errors=0 | median_s=302.4 | cap=9 | gpu=100% | disk_free=789GB | restarts=0
 - 2026-10-19T07:24:05Z | step=p4_v12r | done=25/74 | solved=2 | empty=10 | errors=0 | median_s=302.1 | cap=18 | gpu=100% | disk_free=790GB | restarts=0
+- 2026-10-19T08:24:08Z | step=p4_v12r | done=37/74 | solved=3 | empty=16 | errors=0 | median_s=302.1 | cap=28 | gpu=100% | disk_free=789GB | restarts=0
