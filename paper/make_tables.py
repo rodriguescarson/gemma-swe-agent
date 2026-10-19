@@ -2,7 +2,8 @@
 calls rebuilds it). Writes paper/tables/*.md, each stamped with the commit and the input files.
     python paper/make_tables.py
 Tables: box_runs (every complete 74-read), paired (net / flips / sign-test p between key runs), aa (the same bundle twice),
-deadline (solves kept under a shorter cap, conservative), calibration (box vs hidden; eval/analysis/calibration.py)."""
+deadline (solves kept under a shorter cap, conservative), calibration (box vs hidden; eval/analysis/calibration.py),
+l4_screen (the same question on Kaggle's 4xL4, no proxy), hidden_repeats (one bundle submitted twice)."""
 from __future__ import annotations
 
 import json
@@ -101,6 +102,43 @@ def main() -> int:
     stamp("deadline", [f"eval/a6000/results/{r}/results.jsonl" for r in ("p4_v12", "p4_v12b", "p4_v13", "p4_v12a", "p4_pub024", "p4_v12c") if r in have],
           "Solves kept (mean seconds per task) if the per-task cap were D; conservative: a solve counts only if its run ended before D.\n\n"
           + "\n".join(lines) + "\n")
+    # l4_screen: the same question on Kaggle's own 4xL4 (no pacing proxy), from the per-task results the kernels saved
+    l4 = {}
+    for run in ("g4-l4-v4-wh28-p312", "g4-l4-v4h2-p312", "g4-l4-v4h2g-p312", "g4-l4-v12-p312"):
+        f = ROOT / "eval" / "kaggle" / run / "results.jsonl"
+        if f.is_file():
+            rows = {}
+            for line in f.read_text().splitlines():
+                if line.strip():
+                    r = json.loads(line)
+                    rows[r["id"]] = r
+            l4[run] = rows if len(rows) == 74 else None
+    subs = {}
+    snaps = sorted((ROOT / "eval" / "analysis" / "out").glob("kaggle_submissions_*.json"))
+    if snaps:
+        for r in json.loads(snaps[-1].read_text())["submissions"]:
+            subs[r["ref"]] = r.get("public_score") or ("RUNTIME" if "runtime" in (r.get("error_description") or "") else "error")
+    hidden = {"g4-l4-v4-wh28-p312": ("v4", ["56824301"]), "g4-l4-v4h2-p312": ("v4h2", ["56788077", "56864298"]),
+              "g4-l4-v4h2g-p312": ("v4h2g", ["56837573"]), "g4-l4-v12-p312": ("v12", ["57070001"])}
+    lines = ["| L4 run | bundle | solved/74 | hidden public (rebuilt scorer) |", "|---|---|---|---|"]
+    for run, d in l4.items():
+        if d:
+            b, refs = hidden[run]
+            lines.append(f"| {run} | {b} | {sum(bool(x['resolved']) for x in d.values())} | "
+                         f"{', '.join(subs.get(x, '?') for x in refs)} |")
+    if l4.get("g4-l4-v4h2g-p312") and l4.get("g4-l4-v4h2-p312"):
+        A, B = l4["g4-l4-v4h2g-p312"], l4["g4-l4-v4h2-p312"]
+        w = sum(bool(A[i]["resolved"]) and not B[i]["resolved"] for i in A)
+        l = sum(bool(B[i]["resolved"]) and not A[i]["resolved"] for i in A)
+        lines.append(f"\nPaired on L4, v4h2g vs v4h2: {w} only-A, {l} only-B, sign-test p {sign_p(w, l):.3f}.")
+    stamp("l4_screen", [f"eval/kaggle/{r}/results.jsonl" for r in l4] + [str(s.relative_to(ROOT)) for s in snaps[-1:]],
+          "\n".join(lines) + "\n")
+    # hidden_repeats: the same bundle submitted more than once (post hoc; the scorer was rebuilt about 30 Sep)
+    reps = {"v4 (old scorer)": ["56591871", "56655519"], "v10.1": ["56690751", "56765412"], "v4h2": ["56788077", "56864298"],
+            "pub024": ["57280385", "57304025"]}
+    lines = ["| bundle | hidden public reads |", "|---|---|"] + [f"| {b} | {', '.join(subs.get(x, '?') for x in refs)} |"
+                                                              for b, refs in reps.items()]
+    stamp("hidden_repeats", [str(s.relative_to(ROOT)) for s in snaps[-1:]], "\n".join(lines) + "\n")
     # calibration (delegated, so there is one implementation)
     cal = subprocess.run([sys.executable, str(ROOT / "eval" / "analysis" / "calibration.py")], capture_output=True, text=True, cwd=ROOT)
     if cal.returncode == 0:

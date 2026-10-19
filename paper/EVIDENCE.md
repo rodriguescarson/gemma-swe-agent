@@ -107,3 +107,10 @@ claim): the public prompt solves late. At a 300 s cutoff, v12 keeps 27 of 27 sol
 Correction (19 Oct, 02:45 IST): the line above says the late-solve observation was "recorded here before any v16 row is final".
 The chronology checker showed p4_v16 rows were already on origin (first added 16:06Z; 51 of 74 seen by the author) when it was
 written (19:30Z). It is an observation, not a blind prediction; claim C9 in eval/analysis/claims.json says so.
+
+## C, added 19 Oct (C9 and C10 are in eval/analysis/claims.json; C11 and C12 added here and there)
+
+| # | Claim | Data | Produced by | Pre-registration |
+|---|---|---|---|---|
+| C11 | The same failure on Kaggle's own 4xL4, with no pacing proxy: v4h2g beat v4h2 9-0 on the 74 (sign p 0.004), then read 0.08 hidden against v4h2's 0.10 and 0.08; L4 34 -> 0.08 while L4 32 (v12) -> 0.15 | eval/kaggle/g4-l4-{v4-wh28,v4h2,v4h2g,v12}-p312/results.jsonl; kaggle 56837573 | paper/make_tables.py -> paper/tables/l4_screen.md | docs/v4h/GATE.md 'sub10 read' (sub11 reading rule, committed 4 Oct 22:58Z, before sub11) |
+| C12 | Hidden repeats of one bundle came back 0-1 task apart (v4 0.12/0.12 old scorer; v10.1 0.08/0.08; v4h2 0.10/0.08), tighter than the box A/A (2 tasks, 4 flips). Probable reason, not tested: seeded sampling on a sequential scorer, so a repeat measures scorer repeatability, not how a small change reshuffles solves. sub21 (v12, seed 42, again) tests it | kaggle_submissions_2026-10-18.json | paper/make_tables.py -> paper/tables/hidden_repeats.md | none (observed, post hoc) |
