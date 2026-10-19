@@ -113,7 +113,7 @@ def test_launcher_stages_per_rollout_and_calls_the_race_runner_per_run(tmp_path)
 def test_two_trees_and_one_tree_twice_never_share_an_arm_or_a_result(tmp_path):
     """2026-10-19 (box B-208): every candidate of task 1 ran as the base arm, and results landed in the rollout smoke's folder.
     Two different trees and the same tree twice must give three arms, three staged bundles and three item dirs, all under this
-    root's race dir, each with a staged.json naming the fingerprint that ran."""
+    root's race dir, each with a staged record naming the fingerprint that ran."""
     from harness2.substrate.base import Install, RunRequest
     stage = tmp_path / "subs"
     a = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "a")
@@ -130,7 +130,7 @@ def test_two_trees_and_one_tree_twice_never_share_an_arm_or_a_result(tmp_path):
     assert all(str(d).startswith(str((tmp_path / "runs" / "race").resolve())) for d in dirs)
     assert len(list(stage.glob("_h2_*"))) == 3
     L(RunRequest(task_ref="arrow_06fe693", run_ids=("inv1-0",), timeout=600), ib)        # a rerun writes the record
-    rec = json.loads((dirs[1] / "staged.json").read_text())
+    rec = json.loads(L.record_path(dirs[1].parent.name, "arrow_06fe693").read_text())
     assert rec["fingerprint"] == "bb" * 32 and rec["run_id"] == "inv1-0" and rec["arm"] == dirs[1].parent.name
     assert rec["system_md_sha256"] == hashlib.sha256((stage / rec["arm"] / "prompts" / "system.md").read_bytes()).hexdigest()
 
@@ -159,10 +159,29 @@ def test_a_rollout_whose_result_lands_elsewhere_raises(tmp_path):
                                                         f'echo "{{}}" > "{elsewhere}/items/{arm}/t1/task_results.jsonl"']
     with pytest.raises(RuntimeError, match="no result"):
         L(RunRequest(task_ref="t1", run_ids=("r1",), timeout=60), Install(staging_dir=src, fingerprint="ab" * 32))
-    L.command = lambda ids_file, arm: ["/bin/sh", "-c", f'mkdir -p "{L.out}/items/{arm}/t1" && '
-                                                        f'echo "{{}}" > "{L.out}/items/{arm}/t1/task_results.jsonl"']
-    d = L(RunRequest(task_ref="t1", run_ids=("r2",), timeout=60), Install(staging_dir=src, fingerprint="ab" * 32))[0]
-    assert json.loads((d / "staged.json").read_text())["run_id"] == "r2"
+
+
+def test_the_record_is_written_before_the_rollout_outside_the_containers_root_owned_dirs(tmp_path):
+    """2026-10-19 (box B-209): the race container runs as root, so race/items/<arm>/<task> and its files are root:root 755
+    and the box user could not write staged.json there after the rollout. The record now lives in race/staged/, is written
+    BEFORE p2_race runs (the fake runner refuses to produce a result without it), and a read-only item dir changes nothing."""
+    from harness2.substrate.base import Install, RunRequest
+    src = compose_bundle({"systemprompt.md": V12_PROMPT}, tmp_path / "staged")
+    L = RaceLauncher(tmp_path / "runs", dry=False, stage_root=tmp_path / "subs")
+    L.docker = _fake_bin(tmp_path / "docker", "exit 1\n")
+    inst = Install(staging_dir=src, fingerprint="ab" * 32)
+    arm = L.arm(inst, "r2")
+    rec = L.record_path(arm, "t1")
+    item = L.out / "items" / arm / "t1"
+    L.command = lambda ids_file, a: ["/bin/sh", "-c", f'test -f "{rec}" || exit 3; mkdir -p "{item}" && '
+                                                      f'echo "{{}}" > "{item}/task_results.jsonl" && chmod 555 "{item}"']
+    try:
+        d = L(RunRequest(task_ref="t1", run_ids=("r2",), timeout=60), inst)[0]
+        assert d == item and (d / "task_results.jsonl").is_file() and not (d / "staged.json").exists()
+        r = json.loads(rec.read_text())
+        assert r["run_id"] == "r2" and r["arm"] == arm and r["task"] == "t1" and r["fingerprint"] == "ab" * 32
+    finally:
+        item.chmod(0o755) if item.is_dir() else None
 
 
 def test_a_live_container_mounted_on_another_folder_is_removed_not_reused(tmp_path):

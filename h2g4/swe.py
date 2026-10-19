@@ -107,8 +107,9 @@ class RaceLauncher:
       task must not share an item dir).
     - --harness repo-relative (p2_race copies "/g4/$HARNESS").
     - After each call the result must exist at <runs_root>/race/items/<arm>/<task>, or the rollout raises (recorded by
-      harness2 as a dead rollout, never as a silent miss); staged.json beside it records run_id, arm, fingerprint and the
-      sha256 of the staged prompts/system.md, so the archive proves which harness ran.
+      harness2 as a dead rollout, never as a silent miss). BEFORE the call, <runs_root>/race/staged/<arm>/<task>.json records
+      run_id, arm, fingerprint and the sha256 of the staged prompts/system.md, so the archive proves which harness ran (not
+      beside the result: the container runs as root and its item dirs are read-only to the box user, B-209).
     Rollouts are serialised behind a lock (one model; the scorer is sequential)."""
 
     def __init__(self, runs_root: Path, *, harness: Path = HARNESS, port: int = 8001, python: str = sys.executable,
@@ -151,6 +152,22 @@ class RaceLauncher:
                 "--ids", str(ids_file), "--arms", arm, "--conc", "1", "--port", str(self.port), "--keep",
                 "--label", self.label]
 
+    def record_path(self, arm: str, task: str) -> Path:
+        """Where a rollout's staged.json lives: <root>/race/staged/<arm>/<task>.json, a folder this process owns. The race
+        container runs as root, so the item dirs it creates under race/items are root-owned and read-only to the box user
+        (box B-209); the record is written there by no one, and it is written BEFORE the rollout, never after."""
+        return self.out / "staged" / arm / f"{task}.json"
+
+    def give_back(self, arm: str) -> None:
+        """Best effort: chown what the container wrote for this arm to the calling user, so the archive copy and cleanup do
+        not need root. A failure here never fails a rollout (the record is already outside the container's dirs)."""
+        if not hasattr(os, "getuid"):
+            return
+        ug = f"{os.getuid()}:{os.getgid()}"
+        subprocess.run([self.docker, "exec", f"g4-{self.label}", "sh", "-c",
+                        f"chown {ug} /out/items 2>/dev/null; chown -R {ug} /out/items/{arm} /out/items/{arm}.* 2>/dev/null; true"],
+                       capture_output=True, check=False)
+
     def __call__(self, req: RunRequest, install: Install) -> list[Path]:
         dirs = []
         with self.lock:
@@ -160,6 +177,15 @@ class RaceLauncher:
                 if not dest.is_dir():
                     shutil.copytree(install.staging_dir, dest)
                 run_dir = self.out / "items" / arm / req.task_ref
+                rec = self.record_path(arm, req.task_ref)
+                if not rec.is_file():
+                    rec.parent.mkdir(parents=True, exist_ok=True)
+                    sysmd = dest / "prompts" / "system.md"
+                    rec.write_text(json.dumps({
+                        "run_id": run_id, "arm": arm, "task": req.task_ref, "fingerprint": install.fingerprint,
+                        "system_md_sha256": hashlib.sha256(sysmd.read_bytes()).hexdigest() if sysmd.is_file() else None,
+                        "skills": sorted(x.name for x in (dest / "skills").iterdir()) if (dest / "skills").is_dir() else []},
+                        indent=1), encoding="utf-8")
                 if not (run_dir / "task_results.jsonl").is_file():
                     self.out.mkdir(parents=True, exist_ok=True)
                     ids_file = self.out / f"ids_{arm}.txt"
@@ -173,15 +199,9 @@ class RaceLauncher:
                             log.flush()
                             subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
                                            timeout=int(req.timeout) + 900, check=False)
+                        self.give_back(arm)
                         if not (run_dir / "task_results.jsonl").is_file():
                             raise RuntimeError(f"rollout {run_id}: no result at {run_dir}; see {self.out}/race.log and launch.log")
-                if run_dir.is_dir():
-                    sysmd = dest / "prompts" / "system.md"
-                    (run_dir / "staged.json").write_text(json.dumps({
-                        "run_id": run_id, "arm": arm, "fingerprint": install.fingerprint,
-                        "system_md_sha256": hashlib.sha256(sysmd.read_bytes()).hexdigest() if sysmd.is_file() else None,
-                        "skills": sorted(x.name for x in (dest / "skills").iterdir()) if (dest / "skills").is_dir() else []},
-                        indent=1), encoding="utf-8")
                 dirs.append(run_dir)
         return dirs
 

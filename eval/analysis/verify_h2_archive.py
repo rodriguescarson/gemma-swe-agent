@@ -8,7 +8,7 @@ Checks (each prints PASS/FAIL; exit 1 if any FAIL):
   env        env.txt names the harness2 pin (1cfe254) and holds a pip freeze
   proxy      proxy.jsonl has per-call rows (t, latency_s)
   sweep      root/adapt (summaries), root/adapt/_audit (improver sessions), root/library, the rollouts (results + traces in
-             equal numbers; under root/race/items/<arm>/<task> each with a staged.json naming its run and fingerprint, or the
+             equal numbers; under root/race/items/<arm>/<task> each with a record root/race/staged/<arm>/<task>.json naming its run and fingerprint, or the
              pre-B-208 root/rollouts/<run>/items/<arm>/<task>), judged.json and base_judged.json
   transfer   eval_base_a.json and eval_base_b.json, and a frozen/<label>/ tree for every non-base eval_<label>.json
   secrets    no OpenRouter key material ("sk-or-") anywhere
@@ -75,15 +75,20 @@ def check_proxy(d: Path) -> tuple[bool, str]:
     return ok, f"{len(rows)} per-call rows" if ok else f"{len(rows)} rows, some without t/latency_s"
 
 
+def _record(r: Path, item: Path) -> Path:
+    return r / "race" / "staged" / item.parent.name / f"{item.name}.json"
+
+
 def _rollouts(r: Path) -> list[tuple[str, str | None, Path]]:
     """(task, run_id, item dir) for every result. Since 19 Oct (box B-208) the launcher writes root/race/items/<arm>/<task>
-    with the run id in the item's staged.json (None if the record is missing); before that, root/rollouts/<run>/items/<arm>/
-    <task> with the run id in the path."""
+    with the run id in the rollout's record root/race/staged/<arm>/<task>.json, written before the rollout (B-209: the race
+    container's item dirs are root-owned; None if the record is missing); before that, root/rollouts/<run>/items/<arm>/<task>
+    with the run id in the path."""
     out = []
     race = r / "race" / "items"
     for res in sorted(race.rglob("task_results.jsonl")) if race.is_dir() else []:
         try:
-            rid = json.loads((res.parent / "staged.json").read_text()).get("run_id")
+            rid = json.loads(_record(r, res.parent).read_text()).get("run_id")
         except (OSError, ValueError):
             rid = None
         out.append((res.parent.name, rid, res.parent))
@@ -132,9 +137,9 @@ def check_sweep(d: Path, expected: dict | None = None) -> tuple[bool, str]:
         untraced = [x for x in runs if not list((x / "traces").glob("trace_*.json"))]
         if untraced:
             problems.append(f"{t}: {len(untraced)} rollouts without a trace")
-        unrecorded = [x for x in runs if "race" in x.relative_to(r).parts[:1] and not (x / "staged.json").is_file()]
+        unrecorded = [x for x in runs if "race" in x.relative_to(r).parts[:1] and not _record(r, x).is_file()]
         if unrecorded:
-            problems.append(f"{t}: {len(unrecorded)} rollouts without staged.json")
+            problems.append(f"{t}: {len(unrecorded)} rollouts without a staged record")
         if t not in judged:
             problems.append(f"{t}: no judged row")
     if not tasks:

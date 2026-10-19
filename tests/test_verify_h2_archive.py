@@ -34,7 +34,8 @@ def rollout(r: Path, run_id: str, task: str, traced=True, legacy=False):
     it = r / "rollouts" / run_id / "items" / "_staging" / "h2_ab" / task if legacy else item(r, run_id, task)
     write(it / "task_results.jsonl", json.dumps({"instance_id": task, "resolved": False}) + "\n")
     if not legacy:
-        write(it / "staged.json", json.dumps({"run_id": run_id, "arm": it.parent.name, "fingerprint": "ab" * 32}))
+        write(r / "race" / "staged" / it.parent.name / f"{task}.json",
+              json.dumps({"run_id": run_id, "arm": it.parent.name, "task": task, "fingerprint": "ab" * 32}))
     if traced:
         write(it / "traces" / f"trace_{task}.json", '{"steps": []}')
 
@@ -88,9 +89,10 @@ def test_each_task_level_omission_fails(tmp_path):
     shutil.rmtree(d / "root" / "library")
     assert not V.check_sweep(d)[0]
     d = sweep_archive(tmp_path / "f")                                  # a result with no record of what ran
-    (item(d / "root", f"{tasks[2]}-r1", tasks[2]) / "staged.json").unlink()
+    it = item(d / "root", f"{tasks[2]}-r1", tasks[2])
+    (d / "root" / "race" / "staged" / it.parent.name / f"{tasks[2]}.json").unlink()
     ok, msg = V.check_sweep(d)
-    assert not ok and "without staged.json" in msg
+    assert not ok and "without a staged record" in msg
 
 
 def test_a_pre_b208_archive_still_verifies(tmp_path):
