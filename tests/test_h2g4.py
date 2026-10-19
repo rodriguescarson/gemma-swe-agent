@@ -457,3 +457,16 @@ def test_h2g4_detaches_stdin_so_opencode_never_waits_for_eof(tmp_path):
     finally:
         p.kill()
     assert out.strip() == "EOF", out
+
+
+def test_dry_run_with_evaluate_starts_no_rollout(tmp_path, monkeypatch, capsys):
+    """2026-10-19 (box B-217): --evaluate was handled before --dry-run, so '--evaluate base --label base_a --dry-run' ran real
+    rollouts. A dry run must only print the stream."""
+    from h2g4 import run as RUN
+    called = []
+    monkeypatch.setattr(RUN, "evaluate", lambda *a, **k: called.append(a) or 0)
+    rc = RUN.main([str(tmp_path / "t"), "--only-domains", "boltons,attrs", "--max-tasks", "6", "--evaluate", "base",
+                   "--label", "base_a", "--dry-run"])
+    out = capsys.readouterr().out
+    assert rc == 0 and not called
+    assert "boltons_139d5dc" in out and "attrs_937b1e2" in out and "one rollout per task = 12" in out

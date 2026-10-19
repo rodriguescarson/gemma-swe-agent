@@ -290,17 +290,21 @@ def main(argv=None) -> int:
             return 1
         print(h)
         return 0
-    if a.evaluate:
-        if not a.label:
-            print("error: --evaluate needs --label", file=sys.stderr)
-            return 1
-        return evaluate(adapter, None if a.evaluate == "base" else Path(a.evaluate), a.label, [t for _, t in stream])
-    if a.dry_run:
+    if a.evaluate and not a.label:
+        print("error: --evaluate needs --label", file=sys.stderr)
+        return 1
+    if a.dry_run:                                              # before --evaluate: a dry run never starts a rollout (box B-217)
         for i, (d, t) in enumerate(stream, 1):
             print(f"{i:>4}  {d:<24} {t}")
-        print(f"# {len(stream)} tasks over {len(by_domain)} domains; k={a.k}; modes={modes_of(a.modes)}; "
-              f"rollouts = 4k per task = {4 * a.k * len(stream)}, improver sessions = 3k per task = {3 * a.k * len(stream)}")
+        if a.evaluate:
+            print(f"# {len(stream)} tasks over {len(by_domain)} domains; --evaluate {a.evaluate} --label {a.label}: "
+                  f"one rollout per task = {len(stream)}, no improver sessions")
+        else:
+            print(f"# {len(stream)} tasks over {len(by_domain)} domains; k={a.k}; modes={modes_of(a.modes)}; "
+                  f"rollouts = 4k per task = {4 * a.k * len(stream)}, improver sessions = 3k per task = {3 * a.k * len(stream)}")
         return 0 if stream else 1
+    if a.evaluate:
+        return evaluate(adapter, None if a.evaluate == "base" else Path(a.evaluate), a.label, [t for _, t in stream])
     if not stream:
         print("error: empty task stream", file=sys.stderr)
         return 1
