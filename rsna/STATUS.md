@@ -9,3 +9,6 @@
 - disk free: 726G on / (gate >= 650 GB per owner amendment): PASS
 - RAM: 94 GB total, 87 GB available
 - Kaggle CLI: ~/g4/venv/bin/kaggle, KAGGLE_USERNAME exported; API call (datasets list): ok
+
+## T2 START 2026-10-19T19:45:17Z
+- downloading 3 Kaggle datasets into ~/rsna/src with the Kaggle CLI (--unzip)
