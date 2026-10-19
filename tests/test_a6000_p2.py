@@ -395,3 +395,23 @@ def test_race_setup_installs_the_wheels_under_the_box_venv_constraints():
     m = re.search(r"pip -q install [^\n]*-c /g4/(\S+) /g4/harness/wheels/\*\.whl", race.SETUP)
     assert m and (ROOT / m.group(1)).is_file()
     assert "litellm==" not in race.SETUP
+
+
+def test_keep_reuses_a_container_only_when_its_out_mount_is_this_runs_out(tmp_path):
+    """2026-10-19 (box B-221): the autopilot's probe reused g4-probe, created for a sandbox check with /out elsewhere, and its
+    four items landed in the other folder. reusable() is false unless the live container's /out is this run's out dir."""
+    out = tmp_path / "p2"
+    out.mkdir()
+
+    def fake(mount, live=True):
+        f = tmp_path / f"docker_{abs(hash((str(mount), live)))}"
+        f.write_text("#!/bin/sh\n"
+                     f'[ "$1" = exec ] && exit {0 if live else 1}\n'
+                     f'[ "$1" = inspect ] && echo "{mount}"\n'
+                     "exit 0\n")
+        f.chmod(0o755)
+        return str(f)
+    assert race.reusable("g4-probe", out, docker=fake(out))
+    assert not race.reusable("g4-probe", out, docker=fake(tmp_path / "sandbox_check"))
+    assert not race.reusable("g4-probe", out, docker=fake(out, live=False))
+    assert not race.reusable("g4-probe", out, docker=fake(""))

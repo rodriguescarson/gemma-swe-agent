@@ -110,6 +110,19 @@ def item_script(arm, task, port, scale, items="items", rdir=None):
             f"rm -rf /tmp/sbx_{arm}_{rdir} /tmp/run_{arm}_{rdir}; exit $rc")
 
 
+def reusable(name, out, docker=DOCKER):
+    """A live, set-up container g4-<label> whose /out is THIS run's out dir. --keep used to reuse any live container of that
+    name, and its /out stays wherever it was first mounted: a probe then wrote its items into another run's folder and the
+    probe guard saw none (box B-208 for the Harness² launcher, B-221 for the autopilot's probe). A container mounted elsewhere
+    is not reusable, so main() removes and recreates it."""
+    if subprocess.run([docker, "exec", name, "test", "-d", "/root/h"], capture_output=True).returncode != 0:
+        return False
+    r = subprocess.run([docker, "inspect", "-f", '{{range .Mounts}}{{if eq .Destination "/out"}}{{.Source}}{{end}}{{end}}', name],
+                       capture_output=True, text=True)
+    src = r.stdout.strip() if r.returncode == 0 else ""
+    return bool(src) and Path(src).resolve() == Path(out).resolve()
+
+
 def pending(items, out, items_dir="items", passes=1):
     out = Path(out)
     if passes > 1:
@@ -151,7 +164,7 @@ def main(argv=None):
     items = pending(build_items(ids, a.arms, a.passes), str(out), a.items_dir, a.passes)
     (out / "ids.txt").write_text("".join(i + "\n" for i in ids))
     name = f"g4-{a.label}"
-    live = subprocess.run([DOCKER, "exec", name, "test", "-d", "/root/h"], capture_output=True).returncode == 0
+    live = reusable(name, out)
     if not (a.keep and live):
         subprocess.run([DOCKER, "rm", "-f", name], capture_output=True)
     pallets = Path.home() / "g4" / "pallets_cache"; pallets.mkdir(exist_ok=True)
