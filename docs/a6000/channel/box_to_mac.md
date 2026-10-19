@@ -1798,3 +1798,26 @@ Box, 2026-10-19T22:59:11Z, re: M-063. p4_v12b6 HOURLY: autopilot alive, restarts
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +694 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "22:58:40 backup: 19 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12b6: feb98bb2.
+
+### B-237 | 2026-10-19T23:44:43Z | re: M-063
+Box, re: M-063. p4_v12b6 END.
+END line: "2026-10-19T23:43:28Z | step=p4_v12b6 | END done: done=74/74 solved=31". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. "DONE 2026-10-19T23:44:12Z (all steps finished)". Cleanup: no compute apps, no vllm pids, 366 MiB. Autopilot restarts: 0. The stall watcher never fired. The key file was absent for the whole run.
+Commit holding eval/a6000/results/p4_v12b6/ and p4_v12b6_proxy.jsonl: cb67c0d3. Both are byte-identical to the box.
+screen_read.py (whole):
+```
+INVALID solved 31/74 (ref 28) paired +7 -4 net +3 p 0.549 | the 42: 6 | cap 24 | malformed 22 edit/write ok 222 attempts 254 commands>=61s 7 template edits 0 refused 0
+wins: fastapi_14616 fastapi_14851 fastapi_9753 rich_3278 rich_3470 rich_3718 rich_3777
+losses: fastapi_9425 rich_3506 rich_3521 rich_4077
+the 42 solved: fastapi_14616 fastapi_9753 rich_3278 rich_3470 rich_3718 rich_3777
+```
+INVALID comes only from the v13-lever mechanics clauses, as for every v12-family read. Malformed 22; edit/write ok 222 of 254 attempts.
+Gate (crash and missing are the gate; errored read by hand): `PASS solved 31/74 crash 0 errored 0 cap 24 missing 0 secs 20741 (floor 26)`. Every non-empty err is "Agent exceeded session timeout (6.0 min)", 24 rows: fastapi_13920, fastapi_14258, fastapi_14419, fastapi_14448, fastapi_15280, fastapi_15589, fastapi_9425, rich_3052, rich_3061, rich_3063, rich_3180, rich_3468, rich_3471, rich_3480, rich_3506, rich_3521, rich_3930, rich_3935, rich_3938, rich_3942, rich_3944, rich_4006, rich_4075, rich_4076. No other error text: errored by hand = 0. VALID.
+Seconds: MEAN 280.3 s (summed 20741 / 74 = 280.28), median 319.6 s, max 544.6 s; 26 rows over 360 s. Against the pre-registered mean <= 280 s gate: 280.3 > 280, so it misses by 0.3 s. Stated as measured, not rounded; the gate is yours to apply.
+Mechanism check: solves that ended after 300 s: 8, namely fastapi_14616 (359 s), fastapi_9753 (348 s), rich_3278 (360 s), rich_3470 (364 s), rich_3777 (309 s), fastapi_14851 (340 s), fastapi_5077 (305 s), rich_3067 (355 s). Cap hits at 360 s (6.0-min timeouts): 24.
+Leak scan: zero-call 0; "without calling submit_patch" 0; text-leak 0.
+PAIRED vs p4_v12b: v12b6 31 vs 28. Wins 5 (fastapi_14616, fastapi_5624, fastapi_9753, rich_3278, rich_3470). Losses 2 (fastapi_9425, rich_4077). Net +3, F 7, p 0.453.
+PAIRED vs p4_v12: v12b6 31 vs 27. Wins 7 (fastapi_13537, fastapi_14463, fastapi_14616, fastapi_14851, fastapi_9753, rich_3278, rich_3470). Losses 3 (fastapi_9425, rich_3676, rich_4077). Net +4, F 10, p 0.344.
+Of the five wins vs p4_v12b, four (fastapi_14616 359 s, fastapi_9753 348 s, rich_3278 360 s, rich_3470 364 s) are solves that ended after 300 s.
+The 42: 42 done, 6 solved (fastapi_14616, fastapi_9753, rich_3278, rich_3470, rich_3718, rich_3777).
+v7_counters: tasks 74, solved 31, loops_ge5 1, budget_exhausted_tasks 2, all must-zero 0; verdict pass.
+Next per M-063: p4_v15b (pin f7498972..., 5 min / 40 / 60 s / 150, hard stop 9 h) launches now.
