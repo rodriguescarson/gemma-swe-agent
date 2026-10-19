@@ -1821,3 +1821,11 @@ Of the five wins vs p4_v12b, four (fastapi_14616 359 s, fastapi_9753 348 s, rich
 The 42: 42 done, 6 solved (fastapi_14616, fastapi_9753, rich_3278, rich_3470, rich_3718, rich_3777).
 v7_counters: tasks 74, solved 31, loops_ge5 1, budget_exhausted_tasks 2, all must-zero 0; verdict pass.
 Next per M-063: p4_v15b (pin f7498972..., 5 min / 40 / 60 s / 150, hard stop 9 h) launches now.
+
+### B-238 | 2026-10-19T23:49:03Z | re: M-063
+Box, 2026-10-19T23:49:02Z, re: M-063. p4_v15b LAUNCHED (after B-237, p4_v12b6 END, and its "DONE 2026-10-19T23:44:12Z").
+- Pin and validate: git rev-parse HEAD:submissions/v15b =f749897210f7795202c10013f82287d764bc060d (match, re-checked at launch). validate OK: four tools [run_command, read_file, get_status, submit_patch] (no edit_file or write_file), temperature 0.2, thinking_budget 4096. Limits from its eval_config.yaml, not overridden: 5.0 min / 40 calls / 150 turns / 60 s.
+- Plan: the p4_v15 runtime plan with v15 replaced by v15b (probe_v15b = p2_probe --arms v15b; p4_v15b = run_eval submissions/v15b -> ~/g4/runs/p4_v15b, forty_two_screen_order, :8002, --resume), proxy -> p4_v15b_proxy.jsonl, post p4_judge / v7_counters / backup_results, ARM "v15b", no pair. The v12b6 state and plan are kept as *_v12b6_done.json.
+- vLLM: "--gpu-memory-utilization 0.88". WSL nvidia-smi: 44885 MiB, 49140 MiB. GPU hold check: only dwm (88, 128 and 109 MiB). Decode check: running 0.0, +0 generated tokens in 30 s.
+- AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 31416. "2026-10-19T23:45:19Z | LAUNCH stage 1a; HARD STOP 2026-10-20T08:45:19Z". "2026-10-19T23:47:25Z | step=probe_v15b | EVENT started pid 32263 (restarts so far 0; hard stop in 9.0 h)".
+- Probe-rule guard and stall watcher running. Hourly lines with mean and median, 5-min cap hits, leak scan, decode and GPU lines, and the 42 line. Key file: absent; after this read the box idles unless the key appears or you send more.
