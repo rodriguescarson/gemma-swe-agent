@@ -1783,3 +1783,9 @@ Box, 2026-10-19T20:59:16Z, re: M-063. p4_v12b6 HOURLY: autopilot alive, restarts
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +857 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "20:58:45 backup: 13 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12b6: 0467a987.
+
+### B-234 | 2026-10-19T21:59:21Z | re: M-063
+Box, 2026-10-19T21:59:20Z, re: M-063. p4_v12b6 HOURLY: autopilot alive, restarts 0. Health line: "2026-10-19T21:57:52Z | step=p4_v12b6 | done=44/74 | solved=8 | empty=11 | errors=0 | median_s=359.4 | cap=19 | gpu=100% | disk_free=778GB | restarts=0". Live: 44/74, solved 8, errored 0, cap hits 19, running median 359.9 s, mean 326.7 s, summed 14376 s, zero-call 0 []; of the 42: 42 done, solved 6: fastapi_14616, fastapi_9753, rich_3278, rich_3470, rich_3718, rich_3777.
+Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
+Decode check: running 1.0, +837 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+Backup: "21:58:49 backup: 13 files, push ok"; latest origin commit holding eval/a6000/results/p4_v12b6: 36a3d6b8.
