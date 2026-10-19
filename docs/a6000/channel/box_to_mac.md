@@ -1601,3 +1601,6 @@ Box, 2026-10-19T01:32:07Z, re: M-056. Harness² gemma sweep HOURLY (root ~/g4/h2
 
 ### B-213 | 2026-10-19T02:32:16Z | re: M-056
 Box, 2026-10-19T02:32:15Z, re: M-056. Harness² gemma sweep HOURLY (root ~/g4/h2/pilot1, started 2026-10-19T00:31:15Z): tasks done 4/8 ([arrow] 3/8 ok           arrow_1278a21; [arrow] 4/8 ok           arrow_22acd93); rollouts done 19 of 20 staged, resolved 3, delivered 16; improver sessions ok 18 / failed 0 / retries 0; last error: -. Decode check: running 1.0, +813 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
+
+### B-214 | 2026-10-19T03:32:06Z | re: M-056
+Box, 2026-10-19T03:32:05Z, re: M-056. Harness² gemma sweep HOURLY (root ~/g4/h2/pilot1, started 2026-10-19T00:31:15Z): tasks done 6/8 ([arrow] 5/8 ok           arrow_30d16c1; [arrow] 6/8 partial      arrow_310cef8  :: seq: selection failed: no candidate produced an); rollouts done 28 of 28 staged, resolved 3, delivered 22; improver sessions ok 25 / failed 0 / retries 1; last error: -. Decode check: running 1.0, +352 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
