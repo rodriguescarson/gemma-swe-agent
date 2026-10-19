@@ -1,0 +1,2 @@
+- When fixing argument propagation issues, explicitly audit the call stack for every branch of the logic to ensure the argument is not dropped in any conditional path.
+- Always verify that local variables captured from keyword arguments (e.g., tzinfo) are passed as arguments to subsequent factory or instantiation methods.

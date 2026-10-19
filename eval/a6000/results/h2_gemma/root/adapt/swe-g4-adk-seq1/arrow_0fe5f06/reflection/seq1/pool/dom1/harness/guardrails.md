@@ -1,0 +1,1 @@
+- When using the edit_file tool, never use literal `\n` characters in the new_string to create new lines. The tool interprets them as literal text. To insert a newline, create a separate edit_file call to modify the line below the insertion point, or ensure the new_string only contains the content for a single line.

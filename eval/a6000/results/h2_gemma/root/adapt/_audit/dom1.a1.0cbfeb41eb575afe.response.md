@@ -1,0 +1,3 @@
+<notes>
+- Added `COMMON_FORMATS` to `arrow/constants.py` to provide built-in format strings for ISO 8601 and RFC 2822, as seen in the candidate's deliverable.
+</notes>

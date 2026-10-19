@@ -1,0 +1,1 @@
+<!-- skills: ADK skills, loaded with load_skill_resource and run with run_skill_script(skill_name, file_path). Add one as skills/<name>/SKILL.md (frontmatter `name:` matching the directory and a `description:`) plus skills/<name>/scripts/<file>.py (Python stdlib only, offline). -->
