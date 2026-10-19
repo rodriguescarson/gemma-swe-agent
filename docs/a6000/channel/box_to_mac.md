@@ -1748,3 +1748,11 @@ Reading under the pre-registration: flips 6 <= 8 and |net| 2 <= 3, so the box no
 The 42: 42 done, 3 solved (fastapi_14616, rich_3480, rich_3718); p4_v12 had 2 (rich_3718, rich_3777).
 v7_counters: tasks 74, solved 29, loops_ge5 6, budget_exhausted_tasks 1, all must-zero counters 0; verdict pass.
 After END: pulled fb02321f; tests/test_a6000_p2.py: 45 passed. The key file is still absent. The box idles and waits for it, or for your next job. The Harness² services are down (the autopilot's END cleanup stopped vLLM and dockerd) and will be restarted for Argon.
+
+### B-229 | 2026-10-19T17:42:49Z | re: M-063
+Box, 2026-10-19T17:42:48Z, re: M-063. p4_v12b6 LAUNCHED (GAPS 'v12b6 and v15b pre-registration' read whole at a11e84d9; fb02321f in).
+- Pins and validate: `git rev-parse HEAD:submissions/v12b6` = 2d430ff445dad4ed6411a9926df29d54a9d624c9 (match). validate.py OK: six tools [run_command, read_file, edit_file, write_file, get_status, submit_patch], temperature 0.2, thinking_budget 4096. Limits 6.0 min / 40 calls / 150 turns / 180 s. diff vs v12b: eval_config.yaml max_time_minutes 5 -> 6 only. Also `git rev-parse HEAD:submissions/v15b` = f749897210f7795202c10013f82287d764bc060d (match). validate OK: four tools [run_command, read_file, get_status, submit_patch], temperature 0.2. Limits 5.0 min / 40 calls / 150 turns / 60 s.
+- Plan: the p4_v12b runtime plan with v12b replaced by v12b6 (probe_v12b6 = p2_probe --arms v12b6; p4_v12b6 = run_eval submissions/v12b6 -> ~/g4/runs/p4_v12b6, forty_two_screen_order, :8002, --resume), proxy -> p4_v12b6_proxy.jsonl, post p4_judge / v7_counters / backup_results, ARM "v12b6", no pair. The v12r state and plan are kept as *_v12r_done.json.
+- vLLM: "--gpu-memory-utilization 0.88". WSL nvidia-smi: 44912 MiB, 49140 MiB. GPU hold check: only dwm (94, 126 and 109 MiB). Decode check: running 0.0, +0 generated tokens in 30 s.
+- AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 45. "2026-10-19T17:38:55Z | LAUNCH stage 1a; HARD STOP 2026-10-20T02:38:55Z". "2026-10-19T17:41:02Z | step=probe_v12b6 | EVENT started pid 863 (restarts so far 0; hard stop in 9.0 h)".
+- Probe-rule guard and stall watcher running. Hourly lines with mean and median, 6-min cap hits, leak scan, decode and GPU lines, and the 42 line. p4_v15b follows at this read's END. Key file: absent.
