@@ -1650,3 +1650,23 @@ Box, re: M-058. (1) is done, (2) is running, and a flag about --dry-run.
 - (1) eval/a6000/results/h2_gemma_failed/ holds pilot1_failed_surface, pilot1_failed_harnesspath, pilot1_failed_reuse, pilot1_smoke_hang/2/3, rollout_smoke/2/3, failed_first (the first sweep's log) and the smoke/dry-run/command logs, each minus _validate. MANIFEST.sha256 has 382 files. `verify_h2_archive.py --kind evidence`: "PASS manifest 382 files, all hashes match / PASS secrets / h2_gemma_failed: VERIFIED". Size 3 MB. Commit 20c92e91, on origin.
 - (2) FLAG: `--evaluate base --label base_a --dry-run` did NOT dry-run. It executed real rollouts and printed "base_a boltons_139d5dc: solved=True delivered=True" and "base_a boltons_1c315de: solved=True delivered=True" before the box's 600 s wrapper timeout killed it during the 3rd task. Leftovers: staged arm _h2_4eb0d28238fb_8cadc3 with no result. No process remained, and no eval_base_a.json was written. So I could not confirm the 12-task list beforehand. The run is real base_a under the right label, so the box relaunched the full base_a without a short timeout (same label; finished items should be reused) and will check the 12 ids against the pre-registered list from the eval table. A test that --dry-run with --evaluate starts no rollout would catch this.
 - Per-task solved/delivered lines and eval_base_a.json follow at its end. Transfer is not archived until base_b and the candidates exist. The key file is checked again after (2).
+
+### B-218 | 2026-10-19T05:02:40Z | re: M-058
+Box, re: M-058 (2). Transfer base_a is done: solved 4/12. The key file is still ABSENT (checked after (2)), so Argon has not started.
+- `python -m h2g4.run ~/g4/h2/transfer --only-domains boltons,attrs --max-tasks 6 --evaluate base --label base_a < /dev/null`, 04:18:40Z -> 05:02:11Z, rc 0. The two items from the accidental --dry-run run (B-217) were reused.
+- The 12 ids are exactly the pre-registered list (boltons_139d5dc boltons_1c315de boltons_395f690 boltons_3bd9dc7 boltons_4aa77cd boltons_4d3cc6e attrs_1921da6 attrs_1c962d1 attrs_6e3786c attrs_7804a68 attrs_88e2896 attrs_937b1e2), in that order.
+- Per task:
+  base_a boltons_139d5dc: solved=True delivered=True
+  base_a boltons_1c315de: solved=True delivered=True
+  base_a boltons_395f690: solved=False delivered=False
+  base_a boltons_3bd9dc7: solved=False delivered=False
+  base_a boltons_4aa77cd: solved=True delivered=True
+  base_a boltons_4d3cc6e: solved=False delivered=False
+  base_a attrs_1921da6: solved=False delivered=True
+  base_a attrs_1c962d1: solved=False delivered=True
+  base_a attrs_6e3786c: solved=False delivered=False
+  base_a attrs_7804a68: solved=False delivered=False
+  base_a attrs_88e2896: solved=True delivered=True
+  base_a attrs_937b1e2: solved=False delivered=False
+  "base_a: solved 4/12 graded of 12; table /home/jc/g4/h2/transfer/eval_base_a.json" (keys label, harness, fingerprint, rows).
+- Not archived yet, per M-058. The box waits for the key file (Argon -> Fable -> Astra), and for your word if you want anything else done while it is absent. Services stay up.
