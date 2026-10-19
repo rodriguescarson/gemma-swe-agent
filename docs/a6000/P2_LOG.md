@@ -3923,3 +3923,4 @@ not run (no capture)
 - 2026-10-19T17:57:42Z | step=p4_v12b6 | EVENT started pid 5192 (restarts so far 0; hard stop in 8.7 h)
 - 2026-10-19T18:57:42Z | step=p4_v12b6 | done=11/74 | solved=1 | empty=2 | errors=0 | median_s=358.9 | cap=5 | gpu=100% | disk_free=779GB | restarts=0
 - 2026-10-19T19:57:45Z | step=p4_v12b6 | done=22/74 | solved=4 | empty=2 | errors=0 | median_s=359.4 | cap=9 | gpu=100% | disk_free=778GB | restarts=0
+- 2026-10-19T20:57:49Z | step=p4_v12b6 | done=32/74 | solved=6 | empty=4 | errors=0 | median_s=353.5 | cap=12 | gpu=100% | disk_free=778GB | restarts=0
