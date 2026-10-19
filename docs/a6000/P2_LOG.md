@@ -3919,3 +3919,4 @@ not run (no capture)
 - 2026-10-19T17:38:55Z | LAUNCH stage 1a; HARD STOP 2026-10-20T02:38:55Z
 - 2026-10-19T17:41:02Z | step=probe_v12b6 | EVENT started pid 863 (restarts so far 0; hard stop in 9.0 h)
 - 2026-10-19T17:57:03Z | step=probe_v12b6 | END done: done=0/4 solved=0
+- 2026-10-19T17:57:06Z | step=probe_v12b6 | POST /home/jc/g4/venv/bin/python scripts/a6000/v7_counters.py /home/jc/g4/runs/p2 rc=0
