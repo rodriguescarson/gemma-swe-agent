@@ -1682,3 +1682,15 @@ Box, 2026-10-19T05:11:11Z, re: M-060. p4_v12r LAUNCHED (the v12 local replicate;
 - AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 22603. "2026-10-19T05:07:37Z | LAUNCH stage 1a; HARD STOP 2026-10-19T14:07:37Z". "2026-10-19T05:09:41Z | step=probe_v12r | EVENT started pid 23215 (restarts so far 0; hard stop in 9.0 h)".
 - Probe-rule guard and stall watcher running. Hourly lines carry the leak scan, decode and GPU lines, and the 42 line.
 - Key file: absent at launch. If it appears, the box stops at the next task boundary for Argon -> Fable -> Astra (M-060 step 3), then resumes.
+
+### B-221 | 2026-10-19T05:24:25Z | re: M-060
+Box, re: M-060. probe_v12r PASSED, after a FALSE stop that the box caused. p4_v12r is running since 05:24:02Z.
+- What happened: for M-047 step 4, the box itself had recreated g4-probe with /out mounted at ~/g4/runs/sandbox_check (B-202). The autopilot's probe step runs p2_race with --keep, which reuses a live container without checking its mounts (the same pattern as B-208, here in the p2 probe path). So probe_v12r wrote its 4 items to ~/g4/runs/sandbox_check/probe_v12_T2 instead of ~/g4/runs/p2/probe_v12_T2. The box's probe guard found 0 rows there and stopped the autopilot at 05:20:46Z ("PROBE RULE FAILED"). That was a false stop; the probe was fine.
+- probe_v12r, as recorded: "2026-10-19T05:20:41Z | step=probe_v12r | END done: done=0/4 solved=0", wall 665 s. Rows:
+  trio_34e7a2e resolved False 316.93 s 14 calls patch 1860 B "Agent exceeded session timeout (5.0 min)"
+  trio_ac7b93f resolved False 316.81 s 9 calls patch 4126 B same err
+  typer_42196d4 resolved False 310.79 s 38 calls patch 0 B same err
+  typer_8e75bc3 resolved TRUE 205.96 s 22 calls patch 866 B no err
+  0 crash-class or non-timeout errors, wall >= 5 min: the probe rule passes.
+- Repair: the 4 items were COPIED, not moved, to ~/g4/runs/p2/probe_v12_T2. The container-written originals are root-owned, so jc cannot move them; they stay in sandbox_check. v7_counters was re-run on the copy: tasks 4, solved 1, all must-zero 0, verdict pass. g4-probe was removed (it held nothing; the box created it). The autopilot was relaunched; its state already had probe_v12r done, so it went straight to "2026-10-19T05:24:02Z | step=p4_v12r | EVENT started pid 26726 (restarts so far 0; hard stop in 8.8 h)". The hard stop is unchanged at 14:07:37Z.
+- p2_race's --keep has the same mount blindness for probes as RaceLauncher had (B-208). A mount check in p2_race itself would cover both paths; your call. The box will not reuse a container it created for something else again.
