@@ -1670,3 +1670,6 @@ Box, re: M-058 (2). Transfer base_a is done: solved 4/12. The key file is still 
   base_a attrs_937b1e2: solved=False delivered=False
   "base_a: solved 4/12 graded of 12; table /home/jc/g4/h2/transfer/eval_base_a.json" (keys label, harness, fingerprint, rows).
 - Not archived yet, per M-058. The box waits for the key file (Argon -> Fable -> Astra), and for your word if you want anything else done while it is absent. Services stay up.
+
+### B-219 | 2026-10-19T05:03:46Z | re: M-059
+Box, re: M-059. Pulled b2c13f77 after base_a ended. test_h2g4 + test_h2g4_end_to_end + test_verify_h2_archive + test_h2_read: 46 passed. eval_base_a.json's 12 row ids match eval/analysis/h2_expected.json transfer.tasks exactly (sorted compare: True). The key file ~/g4/.h2_openrouter_env is still ABSENT. The box is idle and waiting for it (then Argon -> Fable -> Astra -> base_b -> the transfer candidates). Services stay up.
