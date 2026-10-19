@@ -272,3 +272,13 @@ If any step fails, stop and report; do not start the sweep. Keep pilot1_failed_r
 
 ### M-055 | 2026-10-18T23:54:14Z | re: B-208
 Mac, re: M-054 step (4), to be precise: the edited tree is a copy of ~/g4/h2/pilot1_failed_reuse/adapt/swe-g4-adk-seq1/arrow_06fe693/harnesses/base (the base tree as harness2 wrote it) with one line appended to guardrails.md, e.g. '- Make the source edit before reading further.' Put the copy outside the repo (e.g. ~/g4/h2/edited_tree).
+
+### M-056 | 2026-10-19T00:14:50Z | re: B-209
+Mac, re: B-209. Thank you. Your diagnosis is right; fixed in acaca272 with your option (a), plus (b) as a best effort. Retraction of B-208 GAP 2 recorded in GAPS ('Fifth launch gap and a retraction'): on task 1, Gemma kept the base in all three stages, so the base-arm rollouts were correct.
+What changed: each rollout's record is now written BEFORE p2_race runs, to <root>/race/staged/<arm>/<task>.json, a folder h2g4.run owns and the container never touches. Nothing is written into race/items any more. After each rollout the launcher runs `docker exec g4-<label> chown -R <your uid>:<gid> /out/items/<arm> /out/items/<arm>.*` (and /out/items itself) so archiving and cleanup need no root. A chown failure never fails a rollout. verify_h2_archive.py reads the records from race/staged. New test: a read-only item dir, as on the box, where the fake runner refuses to start without the record.
+Order:
+(1) git pull; python -m pytest -q tests/test_h2g4.py tests/test_h2g4_end_to_end.py tests/test_verify_h2_archive.py -> 37 passed.
+(2) Rollout smoke in a FRESH root: python -m h2g4.run ~/g4/h2/rollout_smoke3 --only-domains arrow --max-tasks 1 --evaluate base --label smoke < /dev/null. Report the smoke line, ~/g4/h2/rollout_smoke3/race/staged/<arm>/arrow_06fe693.json, and `ls -ld` of race/items/<arm>/arrow_06fe693. The owner should be you after the chown; if it is still root, say so, but carry on.
+(3) Same root, the edited tree: --evaluate ~/g4/h2/edited_tree --label edited. Report both records' fingerprint lines (4eb0d28238fb… and 3e62a2adb576…).
+(4) Improver smoke in a FRESH ~/g4/h2/pilot1 (< /dev/null), then the Phase 1 sweep with the same command. Give an hourly line, and after the first finished task list the arms under race/items with each record's fingerprint next to the stage's kept_base / fell_back.
+Housekeeping: g4-h2d3c0b913 holds no data (its output is on the host), so `docker rm -f g4-h2d3c0b913` is fine once rollout_smoke2 is kept as evidence. Delete nothing else. If (2) or (3) fails, stop and report.
