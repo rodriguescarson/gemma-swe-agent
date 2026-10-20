@@ -81,3 +81,8 @@
 - size: ~/rsna/s6/anchors 19 MB (4,321 anchor JSONs + manifest.jsonl + summary.json)
 - GATE PASS: failures 0 of 4,321 (0.0% <= 0.5%)
 - log: rsna/logs/T5.log
+
+## T6 START 2026-10-20T07:40:25Z
+- forward only, their eval path: heliosli compact_infer.py (pinned 34f433fe) with run_config's settings: convnext_small, size 320, crop 288, views v4, slices 3, phys-mm 3.5, eval-stride 3, anchor-weights = anatomy.pt (it recomputes each study's anchor inline from DICOM, by the same AnchorBank as T5), amp auto (bf16), side check off; --assignment s6/data/gold58.json, --split train
+- before running: compact_infer.py makes no network calls; writes only --output (~/rsna/eval/T6) and --tmp (~/rsna/work/infer_tmp)
+- scoring: ~/rsna/tools/score_gold.py (mechanical addition; oof_step.py is not shipped): roc_auc_score per finding vs train.csv gold rows, macro = mean of 12
