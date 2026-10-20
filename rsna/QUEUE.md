@@ -1,5 +1,18 @@
 # Queue from the other side (read top to bottom; newest task first)
 
+## T8 details and T10 (added 2026-10-20 10:20Z)
+T8 upload format, so the inference notebook can verify it (it reuses nartaa's checks):
+- Put in the private dataset rsna-knee-s6-student, for each run: the checkpoint exactly as the trainer wrote it
+  (e.g. E_prior_s7_fall.pt), its run_config JSON and its DONE JSON. Name them <checkpoint stem>.run_config.json and
+  <checkpoint stem>.DONE.json (nartaa's naming), copied unchanged from the trainer's output.
+- The DONE JSON's "model" basename must equal the checkpoint file name and its "model_sha256" the file's sha256;
+  it must show epochs 16 and train_studies 4263. The run_config must show size 320, crop 288, views v4, slices 3,
+  phys_mm 3.5, backbone convnext_small, spatial_attn true, arms E_prior. If any differs, report it and stop T8.
+- Report in STATUS: dataset ref, version, each file name, sha256 and size.
+T10. Run C: when T9 (Run B) is done and uploaded, start the same recipe with seed 23, out ~/rsna/runs/C, same gate,
+upload as a new version of the same dataset (all checkpoints in it). The other side may cancel T10 through this file.
+Keep the 15-minute progress loop running for every training run.
+
 ## T5c. Compare anchor methods with nartaa's run (added 2026-10-20 07:15Z)
 When the full precompute ends, report the count of each anchor method (skm_tea_joint, skm_tea_joint_avg3,
 slab_prior, ...) over the 4,321 studies, next to nartaa's own counts if data/pool_ok.counts.json or any
