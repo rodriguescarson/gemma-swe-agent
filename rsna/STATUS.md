@@ -36,3 +36,6 @@
 
 ## T2 DONE 2026-10-20T05:44:48Z
 - T2's missing inputs supplied by T2b (all pins match); T2 complete
+
+## T3 START 2026-10-20T05:44:58Z
+- competition data: listing files to choose per-file download vs remote-zip extraction (no zip + extracted copy at once)
