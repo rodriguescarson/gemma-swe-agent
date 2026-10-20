@@ -46,3 +46,12 @@
 - detached (nohup), pid 32230, log ~/rsna/logs/T3_extract.log; START studies 4321 files 785068 uncompressed GB 528.5 free GB 787.4 workers 16
 - after about 10 min: 225/4321 studies, 28.3 GB of 528.5 GB written, 123.1 MB/s (uncompressed); projected finish 2026-10-20T06:58Z; disk free 707G
 - mechanical additions: ~/rsna/venv (python3 venv: remotezip, requests, pandas, scikit-learn, pyarrow); ~/rsna/tools/extract_pool.py
+
+## T4 DONE 2026-10-20T05:50:46Z
+- control = s6/data/targets_s6f0.csv exactly (copied to ~/rsna/labels/targets_control.csv); treatment = ~/rsna/labels/targets_treatment.csv, same header, rows and order (4,407 = 4,349 non-gold + 58 gold)
+- fused soft label = soft_labels.csv of the evidence-fusion dataset (the card's fusion output; 4,407 rows, 11 findings, Synovitis absent)
+- [0,1] check before mixing: control non-gold prior 0.0036..0.9996, fused 0.0005..0.9746, no NaN: PASS. Treatment 0.0049..0.9917
+- treatment = 0.5 x control + 0.5 x fused for the 11 fused findings on all 4,349 non-gold rows (47,839 cells); Synovitis = control; studies missing from the fused table: 0. Mean |treatment-control| per finding 0.033 (Fracture) .. 0.096 (Effusion)
+- gold-58: kept as is_gold=1 rows with every label blank in BOTH tables (the trainer needs these rows: --all-data asserts pool == pool_ok minus gold); gold rows carrying any label: 0 in each table. No gold label enters training
+- scoring on gold-58 as written is not possible: both tables are blank on the gold studies by construction, so neither has a value to score. What exists: the fused source's own outer-held gold rows score macro AUC 0.9287 over 11 findings (= its card's 0.9287); per finding ACL .968 MCL .993 MedMen .987 LatMen .878 MedOA .961 LatOA .824 PFOA .931 Effusion .927 Baker .953 Contusion .904 Fracture .890. The control source (blendjev) has no gold rows at all
+- full output: rsna/logs/T4.log
