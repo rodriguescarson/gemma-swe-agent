@@ -3,7 +3,7 @@
 Every test copies the bundle scripts to a temp dir first (no __pycache__ can appear in the bundle) and runs edit.py as a
 subprocess against a throwaway git repo with the _swegemma_baseline tag, exactly as the model would through run_command.
 """
-import hashlib, json, os, pathlib, re, shutil, statistics, subprocess, sys, time
+import hashlib, json, os, pathlib, re, shutil, statistics, subprocess, sys, tempfile, time
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -55,10 +55,23 @@ def env_for(ws, t=None):
 
 
 def edit(scripts, ws, args, stdin=None, t=None, cwd=None):
-    """Run edit.py; stdin None means /dev/null (the Docker case). Returns stdout (str)."""
-    r = subprocess.run([PY, str(scripts / "edit.py"), *args], cwd=str(cwd or ws), env=env_for(ws, t),
-                       input=stdin.encode("utf-8", "surrogateescape") if isinstance(stdin, str) else stdin,
-                       stdin=subprocess.DEVNULL if stdin is None else None, capture_output=True, timeout=60)
+    """Run edit.py; stdin None means /dev/null (the Docker case). Returns stdout (str).
+    Text goes in through a file written before the helper starts, not a pipe the test writes after spawning it: the helper
+    treats stdin as empty when nothing arrives within 1 s, and late in the full Linux suite (~4,000 tests) the test process
+    could stall past that before writing, failing --create twice in a row on 19 Oct (it passed in isolation and in either
+    half of the suite). A file holds the text before the helper reads it, as a shell heredoc does."""
+    if stdin is None:
+        f = subprocess.DEVNULL
+    else:
+        f = tempfile.TemporaryFile()
+        f.write(stdin.encode("utf-8", "surrogateescape") if isinstance(stdin, str) else stdin)
+        f.seek(0)
+    try:
+        r = subprocess.run([PY, str(scripts / "edit.py"), *args], cwd=str(cwd or ws), env=env_for(ws, t), stdin=f,
+                           capture_output=True, timeout=60)
+    finally:
+        if f is not subprocess.DEVNULL:
+            f.close()
     out = r.stdout.decode("utf-8", "replace")
     assert r.returncode == 0, out + r.stderr.decode()
     assert "Traceback" not in out and "HELPER ERROR" not in out, out + r.stderr.decode()

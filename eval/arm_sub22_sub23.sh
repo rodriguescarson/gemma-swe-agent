@@ -18,7 +18,8 @@ push_version() {   # push once, wait for COMPLETE, print the pushed version numb
   echo "$out" | sed -n 's/.*Kernel version \([0-9]*\) successfully pushed.*/\1/p' | tail -1
 }
 # ---- 1. package both
-for b in v12b6 v15b; do
+BUNDLES=${BUNDLES:-v12b6 v15b}   # 20 Oct: BUNDLES=v15b ships only v15b (v12b6 failed its pre-registered mean gate)
+for b in $BUNDLES; do
   say "ship $b"
   bash scripts/ship.sh "submissions/$b" "g4agent-$b" submit > "$SP/ship_$b.log" 2>&1
   grep -q "SHIP OK: kernels/g4agent-$b" "$SP/ship_$b.log" || { say "$b ship FAILED (see $SP/ship_$b.log); stop"; exit 1; }
@@ -26,7 +27,7 @@ for b in v12b6 v15b; do
 done
 # ---- 2. gate and submit in order
 NEXT=22
-for b in v12b6 v15b; do
+for b in $BUNDLES; do
   say "waiting for the box END (or stop) of p4_$b"
   while :; do
     git fetch -q origin wip/gemma-agent 2>/dev/null
@@ -43,14 +44,15 @@ def load(p): return {r["id"]: r for r in (json.loads(l) for l in open(p) if l.st
 a = load(f"eval/a6000/results/p4_{os.environ['B']}/results.jsonl"); b = load("eval/a6000/results/p4_v12b/results.jsonl"); ids = set(a) & set(b)
 w = sum(bool(a[i]["resolved"]) and not b[i]["resolved"] for i in ids); l = sum(bool(b[i]["resolved"]) and not a[i]["resolved"] for i in ids)
 late = sum(bool(r["resolved"]) and r["secs"] > 300 for r in a.values())
-print(f"solved {sum(bool(r['resolved']) for r in a.values())} mean_secs {sum(r['secs'] for r in a.values())/max(1,len(a)):.0f} net_vs_v12b {w-l} wins {w} losses {l} n {len(ids)} solves_after_300s {late}")
+print(f"solved {sum(bool(r['resolved']) for r in a.values())} mean_secs {sum(r['secs'] for r in a.values())/max(1,len(a)):.2f} net_vs_v12b {w-l} wins {w} losses {l} n {len(ids)} solves_after_300s {late}")
 EOF
 )
   say "p4_$b gate: $GATE | $STATS"
   SOLVED=$(echo "$STATS" | awk '{print $2}'); MEAN=$(echo "$STATS" | awk '{print $4}'); NETV=$(echo "$STATS" | awk '{print $6}')
   ok=1; echo "$GATE" | grep -q " crash 0 " || ok=0; echo "$GATE" | grep -q " missing 0 " || ok=0
   [ "${SOLVED:-0}" -ge 26 ] || ok=0; [ "${NETV:--99}" -ge -3 ] || ok=0
-  if [ "$b" = v12b6 ] && [ "${MEAN:-999}" -gt 280 ]; then ok=0; fi
+  # the written rule is mean <= 280 s, compared unrounded (20 Oct: the integer comparison would have passed 280.29)
+  if [ "$b" = v12b6 ] && awk -v m="${MEAN:-999}" 'BEGIN { exit !(m > 280) }'; then ok=0; fi
   [ "$ok" -eq 1 ] || { say "p4_$b fails its rule (crash/missing/solved<26/net<-3/mean>280 for v12b6); $b skipped"; continue; }
   TAG="sub$NEXT:"
   until nothing_pending; do say "$b rule PASSED; waiting: a submission is PENDING"; sleep 600; done
