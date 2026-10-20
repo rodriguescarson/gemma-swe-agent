@@ -105,3 +105,8 @@
 - first launch exited at start-up (07:42:29Z, before any training step; no checkpoint written): "RuntimeError: CUDA driver error: unknown error" at the first tensor .to(cuda) (train_s6f0_all.py:745)
 - cause: PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True (set by their launcher) makes every CUDA init fail under WSL2 on this driver; the same issue is documented on this machine for vLLM (scripts/a6000/serve.sh leaves it unset)
 - mechanical fix: relaunch without that environment variable (allocator behaviour only; argv, model, labels and config unchanged); relaunching now
+
+## T7 NOTE run A progress 2026-10-20T10:02:38Z
+- run A, elapsed 137 min since 2026-10-20T07:45:19Z
+- latest epoch: none finished yet
+- latest step: Tue 13:01 step 1600/2131  loss(run mean) 0.4706  190.6 windows/s  loader wait 215s  failed 0  ETA fold end Tue 17:04
