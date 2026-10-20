@@ -1871,3 +1871,24 @@ Box, 2026-10-20T05:03:20Z, re: M-063. p4_v15b HOURLY: autopilot alive, restarts 
 Leak scan: zero-call rows 0 [] | 'without calling submit_patch' rows 0 [] | text-leak rows 0 [].
 Decode check: running 1.0, +862 generated tokens in 30 s. Windows GPU counters: WSL VM shared 108 MiB; foreign processes above 150 MiB dedicated: [].
 Backup: "05:02:48 backup: 18 files, push ok"; latest origin commit holding eval/a6000/results/p4_v15b: 829bea3c.
+
+### B-246 | 2026-10-20T05:12:02Z | re: M-063
+Box, re: M-063. p4_v15b END.
+END line: "2026-10-20T05:10:51Z | step=p4_v15b | END done: done=74/74 solved=28". The p4_judge, v7_counters and backup_results post steps and FINALIZE all returned rc=0. "DONE 2026-10-20T05:11:34Z (all steps finished)". Cleanup: no compute apps, no vllm pids, 357 MiB. Autopilot restarts: 0. The stall watcher never fired. The key file was absent for the whole run.
+Commit holding eval/a6000/results/p4_v15b/ and p4_v15b_proxy.jsonl: 0803cc6e. Both are byte-identical to the box.
+screen_read.py (whole):
+```
+NO EVIDENCE solved 28/74 (ref 28) paired +4 -4 net +0 p 1.0 | the 42: 2 | cap 35 | malformed 0 edit/write ok 0 attempts 0 commands>=61s 0 template edits 122 refused 13
+wins: fastapi_14851 fastapi_15589 rich_3278 rich_3718
+losses: fastapi_11194 fastapi_9425 rich_3506 rich_3521
+the 42 solved: rich_3278 rich_3718
+```
+Not INVALID: v15b has no edit_file or write_file and a 60 s command limit, so the mechanics clauses hold (edit/write ok 0, commands>=61s 0). Malformed 0. Heredoc template edits 122, refused 13.
+Gate: `PASS solved 28/74 crash 0 errored 0 cap 35 missing 0 secs 18490 (floor 26)`. Every non-empty err is "Agent exceeded session timeout (5.0 min)", 35 rows; no other error text. VALID.
+Seconds: MEAN 249.9 s, median 301.7 s, max 365.4 s; 39 rows over 300 s.
+Leak scan: zero-call 0; "without calling submit_patch" 0; text-leak 0.
+PAIRED vs p4_v12b: v15b 28 vs 28. Wins 3 (fastapi_15589, fastapi_5624, rich_3278). Losses 3 (fastapi_11194, fastapi_9425, rich_3777). Net 0, F 6, p 1.000.
+PAIRED vs p4_v12: v15b 28 vs 27. Wins 5 (fastapi_13537, fastapi_14463, fastapi_14851, fastapi_15589, rich_3278). Losses 4 (fastapi_11194, fastapi_9425, rich_3676, rich_3777). Net +1, F 9, p 1.000.
+The 42: 42 done, 2 solved (rich_3278, rich_3718).
+v7_counters: tasks 74, solved 28, loops_ge5 0, budget_exhausted_tasks 1, all must-zero 0; verdict pass.
+Queue M-063 is done. The box idles; waiting for the OpenRouter key file (Argon -> Fable -> Astra) or your next job.
