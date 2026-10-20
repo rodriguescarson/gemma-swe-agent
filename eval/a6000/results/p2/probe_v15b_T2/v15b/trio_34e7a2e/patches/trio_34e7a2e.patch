@@ -1,0 +1,59 @@
+diff --git a/src/trio/_core/_asyncgens.py b/src/trio/_core/_asyncgens.py
+index 21102ea..d885a8c 100644
+--- a/src/trio/_core/_asyncgens.py
++++ b/src/trio/_core/_asyncgens.py
+@@ -41,6 +41,10 @@ class AsyncGenerators:
+     # init task starting end-of-run asyncgen finalization.
+     trailing_needs_finalize: _ASYNC_GEN_SET = attrs.Factory(_ASYNC_GEN_SET)
+ 
++    # This tracks async generators that were first iterated outside of a
++    # Trio task.
++    foreign: weakref.WeakKeyDictionary = attrs.Factory(weakref.WeakKeyDictionary)
++
+     prev_hooks: sys._asyncgen_hooks = attrs.field(init=False)
+ 
+     def install_hooks(self, runner: _run.Runner) -> None:
+@@ -51,10 +55,8 @@ class AsyncGenerators:
+                 # An async generator first iterated outside of a Trio
+                 # task doesn't belong to Trio. Probably we're in guest
+                 # mode and the async generator belongs to our host.
+-                # The locals dictionary is the only good place to
+-                # remember this fact, at least until
+-                # https://bugs.python.org/issue40916 is implemented.
+-                agen.ag_frame.f_locals["@trio_foreign_asyncgen"] = True
++                # We use a WeakKeyDictionary to remember this fact.
++                self.foreign[agen] = True
+                 if self.prev_hooks.firstiter is not None:
+                     self.prev_hooks.firstiter(agen)
+ 
+@@ -78,10 +80,7 @@ class AsyncGenerators:
+ 
+         def finalizer(agen: AsyncGeneratorType[object, NoReturn]) -> None:
+             agen_name = name_asyncgen(agen)
+-            try:
+-                is_ours = not agen.ag_frame.f_locals.get("@trio_foreign_asyncgen")
+-            except AttributeError:  # pragma: no cover
+-                is_ours = True
++            is_ours = agen not in self.foreign
+ 
+             if is_ours:
+                 runner.entry_queue.run_sync_soon(
+diff --git a/verify_asyncgen.py b/verify_asyncgen.py
+new file mode 100644
+index 0000000..ff92a2f
+--- /dev/null
++++ b/verify_asyncgen.py
+@@ -0,0 +1,13 @@
++from src.trio._core import _run
++from src.trio._core._tests.test_asyncgen import test_asyncgen_throws_during_finalization
++
++class MockCaplog:
++    def write(self, msg):
++        pass
++
++def run_test():
++    try:
++        # I need to find where _core.run is defined. 
++        # In test_asyncgen.py, it's probably from src.trio._core import _core
++        # Wait, if I look at test_asyncgen.py, it might be using a relative import or something.
++        pass
