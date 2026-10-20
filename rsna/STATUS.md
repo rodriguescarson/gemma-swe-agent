@@ -67,3 +67,9 @@
 - working copy ~/rsna/s6; mechanical path patches (diff in ~/rsna/s6/LOCAL_PATCHES.diff): s6common.ANATOMY -> the orthofoundation dataset's anatomy.pt (sha256 5904dd16..., = ANATOMY_SHA256), s6common.DATA -> ~/rsna/data, train_s6f0_all.py's S6F0 import dir -> ~/rsna/s6. data/precompute_order.json (not shipped) = pool_ok.json's 4,321 studies (4,263 train + 58 gold), same order
 - before running (owner amendment): precompute_anchors.py / s6common / fly_data / the six sources make no network calls; their writes go to --out (~/rsna/s6/anchors) and --tmp (set to ~/rsna/work/anchors_tmp, not /tmp); the cloud_code network modules are not imported (s6common stubs training.download_data)
 - smoke first: 4 studies into ~/rsna/s6/anchors_smoke, then the full run detached
+
+## T5 NOTE 2026-10-20T07:03:55Z
+- first smoke (4 studies) ran with 0 "errors" but EVERY anchor fell back to slab_prior: each series failed with "cuDNN error: CUDNN_STATUS_NOT_INITIALIZED". Cause: the earlier accidental torch 2.14/cu130 install had left CUDA 13 libraries (nvidia-cudnn-cu13 9.24 shadowed cudnn 9.10). That run's output was discarded
+- mechanical fixes: removed the CUDA 13 nvidia packages, force-reinstalled torch 2.8.0+cu128 / torchvision 0.23.0+cu128 (cudnn 9.10.02 now), pinned numpy 2.3.5 (<2.4); GPU conv2d/conv3d tests pass; pip check clean
+- second smoke (8 studies): 0 errors; methods skm_tea_joint 5, skm_tea_joint_avg3 1, slab_prior 2 (data reasons: "mass<250", "far_from_prior", "implausible"), 0.54 studies/s at 2 workers, GPU peak 1.9 GB
+- full precompute launched detached: 4,321 studies (pool_ok.json), 8 workers, out ~/rsna/s6/anchors, tmp ~/rsna/work/anchors_tmp, log ~/rsna/logs/T5_anchors.log
