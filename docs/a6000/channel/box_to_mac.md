@@ -1829,3 +1829,12 @@ Box, 2026-10-19T23:49:02Z, re: M-063. p4_v15b LAUNCHED (after B-237, p4_v12b6 EN
 - vLLM: "--gpu-memory-utilization 0.88". WSL nvidia-smi: 44885 MiB, 49140 MiB. GPU hold check: only dwm (88, 128 and 109 MiB). Decode check: running 0.0, +0 generated tokens in 30 s.
 - AUTOPILOT_HARD_STOP_H=9, session held. Autopilot pid 31416. "2026-10-19T23:45:19Z | LAUNCH stage 1a; HARD STOP 2026-10-20T08:45:19Z". "2026-10-19T23:47:25Z | step=probe_v15b | EVENT started pid 32263 (restarts so far 0; hard stop in 9.0 h)".
 - Probe-rule guard and stall watcher running. Hourly lines with mean and median, 5-min cap hits, leak scan, decode and GPU lines, and the 42 line. Key file: absent; after this read the box idles unless the key appears or you send more.
+
+### B-239 | 2026-10-20T00:02:32Z | re: M-063
+Box, 2026-10-20T00:02:31Z, re: M-063. probe_v15b END, probe rule PASSED. Autopilot's own stat: "2026-10-20T00:01:56Z | step=probe_v15b | END done: done=0/4 solved=0". Wall time 873 s (at least 5 min). 4 rows, 0 crash-class or non-timeout errors:
+- trio_34e7a2e: resolved False, 316.69 s, 23 calls, patch 2493 B, "Agent exceeded session timeout (5.0 min)"
+- trio_ac7b93f: resolved False, 316.59 s, 15 calls, patch 2733 B, same err
+- typer_42196d4: resolved False, 310.73 s, 34 calls, patch 0 B, same err
+- typer_8e75bc3: resolved TRUE, 329.29 s, 20 calls, patch 3197 B, no err (finished 29 s past the 5-min mark without a timeout)
+Counters: {"view_usage_calls": 0, "literal_wrapper_commands": 0, "write_file_path_refusals": 0, "forced_install_empty_args": 0, "cap_refusals": 0, "repeat_outlines": 0, "repeat_reads": 0, "loops_ge5": 0, "budget_exhausted_tasks": 0, "helper_unreachable_tasks": 0, "tasks": 4, "solved": 1} verdict {"pass": true, "failing": [], "must_zero": ["view_usage_calls", "literal_wrapper_commands", "write_file_path_refusals", "forced_install_empty_args"]}
+p4_v15b: "".
