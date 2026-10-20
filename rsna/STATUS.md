@@ -55,3 +55,9 @@
 - gold-58: kept as is_gold=1 rows with every label blank in BOTH tables (the trainer needs these rows: --all-data asserts pool == pool_ok minus gold); gold rows carrying any label: 0 in each table. No gold label enters training
 - scoring on gold-58 as written is not possible: both tables are blank on the gold studies by construction, so neither has a value to score. What exists: the fused source's own outer-held gold rows score macro AUC 0.9287 over 11 findings (= its card's 0.9287); per finding ACL .968 MCL .993 MedMen .987 LatMen .878 MedOA .961 LatOA .824 PFOA .931 Effusion .927 Baker .953 Contusion .904 Fracture .890. The control source (blendjev) has no gold rows at all
 - full output: rsna/logs/T4.log
+
+## T3 DONE 2026-10-20T06:59:14Z
+- "2026-10-20T06:58:50Z DONE studies 4321 written GB 528.5 in 4321 s" (mean 122.3 MB/s uncompressed); exit 0
+- ~/rsna/data: train.csv, train_series.csv, train_series/ with 4,321 study dirs and 785068 .dcm files (expected 785,068), every file size- and CRC32-checked against the zip directory; 0 partial files; du 495G
+- no zip was stored at any point; disk free after: 227G
+- mechanical fix while waiting: pip had pulled torch 2.14.1+cu130 with timm's torchvision (CUDA unavailable on driver 572.61 / CUDA 12.8); reinstalled torch 2.8.0+cu128 + torchvision 0.23.0+cu128 (= the trainer's recorded torch 2.8.0+cu128); torch.cuda.is_available() True on the RTX A6000; pip check clean
