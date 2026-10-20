@@ -131,3 +131,6 @@
 - RENDERS DIFFER OUTSIDE THE GOLD-58: stride-1 eval windows over the 855 fold-0 studies 493,359 (ours) vs 427,072 (theirs) = +15.5%, and the smallest train-candidate count 248 (ours) vs 231 (theirs). Window counts follow from each study's rendered rows (series, slices, views), so a part of the pool renders differently from what their model saw; the gold-58 renders match theirs exactly (35,148 windows each)
 - likely cause, not verified: their local DICOM copy (they note deleted studies on 2026-09-29) may have had fewer series/slices for some studies than the full competition data we extracted; the anchor method mix is not comparable (no counts shipped)
 - not a gate (Gate 0 = T6 passed at REF 0.9313 on the matching gold-58 renders); Run A continues. Run A loss tracks theirs (epoch 1..5: 0.5522 / 0.5117 / 0.4952 / 0.4837 / 0.4763 vs theirs 0.5517 / 0.5044 / 0.4824 / 0.4671 / 0.4564), with treatment labels rather than control, so the gap is not attributable to renders alone
+
+## T7 NOTE run A progress 2026-10-20T10:18:47Z
+- run A: epoch 6/16 done, loss 0.4709, elapsed 153 min since 2026-10-20T07:45:19Z, projected finish 2026-10-20T14:34Z
