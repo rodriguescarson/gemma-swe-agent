@@ -4214,3 +4214,4 @@ not run (no capture)
 - 2026-10-20T03:02:39Z | step=p4_v15b | done=37/74 | solved=2 | empty=11 | errors=0 | median_s=302.2 | cap=25 | gpu=100% | disk_free=778GB | restarts=0
 - 2026-10-20T04:02:43Z | step=p4_v15b | done=54/74 | solved=13 | empty=14 | errors=0 | median_s=301.7 | cap=31 | gpu=100% | disk_free=778GB | restarts=0
 - 2026-10-20T05:02:46Z | step=p4_v15b | done=70/74 | solved=24 | empty=16 | errors=0 | median_s=301.7 | cap=35 | gpu=100% | disk_free=778GB | restarts=0
+- 2026-10-20T05:10:51Z | step=p4_v15b | END done: done=74/74 solved=28
