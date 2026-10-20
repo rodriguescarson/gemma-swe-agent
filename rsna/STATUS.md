@@ -61,3 +61,9 @@
 - ~/rsna/data: train.csv, train_series.csv, train_series/ with 4,321 study dirs and 785068 .dcm files (expected 785,068), every file size- and CRC32-checked against the zip directory; 0 partial files; du 495G
 - no zip was stored at any point; disk free after: 227G
 - mechanical fix while waiting: pip had pulled torch 2.14.1+cu130 with timm's torchvision (CUDA unavailable on driver 572.61 / CUDA 12.8); reinstalled torch 2.8.0+cu128 + torchvision 0.23.0+cu128 (= the trainer's recorded torch 2.8.0+cu128); torch.cuda.is_available() True on the RTX A6000; pip check clean
+
+## T5 START 2026-10-20T06:59:55Z
+- GPU free (Gemma queue finished; no vLLM / autopilot running)
+- working copy ~/rsna/s6; mechanical path patches (diff in ~/rsna/s6/LOCAL_PATCHES.diff): s6common.ANATOMY -> the orthofoundation dataset's anatomy.pt (sha256 5904dd16..., = ANATOMY_SHA256), s6common.DATA -> ~/rsna/data, train_s6f0_all.py's S6F0 import dir -> ~/rsna/s6. data/precompute_order.json (not shipped) = pool_ok.json's 4,321 studies (4,263 train + 58 gold), same order
+- before running (owner amendment): precompute_anchors.py / s6common / fly_data / the six sources make no network calls; their writes go to --out (~/rsna/s6/anchors) and --tmp (set to ~/rsna/work/anchors_tmp, not /tmp); the cloud_code network modules are not imported (s6common stubs training.download_data)
+- smoke first: 4 studies into ~/rsna/s6/anchors_smoke, then the full run detached
