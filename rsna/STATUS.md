@@ -114,3 +114,10 @@
 ## T7 NOTE run A progress 2026-10-20T10:03:44Z
 - run A: epoch 5/16 done, loss 0.4763, elapsed 138 min since 2026-10-20T07:45:19Z, projected finish 2026-10-20T15:08Z
 - correction: the 10:02Z block said 'none finished yet'; that was this loop's pattern missing the epoch lines (5 epochs were done then). Epoch losses so far: epoch 1/16=0.5522 epoch 2/16=0.5117 epoch 3/16=0.4952 epoch 4/16=0.4837 epoch 5/16=0.4763 
+
+## T4b DONE 2026-10-20T10:05:00Z
+- gold truth: train.csv rows with all 12 labels = 58 (= data/gold58.json)
+- JEV-blend (training_code/labels/labels_v1_blendjev.parquet, 4,349 rows): NO rows for any of the 58 gold ids (by construction; make_data.py asserts gold is not in it), so it cannot be scored on gold-58
+- fused (soft_labels.csv, outer-held gold rows): n=58, macro AUC 0.9287 over its 11 findings; ACL 0.9681, MCL 0.9932, Medial Meniscus 0.9868, Lateral Meniscus 0.8783, Medial OA 0.9612, Lateral OA 0.8240, PF OA 0.9305, Effusion 0.9267, Baker's 0.9529, Contusion 0.9042, Fracture 0.8903; Synovitis not in the source
+- 50/50 mix: not computable on gold-58 (needs JEV-blend rows for the gold ids, which do not exist)
+- log: rsna/logs/T4b_T5c.log
