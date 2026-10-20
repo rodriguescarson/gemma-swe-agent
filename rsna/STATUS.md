@@ -39,3 +39,10 @@
 
 ## T3 START 2026-10-20T05:44:58Z
 - competition data: listing files to choose per-file download vs remote-zip extraction (no zip + extracted copy at once)
+
+## T3 NOTE 2026-10-20T05:50:43Z
+- method: no zip is stored. Kaggle API download-all -> signed storage URL (HTTP range OK); remotezip reads the central directory (819,640 members, 265 GB compressed, 569.8 GB uncompressed); ~/rsna/tools/extract_pool.py fetches each pool study as ONE byte range and inflates its members locally (size + CRC32 checked per file, atomic rename), 16 threads, resumable, stops below 110 GB free
+- scope: train.csv, train_series.csv + train_series of the 4,321 pool studies (785,068 files, 528.5 GB uncompressed, 249.7 GB compressed); all 4,321 are in the zip; test_series and the 86 non-pool studies are not fetched
+- detached (nohup), pid 32230, log ~/rsna/logs/T3_extract.log; START studies 4321 files 785068 uncompressed GB 528.5 free GB 787.4 workers 16
+- after about 10 min: 225/4321 studies, 28.3 GB of 528.5 GB written, 123.1 MB/s (uncompressed); projected finish 2026-10-20T06:58Z; disk free 707G
+- mechanical additions: ~/rsna/venv (python3 venv: remotezip, requests, pandas, scikit-learn, pyarrow); ~/rsna/tools/extract_pool.py
