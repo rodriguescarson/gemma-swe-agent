@@ -110,3 +110,7 @@
 - run A, elapsed 137 min since 2026-10-20T07:45:19Z
 - latest epoch: none finished yet
 - latest step: Tue 13:01 step 1600/2131  loss(run mean) 0.4706  190.6 windows/s  loader wait 215s  failed 0  ETA fold end Tue 17:04
+
+## T7 NOTE run A progress 2026-10-20T10:03:44Z
+- run A: epoch 5/16 done, loss 0.4763, elapsed 138 min since 2026-10-20T07:45:19Z, projected finish 2026-10-20T15:08Z
+- correction: the 10:02Z block said 'none finished yet'; that was this loop's pattern missing the epoch lines (5 epochs were done then). Epoch losses so far: epoch 1/16=0.5522 epoch 2/16=0.5117 epoch 3/16=0.4952 epoch 4/16=0.4837 epoch 5/16=0.4763 
