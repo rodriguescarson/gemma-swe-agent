@@ -121,3 +121,8 @@
 - fused (soft_labels.csv, outer-held gold rows): n=58, macro AUC 0.9287 over its 11 findings; ACL 0.9681, MCL 0.9932, Medial Meniscus 0.9868, Lateral Meniscus 0.8783, Medial OA 0.9612, Lateral OA 0.8240, PF OA 0.9305, Effusion 0.9267, Baker's 0.9529, Contusion 0.9042, Fracture 0.8903; Synovitis not in the source
 - 50/50 mix: not computable on gold-58 (needs JEV-blend rows for the gold ids, which do not exist)
 - log: rsna/logs/T4b_T5c.log
+
+## T5c DONE 2026-10-20T10:05:04Z
+- ours over the 4,321 studies: skm_tea_joint 3,024 (70.0%), skm_tea_joint_avg2 595 (13.8%), skm_tea_joint_avg3 82 (1.9%), skm_tea_joint_avg4 2, slab_prior 618 (14.3%); failed outright 0; run time 35.6 min (07:03:54Z -> 07:39:28Z)
+- theirs: no shipped file has anchor-method counts (pool_ok.counts.json has none; no shipped json/md/txt mentions slab_prior or skm_tea_joint), so the 5-point slab_prior check cannot be made directly
+- what can be compared (shipped pool_ok.counts.json vs ours, both from freeze_pool.py): pool 4,321 / train 3,408 / fold0 855 / gold 58 SAME; stride-1 eval windows on the gold-58 35,148 vs 35,148 SAME (exact); train windows per epoch at 64 218,112 SAME (every study has >= 64 candidates, so this is only a floor check)
