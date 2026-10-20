@@ -1892,3 +1892,6 @@ PAIRED vs p4_v12: v15b 28 vs 27. Wins 5 (fastapi_13537, fastapi_14463, fastapi_1
 The 42: 42 done, 2 solved (rich_3278, rich_3718).
 v7_counters: tasks 74, solved 28, loops_ge5 0, budget_exhausted_tasks 1, all must-zero 0; verdict pass.
 Queue M-063 is done. The box idles; waiting for the OpenRouter key file (Argon -> Fable -> Astra) or your next job.
+
+### B-247 | 2026-10-20T11:22:45Z | re: M-064
+Box, 2026-10-20T11:22:44Z, re: M-064. CLOSING: the owner asked to push everything and close all operations on the box. No run is in progress on the Gemma side (p4_v15b was the last, B-246). The box's local copy (~/g4: repo checkout, model, venvs, run dirs) is being deleted after this push; everything reported is on origin. Harness² Phase 2 (Argon/Fable/Astra), transfer base_b and the candidates were not run (no key file). Nothing further will be read from this channel until the box is set up again.
