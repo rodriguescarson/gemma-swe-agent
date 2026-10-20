@@ -146,3 +146,9 @@
 
 ## T7 NOTE run A progress 2026-10-20T11:18:58Z
 - run A: epoch 8/16 done, loss 0.4619, elapsed 213 min since 2026-10-20T07:45:19Z, projected finish 2026-10-20T14:52Z
+
+## CLOSE NOTE 2026-10-20T11:22:40Z
+- the owner asked to push everything and close all operations on this machine (2026-10-20T11:22:39Z)
+- Run A stopped by the owner's decision at 11:22Z (last finished: epoch 9/16 done: loss 0.4571); no checkpoint is kept (weights never go to git)
+- local data deleted after this push: ~/rsna (DICOM extract, anchors, venv, runs), ~/rsna-channel; T7 gold-58 / Gate 1, T8 and T9 were NOT done
+- everything reported is in rsna/STATUS.md, rsna/logs/ and rsna/notes/PIPELINE.md on this branch
