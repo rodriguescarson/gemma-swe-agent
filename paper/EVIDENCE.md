@@ -129,3 +129,7 @@ close hidden totals (0-1 task) are what ordinary flip noise with cancellation gi
   Kaggle shows it as "Submitted", hidden from others until the hackathon closes, editable and resubmittable until the deadline;
   licence on the writeup page: CC BY 4.0 (Kaggle's default). Pending for v2: sub21's hidden repeat, Harness² Phase 2 + transfer,
   the repository made public.
+
+Status (20 Oct): the A6000 box is closed (channel B-247). D2, D3 and D5 were never run and have no data; D4 covers Phase 1
+only. The transfer base_a run (4/12) survives only as the per-task list in channel B-218, without traces. v1's section 5 says
+the frontier sweeps are "still running"; that is no longer true and must be corrected in the next entered version.
