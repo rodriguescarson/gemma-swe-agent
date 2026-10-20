@@ -93,3 +93,10 @@
 - REF per finding: ACL 0.9792, MCL 0.9660, Medial Meniscus 0.9603, Lateral Meniscus 0.9317, Medial OA 0.9891, Lateral OA 0.8588, PF OA 0.8919, Effusion 0.9540, Synovitis 0.8387, Baker's 0.9801, Contusion 0.9339, Fracture 0.8917
 - GATE PASS: all 58 scored and REF 0.9313 >= 0.88
 - outputs: ~/rsna/eval/T6/{predictions.csv, receipt.json, gold58_auc.json}; log rsna/logs/T6.log
+
+## T7 START 2026-10-20T07:42:26Z
+- Run A = run_all_alldata.sh's production argv (convnext_small, E_prior, crop 288, size 320, views v4, slices 3, phys-mm 3.5, 16 epochs, batch 2, 64 train windows, spatial-attn, grad-ckpt, lr 1e-4 / head 1e-3, wd 0.05, aug crop, uniform sampling, ema 0, --all-data, --only-folds 0, --resume, --no-final-predict) with ONLY: --targets ~/rsna/labels/targets_treatment.csv, --seed-base 7, --out ~/rsna/runs/A; plus the local paths (--pool, --folds-json, --init = the verified timm model.safetensors, --work-tmp ~/rsna/work/s6_work_A)
+- CPU precheck (their --check-targets on this argv): "ALLDATA: train 4263 (every study of --pool 4321 minus gold 58 ...), held out 0, gold in training 0" and "check-targets OK"; 51,156 finite target cells; mean target per class [0.217, 0.136, 0.452, 0.241, 0.349, 0.283, 0.395, 0.471, 0.295, 0.319, 0.281, 0.142]
+- before running: train_s6f0_all.py makes no network calls (timm pretrained only with --init timm; here a local file); writes go to --out and --work-tmp only
+- disk free 228G; the original run took 54,148 s (15.0 h) on its machine; projected finish after epoch 1
+- launched detached; log ~/rsna/logs/T7_train_A.log; per-epoch lines follow
