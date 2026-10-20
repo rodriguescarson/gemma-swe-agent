@@ -73,3 +73,11 @@
 - mechanical fixes: removed the CUDA 13 nvidia packages, force-reinstalled torch 2.8.0+cu128 / torchvision 0.23.0+cu128 (cudnn 9.10.02 now), pinned numpy 2.3.5 (<2.4); GPU conv2d/conv3d tests pass; pip check clean
 - second smoke (8 studies): 0 errors; methods skm_tea_joint 5, skm_tea_joint_avg3 1, slab_prior 2 (data reasons: "mass<250", "far_from_prior", "implausible"), 0.54 studies/s at 2 workers, GPU peak 1.9 GB
 - full precompute launched detached: 4,321 studies (pool_ok.json), 8 workers, out ~/rsna/s6/anchors, tmp ~/rsna/work/anchors_tmp, log ~/rsna/logs/T5_anchors.log
+
+## T5 DONE 2026-10-20T07:40:06Z
+- anchors (no pixel cache exists in this pipeline: studies are rendered from DICOM at load time, so "cache" = the anchor precompute + the frozen pool): precompute_anchors.py, 8 workers, 07:03:54Z -> 07:39:28Z (35.6 min, 2.03 studies/s, GPU peak 10.6 GB)
+- studies 4,321 (4,263 train + 58 gold): ok 4,321, errors 0, missing 0. Methods: skm_tea_joint 3,024, skm_tea_joint_avg2 595, skm_tea_joint_avg3 82, skm_tea_joint_avg4 2, slab_prior 618 (the bank's own fallback, per-study reasons recorded). rows mean 592.9, stride-1 eval windows 2,529,749, train candidates min 248 (none < 64)
+- freeze_pool.py --final: "pool already frozen and identical" to the shipped data/pool_ok.json (4,321); failed_by_group train 0 / fold0 0 / gold 0
+- size: ~/rsna/s6/anchors 19 MB (4,321 anchor JSONs + manifest.jsonl + summary.json)
+- GATE PASS: failures 0 of 4,321 (0.0% <= 0.5%)
+- log: rsna/logs/T5.log
