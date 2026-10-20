@@ -33,3 +33,6 @@
 - eval path for gold-58 (QUEUE item 5): compact_infer.py (pinned) is present, so T6/T7 will use it; oof_step.py stays unshipped
 - working copy ~/rsna/s6 = training_code/s6 + heliosli/ (six sources) + heliosli/cloud_code (272 verified files); path changes are made at T5 and listed then
 - GATE PASS: every pinned file present with matching sha256
+
+## T2 DONE 2026-10-20T05:44:48Z
+- T2's missing inputs supplied by T2b (all pins match); T2 complete
