@@ -86,3 +86,10 @@
 - forward only, their eval path: heliosli compact_infer.py (pinned 34f433fe) with run_config's settings: convnext_small, size 320, crop 288, views v4, slices 3, phys-mm 3.5, eval-stride 3, anchor-weights = anatomy.pt (it recomputes each study's anchor inline from DICOM, by the same AnchorBank as T5), amp auto (bf16), side check off; --assignment s6/data/gold58.json, --split train
 - before running: compact_infer.py makes no network calls; writes only --output (~/rsna/eval/T6) and --tmp (~/rsna/work/infer_tmp)
 - scoring: ~/rsna/tools/score_gold.py (mechanical addition; oof_step.py is not shipped): roc_auc_score per finding vs train.csv gold rows, macro = mean of 12
+
+## T6 DONE 2026-10-20T07:42:06Z
+- E_prior_s42_fall.pt (sha256 0c7297d5...) forward only via compact_infer.py on the gold-58 (data from ~/rsna/data): 58/58 scored, fallback 0, 71.9 s, bf16 on the RTX A6000; anchors recomputed inline: skm_tea_joint 46, avg2 6, avg3 1, slab_prior 5
+- REF macro AUC = 0.9313 (12 findings)
+- REF per finding: ACL 0.9792, MCL 0.9660, Medial Meniscus 0.9603, Lateral Meniscus 0.9317, Medial OA 0.9891, Lateral OA 0.8588, PF OA 0.8919, Effusion 0.9540, Synovitis 0.8387, Baker's 0.9801, Contusion 0.9339, Fracture 0.8917
+- GATE PASS: all 58 scored and REF 0.9313 >= 0.88
+- outputs: ~/rsna/eval/T6/{predictions.csv, receipt.json, gold58_auc.json}; log rsna/logs/T6.log
