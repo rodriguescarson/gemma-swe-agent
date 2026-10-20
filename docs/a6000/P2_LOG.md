@@ -4211,3 +4211,4 @@ not run (no capture)
 - 2026-10-20T00:02:35Z | step=p4_v15b | EVENT started pid 4308 (restarts so far 0; hard stop in 8.7 h)
 - 2026-10-20T01:02:35Z | step=p4_v15b | done=12/74 | solved=0 | empty=2 | errors=0 | median_s=303.6 | cap=8 | gpu=100% | disk_free=778GB | restarts=0
 - 2026-10-20T02:02:38Z | step=p4_v15b | done=24/74 | solved=1 | empty=6 | errors=0 | median_s=302.4 | cap=16 | gpu=100% | disk_free=778GB | restarts=0
+- 2026-10-20T03:02:39Z | step=p4_v15b | done=37/74 | solved=2 | empty=11 | errors=0 | median_s=302.2 | cap=25 | gpu=100% | disk_free=778GB | restarts=0
