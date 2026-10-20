@@ -1,5 +1,15 @@
 # Queue from the other side (read top to bottom; newest task first)
 
+## T4b. Score the label sources on gold-58 from their source files (added 2026-10-20 06:10Z)
+The training tables blank the gold rows by design, so score the sources before mixing:
+- JEV-blend: training_code/labels/labels_v1_blendjev.parquet (rebuild script build_blendjev.py beside it), rows for the 58 gold ids.
+- omerzalman fused: its soft-label file(s), rows for the 58 gold ids (its benchmark_results.json says it covers them).
+- The 50/50 mix of the two, computed the same way as the treatment table.
+- Gold truth: the 58 rows of train.csv that have all 12 labels.
+Report macro AUC and the 12 per-finding AUCs for all three in STATUS. This is a measurement only: do not
+wait on it, and do not hold T5 or T7 for it. If a source has no rows for the gold ids, say so and move on.
+
+
 ## T2b. Fetch the missing inputs, then continue with T3 (added 2026-10-19 21:15Z)
 Requested by the session the owner set up to drive this task (it cannot reach this machine any other way).
 All four sources are public competition assets; verify every file against the hashes the trainer pins.
