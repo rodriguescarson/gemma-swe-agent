@@ -126,3 +126,8 @@
 - ours over the 4,321 studies: skm_tea_joint 3,024 (70.0%), skm_tea_joint_avg2 595 (13.8%), skm_tea_joint_avg3 82 (1.9%), skm_tea_joint_avg4 2, slab_prior 618 (14.3%); failed outright 0; run time 35.6 min (07:03:54Z -> 07:39:28Z)
 - theirs: no shipped file has anchor-method counts (pool_ok.counts.json has none; no shipped json/md/txt mentions slab_prior or skm_tea_joint), so the 5-point slab_prior check cannot be made directly
 - what can be compared (shipped pool_ok.counts.json vs ours, both from freeze_pool.py): pool 4,321 / train 3,408 / fold0 855 / gold 58 SAME; stride-1 eval windows on the gold-58 35,148 vs 35,148 SAME (exact); train windows per epoch at 64 218,112 SAME (every study has >= 64 candidates, so this is only a floor check)
+
+## T5c NOTE 2026-10-20T10:05:06Z
+- RENDERS DIFFER OUTSIDE THE GOLD-58: stride-1 eval windows over the 855 fold-0 studies 493,359 (ours) vs 427,072 (theirs) = +15.5%, and the smallest train-candidate count 248 (ours) vs 231 (theirs). Window counts follow from each study's rendered rows (series, slices, views), so a part of the pool renders differently from what their model saw; the gold-58 renders match theirs exactly (35,148 windows each)
+- likely cause, not verified: their local DICOM copy (they note deleted studies on 2026-09-29) may have had fewer series/slices for some studies than the full competition data we extracted; the anchor method mix is not comparable (no counts shipped)
+- not a gate (Gate 0 = T6 passed at REF 0.9313 on the matching gold-58 renders); Run A continues. Run A loss tracks theirs (epoch 1..5: 0.5522 / 0.5117 / 0.4952 / 0.4837 / 0.4763 vs theirs 0.5517 / 0.5044 / 0.4824 / 0.4671 / 0.4564), with treatment labels rather than control, so the gap is not attributable to renders alone
