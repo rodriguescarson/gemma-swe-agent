@@ -26,7 +26,7 @@ for b in $BUNDLES; do
   say "$b SHIP OK"
 done
 # ---- 2. gate and submit in order
-NEXT=22
+NEXT=${NEXT:-22}   # 21 Oct: NEXT=23 (sub22 is taken; submit_at skips a tag already on Kaggle)
 for b in $BUNDLES; do
   say "waiting for the box END (or stop) of p4_$b"
   while :; do
@@ -52,13 +52,14 @@ EOF
   ok=1; echo "$GATE" | grep -q " crash 0 " || ok=0; echo "$GATE" | grep -q " missing 0 " || ok=0
   [ "${SOLVED:-0}" -ge 26 ] || ok=0; [ "${NETV:--99}" -ge -3 ] || ok=0
   # the written rule is mean <= 280 s, compared unrounded (20 Oct: the integer comparison would have passed 280.29)
-  if [ "$b" = v12b6 ] && awk -v m="${MEAN:-999}" 'BEGIN { exit !(m > 280) }'; then ok=0; fi
+  # MEAN_GATE (21 Oct): 281 by the owner's amendment (GAPS 'Amendment: v12b6's runtime gate'); 280 as pre-registered
+  if [ "$b" = v12b6 ] && awk -v m="${MEAN:-999}" -v g="${MEAN_GATE:-280}" 'BEGIN { exit !(m > g) }'; then ok=0; fi
   [ "$ok" -eq 1 ] || { say "p4_$b fails its rule (crash/missing/solved<26/net<-3/mean>280 for v12b6); $b skipped"; continue; }
   TAG="sub$NEXT:"
   until nothing_pending; do say "$b rule PASSED; waiting: a submission is PENDING"; sleep 600; done
   V=$(push_version "g4agent-$b") || { say "$b kernel push/run failed; stop"; exit 1; }
   if [ "$b" = v12b6 ]; then
-    MSG="$TAG v12b6 = v12b (hidden 0.17) with a 6-minute cap, nothing else (prompt still paces for 5 min); mean-based runtime gate (owner's call): box mean <= 280 s; box 74: $GATE; $STATS; expectation 0.15-0.21"
+    MSG="$TAG v12b6 = v12b (hidden 0.17) with a 6-minute cap, nothing else (prompt still paces for 5 min); mean-based runtime gate, amended by the owner 21 Oct: box mean <= 281 s (measured 280.29); box 74: $GATE; $STATS; expectation 0.15-0.21"
   else
     MSG="$TAG v15b = v12b (hidden 0.17) + L1 (heredoc edits, edit_file/write_file dropped) + L2 (60 s per command); 5-min cap; box 74: $GATE; $STATS; expectation 0.14-0.20"
   fi
