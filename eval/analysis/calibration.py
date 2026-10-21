@@ -7,7 +7,7 @@ SUBS = json.load(open(sorted(glob.glob("eval/analysis/out/kaggle_submissions_*.j
 PAIRS = [("v12", ["p4_v12"], "sub14:"), ("v12-b1024", ["p4_b1024"], "sub15b:"), ("v0-think", ["p4_v0t2"], "sub16:"),
          ("v13", ["p4_v13", "p4_v13r"], "sub17:"), ("pub024", ["p4_pub024"], "sub18:"), ("pub024 (again)", ["p4_pub024"], "sub19:"),
          ("v12b", ["p4_v12b"], "sub20:"), ("v12 (again)", ["p4_v12", "p4_v12r"], "sub21:"),
-         ("v15b", ["p4_v15b"], "sub22:")]
+         ("v15b", ["p4_v15b"], "sub22:"), ("v12b6", ["p4_v12b6"], "sub23:")]
 def box(run):
     rows = [json.loads(l) for l in open(f"eval/a6000/results/{run}/results.jsonl") if l.strip()]
     return sum(bool(r["resolved"]) for r in rows), st.mean(r["secs"] for r in rows)
