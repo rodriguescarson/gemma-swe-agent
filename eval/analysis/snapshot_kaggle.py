@@ -15,19 +15,11 @@ FIELDS = ("ref", "date", "description", "status", "public_score", "private_score
 
 
 def rows(api, competition: str) -> list[dict]:
-    out, page = [], 1
-    while True:
-        batch = api.competition_submissions(competition, page_number=page) if page > 1 else api.competition_submissions(competition)
-        if not batch:
-            break
-        new = [{k: str(getattr(s, k, "") or "") for k in FIELDS} for s in batch]
-        if out and new and new[0]["ref"] == out[0]["ref"]:
-            break                                              # an API that ignores the page number
-        out += new
-        if len(batch) < 20:
-            break
-        page += 1
-    return out
+    """Every submission: one page of up to 200 (this team has far fewer; a full page is refused rather than truncated)."""
+    batch = api.competition_submissions(competition, page_size=200) or []
+    if len(batch) >= 200:
+        raise SystemExit("200 or more submissions: add page_token paging before trusting this snapshot")
+    return [{k: str(getattr(s, k, "") or "") for k in FIELDS} for s in batch if s is not None]
 
 
 def main(argv=None) -> int:
