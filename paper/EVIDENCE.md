@@ -133,3 +133,12 @@ close hidden totals (0-1 task) are what ordinary flip noise with cancellation gi
 Status (20 Oct): the A6000 box is closed (channel B-247). D2, D3 and D5 were never run and have no data; D4 covers Phase 1
 only. The transfer base_a run (4/12) survives only as the per-task list in channel B-218, without traces. v1's section 5 says
 the frontier sweeps are "still running"; that is no longer true and must be corrected in the next entered version.
+
+- v2, updated 2026-10-23 15:05 IST with "Update Submission" (same URL as v1; the entry stays "Submitted", it was never unsubmitted).
+  Body = paper/WRITEUP_v2_body.md (sha256 e035992177e27e27d3201ca4749fa268c404c9f30ee8bc2e69c84a811305bb18, 2,957 words,
+  16,542 chars, verified in the page's editor before saving). Subtitle changed from "Two local screens, eight hidden submissions
+  of a Gemma 4 agent, and why the screen could not rank them" to "Two local screens, eleven Gemma 4 agent configurations scored on
+  the hidden set, and why neither screen could rank them". Project link = the repository, public since 2026-10-23. Section 5 now
+  says the frontier sweeps and the transfer test did not run; adds the four newer hidden reads (sub20-sub23), the A6000 rank
+  correlation (Spearman +0.49, exact permutation p 0.32, n 7) and a link to paper/arxiv/main.pdf. Checked after a reload: the
+  live page carries the v2 phrases and no longer has the v1 subtitle.
