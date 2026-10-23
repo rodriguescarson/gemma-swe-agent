@@ -2,7 +2,7 @@
 
 This folder is the frozen source of the version published on Zenodo (doi:10.5281/zenodo.23592038, concept DOI
 10.5281/zenodo.23592037; cite the concept DOI). The paper's Reproducibility section points here, so it stays. The
-manuscript's working copy and its publication records moved to the author's research repository (paper 21) on
+manuscript's working copy and its publication records moved to the author's research repository (paper 23) on
 2026-10-23; copy any new published version back here.
 
 Status (2026-10-23):
