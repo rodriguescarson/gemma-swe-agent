@@ -150,7 +150,7 @@ the frontier sweeps are "still running"; that is no longer true and must be corr
   local-screen-small-coding-agent.pdf = paper/arxiv/main.pdf (sha256 78c5cbed..., 11 pages, 3 figures, 5 tables; upload md5
   checked by Zenodo). Related identifier: isSupplementedBy the repository. Checked after publishing: the public record API
   shows the metadata above, doi.org redirects to the record, the file downloads (HTTP 200).
-- Kaggle writeup v2, edited 2026-10-23 15:14 IST (Update Submission): section 8's link to the long version now points at the
+- Kaggle writeup v2, edited 2026-10-23 15:13 IST (Update Submission): section 8's link to the long version now points at the
   DOI instead of the branch PDF. Body sha256 8f55afc5639e083bda7d4ae8823cfa09ddadaa655674a06dec451336662b56c1 (16,489 chars),
   verified in the editor before saving and on the live page after a reload.
 - arXiv: source package built (paper/arxiv/arxiv-source.tar.gz, gitignored; recipe in paper/arxiv/SUBMIT.md), not submitted yet.
