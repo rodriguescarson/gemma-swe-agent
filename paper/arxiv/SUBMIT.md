@@ -1,9 +1,15 @@
 # Publishing the paper: arXiv and Zenodo
 
-Status (2026-10-23 15:11 IST): Zenodo published, DOI 10.5281/zenodo.23592038 (concept DOI 10.5281/zenodo.23592037;
-cite the concept DOI so a later version still resolves), file local-screen-small-coding-agent.pdf = main.pdf sha256
-78c5cbed47af6c72e5d857a077a37dbad532fc4b535029d7ea0cbab72a823e0e. arXiv: not yet submitted (needs the owner's sign-in).
-When arXiv announces, add the arXiv id to the Zenodo record as "is identical to".
+This folder is the frozen source of the version published on Zenodo (doi:10.5281/zenodo.23592038, concept DOI
+10.5281/zenodo.23592037; cite the concept DOI). The paper's Reproducibility section points here, so it stays. The
+manuscript's working copy and its publication records moved to the author's research repository (paper 21) on
+2026-10-23; copy any new published version back here.
+
+Status (2026-10-23):
+- Zenodo: published 15:11 IST. The file local-screen-small-coding-agent.pdf is main.pdf (sha256
+  78c5cbed47af6c72e5d857a077a37dbad532fc4b535029d7ea0cbab72a823e0e).
+- arXiv: not submitted and on hold. The author's account has three moderator rejections on earlier papers, and the
+  author decides whether to submit.
 
 Everything below is filled in from main.tex. The source package is built by the steps at the end; it does not live in git.
 
@@ -20,8 +26,8 @@ Everything below is filled in from main.tex. The source package is built by the 
 
 In the Gemma 4 Developer Agent competition the model, the tools and the scorer are fixed, and an entry is only an agent configuration: its prompt, its limits and its sampling settings. Entrants choose between configurations the way most agent builders do, by running them on a small public task set before spending a scarce hidden submission. We report what that practice told us over four weeks, from 20 complete runs on the 74 public tasks across two local setups (the scorer's own four-L4 hardware and a single GPU paced to it) and 11 configurations submitted to the hidden set. The local screen was a poor guide. On the scorer's hardware, a change that beat its parent on nine tasks and lost none scored lower on the hidden set. On the paced GPU, three configurations that each solved 28 of 74 locally scored 0.10, 0.10 and 0.17, and the rank correlation between local and hidden scores was +0.49 (exact permutation p = 0.32, seven configurations). Three measurements explain much of this. Between 91 and 97 percent of each task's wall time is the model generating text, so the per-task time cap is a token budget. Solves arrive late, so longer caps buy local solves that a hard twelve-hour limit on the whole run cannot pay for: a public configuration that scored 0.24 for its author ran out of time on both of our attempts. And prompt rules that each fixed one task lost seven tasks when merged. We also ran Google's Harness$^2$ with Gemma as its own harness improver: 23 of 30 improver sessions overflowed the model's 32k context and no change to the harness was adopted. Every reading rule was committed to git before its result, every number is regenerated from saved files, and all code and data are public.
 
-The account (arxiv.org/a/rodrigues_c_2) has five announced papers and a history of moderation holds, so expect "on hold"
-for a while. The Zenodo record gives a citable DOI in the meantime.
+If it goes ahead: the account has five announced papers and three moderator rejections, so the decision is the
+author's. The Zenodo record is the citable version either way.
 
 ## Zenodo
 
