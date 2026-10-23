@@ -142,3 +142,12 @@ the frontier sweeps are "still running"; that is no longer true and must be corr
   says the frontier sweeps and the transfer test did not run; adds the four newer hidden reads (sub20-sub23), the A6000 rank
   correlation (Spearman +0.49, exact permutation p 0.32, n 7) and a link to paper/arxiv/main.pdf. Checked after a reload: the
   live page carries the v2 phrases and no longer has the v1 subtitle.
+
+## Full paper (paper/arxiv/)
+
+- Zenodo, published 2026-10-23 15:11 IST: https://doi.org/10.5281/zenodo.23592038 (concept DOI 10.5281/zenodo.23592037),
+  preprint, CC BY 4.0, creator Rodrigues, Carson (Celabe Research, ORCID 0009-0001-7195-6742), file
+  local-screen-small-coding-agent.pdf = paper/arxiv/main.pdf (sha256 78c5cbed..., 11 pages, 3 figures, 5 tables; upload md5
+  checked by Zenodo). Related identifier: isSupplementedBy the repository. Checked after publishing: the public record API
+  shows the metadata above, doi.org redirects to the record, the file downloads (HTTP 200).
+- arXiv: source package built (paper/arxiv/arxiv-source.tar.gz, gitignored; recipe in paper/arxiv/SUBMIT.md), not submitted yet.

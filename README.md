@@ -5,7 +5,9 @@ its [paper track](https://www.kaggle.com/competitions/gemma-4-developer-agent-pa
 an entry is an agent configuration (prompt, limits, sampling). This repository holds every configuration we built, every
 local run, every hidden score, and the log of rules we wrote down before each run.
 
-The paper: [What a local screen could not tell us about a small offline coding agent](https://www.kaggle.com/competitions/gemma-4-developer-agent-paper/writeups/what-a-local-screen-could-not-tell-us-about-a-smal).
+The paper: *What a Local Screen Could Not Tell Us: Measuring a Small Offline Coding Agent Under a Twelve-Hour Budget*,
+[doi:10.5281/zenodo.23592038](https://doi.org/10.5281/zenodo.23592038) (source in `paper/arxiv/`). A shorter version is the
+[Kaggle paper-track writeup](https://www.kaggle.com/competitions/gemma-4-developer-agent-paper/writeups/what-a-local-screen-could-not-tell-us-about-a-smal).
 Its main finding is that a 74-task local screen, on the scorer's own hardware or on a GPU paced to it, did not rank our
 configurations' hidden scores.
 
