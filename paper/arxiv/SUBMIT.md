@@ -8,8 +8,8 @@ manuscript's working copy and its publication records moved to the author's rese
 Status (2026-10-23):
 - Zenodo: published 15:11 IST. The file local-screen-small-coding-agent.pdf is main.pdf (sha256
   78c5cbed47af6c72e5d857a077a37dbad532fc4b535029d7ea0cbab72a823e0e).
-- arXiv: not submitted and on hold. The author's account has three moderator rejections on earlier papers, and the
-  author decides whether to submit.
+- arXiv: not submitting. The author decided on 2026-10-24 to keep the paper on Zenodo only (the account has three
+  moderator rejections on earlier papers). The sheet below is kept in case that changes.
 
 Everything below is filled in from main.tex. The source package is built by the steps at the end; it does not live in git.
 
