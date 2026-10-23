@@ -129,4 +129,4 @@ Everything here is about one fixed model, one harness family and the 74 public t
 
 ## 8. Reproducing the numbers
 
-Every configuration, per-task result, trace, the reading-rule log and the scripts are public at https://github.com/rodriguescarson/gemma-swe-agent (Apache-2.0), and one command regenerates every table here from the saved results. A longer version of this paper, with figures, a full method and threats to validity, is at https://github.com/rodriguescarson/gemma-swe-agent/blob/wip/gemma-agent/paper/arxiv/main.pdf.
+Every configuration, per-task result, trace, the reading-rule log and the scripts are public at https://github.com/rodriguescarson/gemma-swe-agent (Apache-2.0), and one command regenerates every table here from the saved results. A longer version of this paper, with figures, a full method and threats to validity, is at https://doi.org/10.5281/zenodo.23592038.
