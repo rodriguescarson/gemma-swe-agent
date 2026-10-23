@@ -41,7 +41,9 @@ def test_bundle_compiles_with_official_compiler(b):
     if adapter_weights_missing(b):
         pytest.skip(f"adapter weights not present (gitignored): {b.name}/adapters has no *.safetensors")
     r = subprocess.run([sys.executable, str(ROOT / "scripts/validate.py"), str(b)], capture_output=True, text=True)
-    assert "OK model=gemma-4-31b-it-qat-w4a16-ct" in r.stdout, r.stdout[-800:] + r.stderr[-2000:]
+    # 31B everywhere except the small-model entries (v12b_e4b, 23 Oct), which pin their own model in their own test
+    want = "gemma-4-e4b-it-qat-w4a16-ct" if b.name.endswith("_e4b") else "gemma-4-31b-it-qat-w4a16-ct"
+    assert f"OK model={want}" in r.stdout, r.stdout[-800:] + r.stderr[-2000:]
 
 def test_adapter_weights_guard(tmp_path):
     b = tmp_path / "b"; (b / "sub_agents").mkdir(parents=True); (b / "agent.yaml").write_text("name: a\n")

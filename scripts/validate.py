@@ -9,11 +9,11 @@ from adk_submission import compile_submission, discover_adapters
 from swegemma.config import ALLOWED_ADAPTER_EXTENSIONS
 from swegemma.tools import create_tools
 from swegemma.config import build_submission_limits
-from swe_compat import compile_only_model_registry, declared_model, stack
+from swe_compat import ALLOWED_MODELS, compile_only_model_registry, declared_model, stack
 
 d = sys.argv[1]
 model = declared_model(d)
-assert model.split('/')[-1] == "gemma-4-31b-it-qat-w4a16-ct", model
+assert model.split('/')[-1] in ALLOWED_MODELS, model
 limits, gen = build_submission_limits()
 adapters = discover_adapters(d, adapter_extensions=ALLOWED_ADAPTER_EXTENSIONS)
 agent = compile_submission(submission_dir=d, adapter_manifest=adapters, tool_registry=create_tools(MagicMock()),

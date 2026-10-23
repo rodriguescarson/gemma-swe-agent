@@ -12,6 +12,11 @@ scripts/make_eval_kernel.py inlines the same logic into the notebook cells (COMP
 kernel cannot import this file; tests/test_swe_compat.py keeps the two copies in step."""
 from pathlib import Path
 
+# The models a bundle may declare: the four the organisers list in discussion 748287 (read 2026-10-23; 12B, E4B and E2B
+# added beside the 31B). One variant per bundle; the small ones are scored on the same 4xL4, 12 h and per-task budgets.
+ALLOWED_MODELS = ("gemma-4-31b-it-qat-w4a16-ct", "gemma-4-12b-it-qat-w4a16-ct",
+                  "gemma-4-e4b-it-qat-w4a16-ct", "gemma-4-e2b-it-qat-w4a16-ct")
+
 
 def declared_model(submission_dir, force_new=False):
     """The one model a bundle declares (its sub_agents' `model:`), e.g. 'gemma-4-31b-it-qat-w4a16-ct'."""
