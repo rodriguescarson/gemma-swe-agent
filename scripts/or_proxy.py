@@ -138,14 +138,18 @@ def main():
     ap.add_argument("--l4-pace", action="store_true", help="hold replies to the modelled L4 time per call")
     ap.add_argument("--capture", default=None, help="JSONL of {t, body, response} for every successful call (SFT raw data)")
     ap.add_argument("--model", default=None, help="upstream model id (default google/gemma-4-31b-it); e.g. a teacher")
-    ap.add_argument("--upstream", choices=("openrouter", "bedrock"), default="openrouter",
-                    help="bedrock: a teacher on Amazon Bedrock via boto3 converse (--model is the Bedrock model id)")
+    ap.add_argument("--upstream", choices=("openrouter", "bedrock", "vllm"), default="openrouter",
+                    help="bedrock: a teacher on Amazon Bedrock via boto3 converse (--model is the Bedrock model id); "
+                         "vllm: a self-hosted OpenAI-compatible server at --base (e.g. a teacher on EC2)")
+    ap.add_argument("--base", default=None, help="upstream base URL for --upstream vllm, e.g. http://127.0.0.1:8000/v1")
     ap.add_argument("--region", default="us-east-1", help="Bedrock region (--upstream bedrock)")
     ap.add_argument("--price-in", type=float, default=None, help="$ per M input tokens (Bedrock models not in the table)")
     ap.add_argument("--price-out", type=float, default=None, help="$ per M output tokens")
     a = ap.parse_args()
     if a.upstream == "bedrock":
         ep = make_bedrock_endpoint(a.model, region=a.region, price_in=a.price_in, price_out=a.price_out)
+    elif a.upstream == "vllm":
+        ep = make_endpoint("vllm", upstream_base=a.base, upstream_model=a.model, price_in=0.0, price_out=0.0)
     else:
         ep = make_endpoint("openrouter", or_provider=a.or_provider, upstream_model=a.model)
     if a.probe:
@@ -156,7 +160,7 @@ def main():
         ap.error("--port, --max-usd and --log are required unless --probe")
     srv = serve(a.port, ep, Budget(a.max_usd), Path(a.log), pacer=Pacer() if a.l4_pace else None,
                 capture_path=Path(a.capture) if a.capture else None)
-    where = f"bedrock:{a.region}" if a.upstream == "bedrock" else f"pin={ep.provider}"
+    where = {"bedrock": f"bedrock:{a.region}", "vllm": f"vllm:{a.base}"}.get(a.upstream, f"pin={ep.provider}")
     print(f"or_proxy :{a.port} -> {ep.model} {where} cap=${a.max_usd} l4_pace={a.l4_pace}", flush=True)
     srv.serve_forever()
 

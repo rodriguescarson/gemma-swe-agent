@@ -74,6 +74,13 @@ def split(repo_of: dict, pool: set, history: dict, *, repo_min: int = REPO_MIN, 
             "eval_ids": eval_ids, "train_ids": train_ids}
 
 
+def g1_ids(train_ids: list, history: dict, n: int = 30) -> list:
+    """G1 pilot tasks (GAPS 'G1 pre-registration'): TRAIN ids with a Gemma history, ordered by sha256(id), first n."""
+    import hashlib
+    have = [i for i in train_ids if i in history]
+    return sorted(have, key=lambda i: hashlib.sha256(i.encode()).hexdigest())[:n]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default=str(OUT))
@@ -84,11 +91,15 @@ def main() -> None:
         repo_of[r["instance_id"]] = r["repo"]
     public = set(PUBLIC.read_text().split())
     pool = set(VALID.read_text().split()) - public
-    rep = split(repo_of, pool, gemma_history())
+    history = gemma_history()
+    rep = split(repo_of, pool, history)
     out = Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / "eval_ids.txt").write_text("\n".join(rep["eval_ids"]) + "\n")
     (out / "train_ids.txt").write_text("\n".join(rep["train_ids"]) + "\n")
+    g1 = g1_ids(rep["train_ids"], history)
+    (out / "g1_ids.txt").write_text("\n".join(g1) + "\n")
+    rep["g1_gemma_solved"] = sum(history[i] for i in g1)
     slim = {k: v for k, v in rep.items() if k not in ("eval_ids", "train_ids")}
     (out / "split_report.json").write_text(json.dumps(slim, indent=1, sort_keys=True) + "\n")
     print(f"EVAL {rep['eval_n']} tasks from {rep['eval_repos']} (Gemma solve rate {rep['eval_gemma_solve_rate']}); "
