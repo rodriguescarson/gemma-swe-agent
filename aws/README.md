@@ -230,6 +230,24 @@ python aws/stage.py fetch s3://B/runs/g1
 
 Then score on the Mac with `scripts/distill/usable.py`, passing `--ec2-usd` from `status.json` or `aws/cost.py`.
 
+**Autorun (installed 24 Oct, 17:16 IST, deadline 27 Oct 17:16 IST).** [aws/jobs/g1_autorun.sh](jobs/g1_autorun.sh) is a
+launchd agent that runs one short tick every 10 minutes, so it survives app restarts and reboots:
+- Once at least 48 G-family vCPU are granted, it launches the pilot once with the line above (`--yes`). It uses
+  on-demand, or spot if only spot is granted, and tries each zone if one has no capacity.
+- When the box has terminated itself, it downloads `out/` to `eval/aws/g1/`, runs `usable.py` per teacher (writing
+  `eval/aws/g1/usable_<teacher>.json`), shows a macOS notification and removes itself.
+- It also removes itself at the deadline, or after 3 launch refusals that aren't capacity errors.
+- It never terminates an instance.
+- State and log are in `~/.local/state/g4-g1-autorun/`.
+
+```bash
+bash aws/jobs/g1_autorun.sh status
+```
+
+```bash
+bash aws/jobs/g1_autorun.sh uninstall
+```
+
 **The 5 h timer and the $40 cap don't fit together.** g6e.12xlarge is $10.49/h on-demand, so 5 h can bill $52.70.
 `--max-usd 40` refuses that and suggests 3.75 h ($39.53 worst case). Spot was $8.51 to $9.24 on 24 Oct, but its
 default `MaxPrice` is the on-demand price, so its worst case is the same. The expected run is about 2 to 2.5 h:
