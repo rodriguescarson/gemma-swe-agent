@@ -386,7 +386,12 @@ def main(argv=None):
             return 0 if ok and not blockers else 1
         if blockers:
             raise Refused(f"{len(blockers)} blocker(s) above")
-        resp = ec2.run_instances(**params)
+        from botocore.exceptions import ClientError
+        try:
+            resp = ec2.run_instances(**params)
+        except ClientError as e:   # e.g. InsufficientInstanceCapacity: nothing was created; another AZ may have room
+            print(f"LAUNCH FAILED {e.response['Error']['Code']}: {e.response['Error'].get('Message', '')}", file=sys.stderr)
+            return 1
         iid = resp["Instances"][0]["InstanceId"]
         got = ec2.describe_instance_attribute(InstanceId=iid, Attribute="instanceInitiatedShutdownBehavior")
         if got.get("InstanceInitiatedShutdownBehavior", {}).get("Value") != "terminate":

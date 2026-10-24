@@ -391,6 +391,17 @@ def test_yes_launches_exactly_once_and_verifies_the_live_shutdown_behaviour(worl
     assert '"instance": "i-0new"' in rec and '"hours": 10.0' in rec
 
 
+def test_a_capacity_error_is_a_clean_failure_not_a_traceback(world, monkeypatch, capsys):
+    import launch
+    def no_room(self, **kw):
+        self.w.run_calls.append(kw)
+        raise ClientError("DryRunOperation" if kw.get("DryRun") else "InsufficientInstanceCapacity")
+    monkeypatch.setattr(FakeEC2, "run_instances", no_room)
+    assert launch.main(args("train", "--yes")) == 1
+    assert "LAUNCH FAILED InsufficientInstanceCapacity" in capsys.readouterr().err
+    assert not launch.LAUNCH_LOG.exists()
+
+
 def test_an_instance_that_comes_up_without_terminate_is_terminated(world, capsys):
     import launch
     world.live_sdb = "stop"
