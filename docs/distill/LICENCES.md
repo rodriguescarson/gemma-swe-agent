@@ -14,6 +14,8 @@ The hosting service's terms count too, not only the model licence (docs/PATH_TO_
 | GLM-5.3 | "GLM-5.3 License", MIT-style (`zai-org/GLM-5.3/LICENSE`) | grant to "fine-tune ... and create derivative works"; extra clause only for model-as-a-service businesses with over $10B revenue (security review) | CLEARED |
 | gpt-oss-120b | Apache-2.0 plus a one-line usage policy ("comply with all applicable law") (`openai/gpt-oss-120b`) | no restriction on outputs | CLEARED (earlier OpenRouter runs saw malformed tool-call JSON, 2026-10-03) |
 | MiniMax M2.5 | MiniMax Model License (`MiniMaxAI/MiniMax-M2.5/LICENSE-MODEL`) | 2.b.i: distributing "a product or service that uses any of them, including another AI model" must ship this Agreement and notices; a Prohibited Uses Policy flows down | UNCLEAR: extra obligations on a derived model may conflict with the Apache-2.0-only winner licence. Not used |
+| Devstral-Small-2-24B-Instruct-2512 | Apache-2.0 (`mistralai/Devstral-Small-2-24B-Instruct-2512` README licence field) | no restriction on outputs; SWE-bench Verified 68.0% per its card; FP8 weights fit one L40S | CLEARED |
+| Devstral-2-123B-Instruct-2512 | Modified MIT (`mistralai/Devstral-2-123B-Instruct-2512/LICENSE`) | clause 2: no rights for a company over $20M monthly revenue, and it "applies to the Model and any derivatives, modifications, or combined works based on it" | UNCLEAR: a revenue cap on derived works conflicts with the Apache-2.0 winner licence. Not used |
 
 ## Hosting route
 
