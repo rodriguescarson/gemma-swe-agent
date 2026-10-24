@@ -8,6 +8,9 @@ back-off) and ``Budget`` (hard USD cap; once hit, every call gets HTTP 500 so th
 
 One JSON line per call: t, status, latency_s, retries, prompt/completion tokens, cost_usd, spent_usd, err. The key is
 read from OPENROUTER_KEY or ~/Projects/.env and never logged. Non-streaming only (the harness never streams).
+
+``--upstream bedrock --model <bedrock id> [--region us-west-2]`` serves a teacher on Amazon Bedrock instead (router.
+BedrockEndpoint: OpenAI <-> converse translation, list-price costing for the cap, AWS keys read in-process only).
 """
 from __future__ import annotations
 
@@ -21,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "golden"))
-from router import VLLM_MODEL, Budget, l4_model_s, make_endpoint  # noqa: E402
+from router import VLLM_MODEL, Budget, l4_model_s, make_bedrock_endpoint, make_endpoint  # noqa: E402
 
 
 class Pacer:
@@ -135,8 +138,16 @@ def main():
     ap.add_argument("--l4-pace", action="store_true", help="hold replies to the modelled L4 time per call")
     ap.add_argument("--capture", default=None, help="JSONL of {t, body, response} for every successful call (SFT raw data)")
     ap.add_argument("--model", default=None, help="upstream model id (default google/gemma-4-31b-it); e.g. a teacher")
+    ap.add_argument("--upstream", choices=("openrouter", "bedrock"), default="openrouter",
+                    help="bedrock: a teacher on Amazon Bedrock via boto3 converse (--model is the Bedrock model id)")
+    ap.add_argument("--region", default="us-east-1", help="Bedrock region (--upstream bedrock)")
+    ap.add_argument("--price-in", type=float, default=None, help="$ per M input tokens (Bedrock models not in the table)")
+    ap.add_argument("--price-out", type=float, default=None, help="$ per M output tokens")
     a = ap.parse_args()
-    ep = make_endpoint("openrouter", or_provider=a.or_provider, upstream_model=a.model)
+    if a.upstream == "bedrock":
+        ep = make_bedrock_endpoint(a.model, region=a.region, price_in=a.price_in, price_out=a.price_out)
+    else:
+        ep = make_endpoint("openrouter", or_provider=a.or_provider, upstream_model=a.model)
     if a.probe:
         ok, status, msg = probe(ep)
         print(f"or_proxy probe {getattr(ep, 'model', a.model)}: {'OK' if ok else 'FAILED'} status={status} {msg[:160]}", flush=True)
@@ -145,7 +156,8 @@ def main():
         ap.error("--port, --max-usd and --log are required unless --probe")
     srv = serve(a.port, ep, Budget(a.max_usd), Path(a.log), pacer=Pacer() if a.l4_pace else None,
                 capture_path=Path(a.capture) if a.capture else None)
-    print(f"or_proxy :{a.port} -> {ep.model} pin={ep.provider} cap=${a.max_usd} l4_pace={a.l4_pace}", flush=True)
+    where = f"bedrock:{a.region}" if a.upstream == "bedrock" else f"pin={ep.provider}"
+    print(f"or_proxy :{a.port} -> {ep.model} {where} cap=${a.max_usd} l4_pace={a.l4_pace}", flush=True)
     srv.serve_forever()
 
 

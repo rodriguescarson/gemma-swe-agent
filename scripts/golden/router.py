@@ -283,6 +283,234 @@ def _json_or_none(raw: bytes):
         return None
 
 
+# ----------------------------------------------------------------------------------------------- bedrock (teacher)
+# Amazon Bedrock list prices, $ per M tokens (AWS Pricing API, us-east-1, read 2026-10-24). A model not listed here needs
+# explicit --price-in/--price-out so the Budget cap means something. Licence clearance is NOT implied by this table:
+# docs/distill/LICENCES.md and GAPS decide which teacher's rows may be used.
+BEDROCK_PRICES = {
+    "qwen.qwen3-coder-480b-a35b-v1:0": (0.45, 1.80),
+    "qwen.qwen3-coder-next": (0.50, 1.20),
+    "qwen.qwen3-coder-30b-a3b-v1:0": (0.15, 0.60),
+    "moonshotai.kimi-k2.5": (0.60, 3.00),
+    "moonshotai.kimi-k3": (3.30, 16.50),
+    "minimax.minimax-m2.5": (0.30, 1.20),
+    "minimax.minimax-m2.1": (0.30, 1.20),
+    "openai.gpt-oss-120b-1:0": (0.15, 0.60),
+}
+BEDROCK_RETRY = ("ThrottlingException", "ServiceUnavailableException", "ModelNotReadyException", "InternalServerException",
+                 "ModelErrorException", "ServiceQuotaExceededException", "ReadTimeoutError", "ConnectTimeoutError",
+                 "EndpointConnectionError")
+BEDROCK_STATUS = {"ValidationException": 400, "AccessDeniedException": 403, "ResourceNotFoundException": 404,
+                  "ThrottlingException": 429, "ServiceQuotaExceededException": 429, "ModelTimeoutException": 504,
+                  "ServiceUnavailableException": 503, "ModelNotReadyException": 503}
+STOP_MAP = {"end_turn": "stop", "stop_sequence": "stop", "tool_use": "tool_calls", "max_tokens": "length",
+            "content_filtered": "content_filter", "guardrail_intervened": "content_filter"}
+THINK_RE = re.compile(r"<think>(.*?)</think>\s*", re.S)
+EMPTY_TEXT = "(empty)"
+
+
+def sanitize_schema(s: Any) -> Any:
+    """OpenAPI-flavoured tool schema -> plain JSON Schema for Converse: drop ``nullable``, rename ``any_of`` to
+    ``anyOf``; everything else is kept as is (``default``, ``enum``, nested properties)."""
+    if isinstance(s, dict):
+        out = {}
+        for k, v in s.items():
+            if k == "nullable":
+                continue
+            out["anyOf" if k == "any_of" else k] = sanitize_schema(v)
+        return out
+    if isinstance(s, list):
+        return [sanitize_schema(x) for x in s]
+    return s
+
+
+def _args_dict(arguments: Any) -> dict:
+    if isinstance(arguments, dict):
+        return arguments
+    try:
+        v = json.loads(arguments or "{}")
+    except (TypeError, ValueError):
+        return {"_raw": str(arguments)}
+    return v if isinstance(v, dict) else {"_value": v}
+
+
+def openai_to_converse(body: dict) -> dict:
+    """OpenAI chat-completions body -> boto3 ``converse`` kwargs (without modelId).
+
+    System messages become ``system``; tool results (role tool) become ``toolResult`` blocks in a user turn; adjacent
+    turns of the same role are merged (Converse wants user/assistant alternation and a user turn first). Earlier
+    ``reasoning_content`` is NOT sent back (Converse only accepts signed reasoning blocks for some models); the teacher
+    reasons afresh each call. vLLM-only fields (chat_template_kwargs, thinking_token_budget, top_k, seed) are dropped."""
+    system, turns = [], []
+
+    def push(role: str, blocks: list) -> None:
+        blocks = [b for b in blocks if b]
+        if not blocks:
+            return
+        if turns and turns[-1]["role"] == role:
+            turns[-1]["content"].extend(blocks)
+        else:
+            turns.append({"role": role, "content": blocks})
+
+    for m in body.get("messages") or []:
+        role = m.get("role")
+        text = _text_of(m.get("content"))
+        if role in ("system", "developer"):
+            if text.strip():
+                system.append({"text": text})
+        elif role == "user":
+            push("user", [{"text": text if text.strip() else EMPTY_TEXT}])
+        elif role == "assistant":
+            blocks = [{"text": text}] if text.strip() else []
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                blocks.append({"toolUse": {"toolUseId": tc.get("id") or "call_" + uuid.uuid4().hex[:10],
+                                           "name": fn.get("name") or "", "input": _args_dict(fn.get("arguments"))}})
+            push("assistant", blocks or [{"text": EMPTY_TEXT}])
+        elif role == "tool":
+            push("user", [{"toolResult": {"toolUseId": m.get("tool_call_id") or "",
+                                          "content": [{"text": text if text.strip() else EMPTY_TEXT}],
+                                          "status": "success"}}])
+    if not turns or turns[0]["role"] != "user":
+        turns.insert(0, {"role": "user", "content": [{"text": "(start)"}]})
+    kw: dict = {"messages": turns}
+    if system:
+        kw["system"] = system
+    inf = {}
+    mt = body.get("max_completion_tokens") or body.get("max_tokens")
+    if mt:
+        inf["maxTokens"] = int(mt)
+    if body.get("temperature") is not None:
+        inf["temperature"] = float(body["temperature"])
+    if body.get("top_p") is not None:
+        inf["topP"] = float(body["top_p"])
+    stop = body.get("stop")
+    if stop:
+        inf["stopSequences"] = [stop] if isinstance(stop, str) else list(stop)
+    if inf:
+        kw["inferenceConfig"] = inf
+    tools = []
+    for t in body.get("tools") or []:
+        fn = t.get("function") or t
+        if not fn.get("name"):
+            continue
+        spec = {"name": fn["name"], "inputSchema": {"json": sanitize_schema(fn.get("parameters") or {"type": "object"})}}
+        if fn.get("description"):
+            spec["description"] = fn["description"]
+        tools.append({"toolSpec": spec})
+    if tools and body.get("tool_choice") != "none":
+        tc = body.get("tool_choice")
+        cfg: dict = {"tools": tools}
+        if tc == "required":
+            cfg["toolChoice"] = {"any": {}}
+        elif isinstance(tc, dict) and (tc.get("function") or {}).get("name"):
+            cfg["toolChoice"] = {"tool": {"name": tc["function"]["name"]}}
+        kw["toolConfig"] = cfg
+    return kw
+
+
+def converse_to_openai(resp: dict, model: str) -> dict:
+    """boto3 ``converse`` reply -> an OpenAI chat.completion dict. Reasoning (a reasoningContent block, or MiniMax-style
+    inline <think>...</think>) goes to ``reasoning_content`` so train/build_sft.py's thought_of() finds it."""
+    blocks = ((resp.get("output") or {}).get("message") or {}).get("content") or []
+    texts, reasons, calls = [], [], []
+    for b in blocks:
+        if "text" in b:
+            texts.append(b["text"])
+        elif "reasoningContent" in b:
+            rt = (b["reasoningContent"] or {}).get("reasoningText") or {}
+            if rt.get("text"):
+                reasons.append(rt["text"])
+        elif "toolUse" in b:
+            tu = b["toolUse"]
+            calls.append({"id": tu.get("toolUseId") or "call_" + uuid.uuid4().hex[:10], "type": "function",
+                          "function": {"name": tu.get("name") or "", "arguments": json.dumps(tu.get("input") or {})}})
+    text = "".join(texts)
+    for found in THINK_RE.findall(text):
+        reasons.append(found.strip())
+    text = THINK_RE.sub("", text).strip()
+    msg: dict = {"role": "assistant", "content": text or None}
+    if calls:
+        msg["tool_calls"] = calls
+    if reasons:
+        msg["reasoning_content"] = "\n".join(reasons)
+    stop = resp.get("stopReason") or "end_turn"
+    finish = "tool_calls" if calls and stop in ("end_turn", "tool_use") else STOP_MAP.get(stop, "stop")
+    u = resp.get("usage") or {}
+    p, c = int(u.get("inputTokens") or 0), int(u.get("outputTokens") or 0)
+    return {"id": "chatcmpl-" + uuid.uuid4().hex[:10], "object": "chat.completion", "created": int(time.time()),
+            "model": model, "choices": [{"index": 0, "message": msg, "finish_reason": finish}],
+            "usage": {"prompt_tokens": p, "completion_tokens": c, "total_tokens": p + c}}
+
+
+@dataclass
+class BedrockEndpoint(Endpoint):
+    """A teacher on Amazon Bedrock behind the same proxy (scripts/or_proxy.py --upstream bedrock): the harness keeps
+    talking OpenAI chat-completions to the proxy; this endpoint translates each call to boto3 ``converse`` and back.
+    Credentials are boto3 arguments read in-process (never logged, never in public()); ``client`` is injectable for
+    tests. Throttling and transient errors are retried with the router's back-off; validation errors are not."""
+    region: str = "us-east-1"
+    client: Any = field(default=None, repr=False)
+    secret: str | None = field(default=None, repr=False)
+
+    @property
+    def live(self) -> bool:
+        return True
+
+    @property
+    def label(self) -> str:
+        return "TEACHER"
+
+    @property
+    def url(self) -> str | None:
+        return f"bedrock:{self.region}/{self.model}"
+
+    def public(self) -> dict:
+        out = super().public()
+        out.update(endpoint="bedrock", region=self.region)
+        return out
+
+    def forward_body(self, body: dict, case_id: str) -> dict:
+        out = dict(body)
+        out["model"] = self.model
+        return out
+
+    def _client(self):
+        if self.client is None:
+            import boto3
+            from botocore.config import Config
+            self.client = boto3.client("bedrock-runtime", region_name=self.region, aws_access_key_id=self.key,
+                                       aws_secret_access_key=self.secret,
+                                       config=Config(read_timeout=self.timeout, connect_timeout=30,
+                                                     retries={"max_attempts": 0}))
+        return self.client
+
+    def post(self, body: dict) -> tuple:
+        try:
+            kw = openai_to_converse(body)
+        except Exception as e:                      # a request the translator cannot express: fail loudly, no retry
+            return 400, None, 0, f"bedrock translate: {type(e).__name__}: {str(e)[:200]}"
+        retries, last_err, status = 0, None, 0
+        for attempt in range(self.retries + 1):
+            try:
+                resp = self._client().converse(modelId=self.model, **kw)
+                return 200, converse_to_openai(resp, self.model), retries, None
+            except Exception as e:
+                er = getattr(e, "response", None)
+                code = (er.get("Error") or {}).get("Code") if isinstance(er, dict) else None
+                code = code or type(e).__name__
+                status = BEDROCK_STATUS.get(code, 502)
+                last_err = f"bedrock {code}: {str(e)[:300]}"
+                if code not in BEDROCK_RETRY or attempt >= self.retries:
+                    return status, {"error": {"message": last_err, "type": code}}, retries, last_err
+            retries += 1
+            self.sleep(self.backoff[min(attempt, len(self.backoff) - 1)])
+        return status, None, retries, last_err
+
+    def billed(self, usage: dict) -> float | None:
+        return None                                 # Bedrock replies carry no charge; cost() prices the tokens
+
+
 # ------------------------------------------------------------------------------------------------------------- route
 @dataclass
 class Route:
@@ -657,3 +885,25 @@ def make_endpoint(name: str, *, upstream_base: str | None = None, upstream_model
     if name in ("oracle", "null"):
         return Endpoint(name, seed_mode=seed_mode, price_in=price_in, price_out=price_out)
     raise ValueError(f"unknown endpoint {name!r}")
+
+
+def make_bedrock_endpoint(model: str, *, region: str = "us-east-1", env_file: str | None = DEFAULT_ENV_FILE,
+                          price_in: float | None = None, price_out: float | None = None, client: Any = None,
+                          timeout: float = 300.0) -> BedrockEndpoint:
+    """A Bedrock teacher. Keys: AWS_ACCESS_KEY / AWS_SECRET_KEY (Carson's names in ~/Projects/.env) or the standard
+    AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY. Prices default to BEDROCK_PRICES; an unlisted model must be priced
+    explicitly so the proxy's Budget cap holds."""
+    if not model:
+        raise ValueError("--upstream bedrock needs --model <bedrock model id>")
+    if price_in is None or price_out is None:
+        if model not in BEDROCK_PRICES:
+            raise ValueError(f"no list price for {model!r}: pass --price-in and --price-out ($ per M tokens)")
+        price_in, price_out = BEDROCK_PRICES[model]
+    key = secret = None
+    if client is None:
+        key = read_env_key("AWS_ACCESS_KEY_ID", None) or read_env_key("AWS_ACCESS_KEY", env_file)
+        secret = read_env_key("AWS_SECRET_ACCESS_KEY", None) or read_env_key("AWS_SECRET_KEY", env_file)
+        if not key or not secret:
+            raise ValueError(f"AWS_ACCESS_KEY / AWS_SECRET_KEY not in the environment or {env_file}")
+    return BedrockEndpoint("bedrock", model=model, key=key, secret=secret, region=region, client=client,
+                           price_in=float(price_in), price_out=float(price_out), timeout=timeout)
