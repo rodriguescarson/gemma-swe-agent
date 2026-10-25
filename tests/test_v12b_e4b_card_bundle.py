@@ -34,5 +34,6 @@ def test_sampling_is_the_card_block_and_nothing_else_moved():
 
 
 def test_model_is_e4b():
-    agent = yaml.safe_load((CARD / "agent.yaml").read_text())
-    assert agent["model"] == "gemma-4-e4b-it-qat-w4a16-ct"
+    # agent.yaml carries !include tags that yaml.safe_load rejects; the declared model is one plain line
+    lines = [l for l in (CARD / "agent.yaml").read_text().splitlines() if l.startswith("model:")]
+    assert lines == ["model: gemma-4-e4b-it-qat-w4a16-ct"]
