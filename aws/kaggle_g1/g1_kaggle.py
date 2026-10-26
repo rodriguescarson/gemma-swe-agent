@@ -31,6 +31,7 @@ import sys
 import threading
 import time
 import traceback
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -381,24 +382,45 @@ def http_ok(url, timeout=5):
         return False
 
 
-def tool_probe():
-    """One request with a tool straight to vLLM (not captured): does the mistral parser return a tool call?"""
-    body = {"model": TEACHER["served"], "max_tokens": 200, "temperature": 0.2,
-            "messages": [{"role": "user", "content": "List the files in the current directory using the tool."}],
-            "tools": [{"type": "function", "function": {"name": "run_shell", "description": "Run a shell command",
-                       "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]}
+TOOLS = [{"type": "function", "function": {"name": "run_shell", "description": "Run a shell command",
+          "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]
+
+
+def direct(body, name):
+    """One request straight to vLLM (never through the capturing proxy); the reply or the error, kept as W/<name>.json."""
     req = urllib.request.Request(f"http://127.0.0.1:{VPORT}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
             out = json.load(r)
         msg = out["choices"][0]["message"]
-        res = {"tool_calls": msg.get("tool_calls"), "content": (msg.get("content") or "")[:300], "usage": out.get("usage")}
+        res = {"status": 200, "tool_calls": msg.get("tool_calls"), "content": (msg.get("content") or "")[:300], "usage": out.get("usage")}
+    except urllib.error.HTTPError as e:
+        res = {"status": e.code, "error": e.read()[:800].decode("utf-8", "replace")}
     except Exception as e:
-        res = {"error": repr(e)[:500]}
-    (W / "tool_probe.json").write_text(json.dumps(res, indent=1))
-    log("TOOL_PROBE", json.dumps(res)[:400])
+        res = {"status": None, "error": repr(e)[:500]}
+    (W / f"{name}.json").write_text(json.dumps(res, indent=1))
+    log(name.upper(), json.dumps(res)[:400])
+    return res
+
+
+def tool_probe():
+    """Does the mistral parser return a tool call at all?"""
+    res = direct({"model": TEACHER["served"], "max_tokens": 200, "temperature": 0.2, "tools": TOOLS,
+                  "messages": [{"role": "user", "content": "List the files in the current directory using the tool."}]}, "tool_probe")
     return bool(res.get("tool_calls"))
+
+
+def harness_probe():
+    """A body shaped like the harness's (eval/collect captures: chat_template_kwargs, float top_k, max_completion_tokens,
+    tools); or_proxy --upstream vllm forwards bodies unchanged, so if vLLM refuses this, every task call would fail."""
+    res = direct({"model": TEACHER["served"], "max_completion_tokens": 256, "temperature": 0.2, "top_p": 0.95, "top_k": 64.0,
+                  "chat_template_kwargs": {"enable_thinking": True}, "tools": TOOLS,
+                  "messages": [{"role": "system", "content": "You are a coding agent."},
+                               {"role": "user", "content": "Show the files in the repository."}]}, "harness_probe")
+    if res.get("status") != 200:
+        raise RuntimeError(f"vLLM refused a harness-shaped request: {res}")
+    return res
 
 
 def teacher_mode():
@@ -437,6 +459,7 @@ def teacher_mode():
         raise RuntimeError("vLLM not up after 40 min")
     mark("vllm_up")
     STATUS["tool_probe_tool_call"] = tool_probe()
+    harness_probe()
     base = f"http://127.0.0.1:{VPORT}/v1"
     probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
                            capture_output=True, text=True, env=clean_env())

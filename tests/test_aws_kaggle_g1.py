@@ -107,7 +107,8 @@ def test_teacher_mode_end_to_end_against_stubs(tmp_path):
     for flag in ("--tensor-parallel-size 4", "--tokenizer-mode mistral --config-format mistral --load-format mistral",
                  "--tool-call-parser mistral --enable-auto-tool-choice", "--max-model-len 65536", "--served-model-name devstral-small-2-24b"):
         assert flag in vlog, flag
-    assert vlog.count("REQUEST model=devstral-small-2-24b") == 32                         # tool probe + or_proxy probe + 30 tasks
+    assert vlog.count("REQUEST model=devstral-small-2-24b") == 33          # tool probe + harness probe + or_proxy probe + 30 tasks
+    hp = json.loads((w / "harness_probe.json").read_text()); assert hp["status"] == 200
     runs = [json.loads(ln) for ln in (tmp_path / "runner.jsonl").read_text().splitlines()]
     assert sorted(r["argv"][r["argv"].index("--task-ids") + 1] for r in runs) == sorted(IDS)
     for r in runs:
@@ -234,3 +235,16 @@ def test_uv_system_python_in_the_environment_does_not_reach_the_runner(tmp_path)
     facts = json.loads((w / "facts.json").read_text())
     assert facts["scrubbed_env"] == {"UV_SYSTEM_PYTHON": "1", "PYTHONPATH": "/nonexistent/kaggle/lib"}
     assert json.loads((w / "gold_summary.json").read_text())["resolved"] == 30
+
+
+def test_a_refused_harness_shaped_request_stops_before_the_race(tmp_path):
+    env, w, _ = make_world(tmp_path)
+    fake = Path(env["G1_TV_VLLM"])
+    src = FAKE_VLLM.replace('        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")',
+        '        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")\n'
+        '        if "chat_template_kwargs" in body:\n'
+        '            b = b"{\\"error\\": \\"bad kwargs\\"}"; self.send_response(400); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return')
+    fake.write_text(src)
+    run(env, "teacher")
+    st = json.loads((w / "status.json").read_text())
+    assert st["ok"] is False and "harness-shaped" in st["error"] and not (tmp_path / "runner.jsonl").exists()
