@@ -120,19 +120,27 @@ def find_input(name):
     return Path(hits[0]) if hits else None
 
 
-def unpack(name, dest):
-    """name.tgz/.tar, or a directory Kaggle already unpacked, -> dest."""
-    for cand in (name + ".tgz", name + ".tar", name):
-        src = find_input(cand)
-        if src is None:
-            continue
-        dest.mkdir(parents=True, exist_ok=True)
-        if src.is_dir():
-            shutil.copytree(src, dest, dirs_exist_ok=True)
-        else:
-            sh(["tar", "xf", str(src), "-C", str(dest)], "unpack")
-        return src
-    raise FileNotFoundError(f"{name}(.tgz|.tar) not under {INPUT}: {sorted(glob.glob(str(INPUT / '*' / '*')))[:20]}")
+def unpack(name, dest, marker="tasks.jsonl"):
+    """name.tgz/.tar, or whatever directory Kaggle unpacked it to, -> dest (the directory that holds `marker`)."""
+    src = next((p for p in (find_input(c) for c in (name + ".tgz", name + ".tar", name)) if p is not None), None)
+    if src is None:   # unpacked at the dataset root, or under another name: the directory holding the marker and snapshots/
+        src = next((Path(m).parent for m in sorted(glob.glob(str(INPUT / "**" / marker), recursive=True))
+                    if (Path(m).parent / "snapshots").is_dir()), None)
+    if src is None:
+        raise FileNotFoundError(f"{name}(.tgz|.tar) not under {INPUT}: {sorted(glob.glob(str(INPUT / '*' / '*')))[:20]}")
+    dest.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+    else:
+        sh(["tar", "xf", str(src), "-C", str(dest)], "unpack")
+    if not (dest / marker).exists():   # the archive held one top-level folder: lift it
+        inner = next((Path(m).parent for m in sorted(glob.glob(str(dest / "**" / marker), recursive=True))), None)
+        if inner is None:
+            raise FileNotFoundError(f"no {marker} in {src}")
+        for item in inner.iterdir():
+            shutil.move(str(item), str(dest / item.name))
+    log("unpacked", src, "->", dest)
+    return src
 
 
 def check_tasks():

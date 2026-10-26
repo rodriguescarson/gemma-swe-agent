@@ -20,23 +20,29 @@ KERNELS = {   # dir under kernels/ -> (kernel id, mode, gpu)
 }
 
 CELL = r'''# G1 teacher pilot ({mode}): docs/GAPS_2026-10-06.md 'G1 amendment 2'; the work is in aws/kaggle_g1/g1_kaggle.py
-import glob, os, shutil, subprocess, sys, time
+import base64, glob, os, shutil, subprocess, sys, time
 os.environ["G1_T0"] = str(time.time())
 dst = "/root/g4"; os.makedirs(dst, exist_ok=True)
-tgz = sorted(glob.glob("/kaggle/input/**/g1_code.tgz", recursive=True))
-if tgz:
-    subprocess.run(["tar", "xzf", tgz[0], "-C", dst], check=True)
-else:
-    d = sorted(glob.glob("/kaggle/input/**/g1_code", recursive=True))
-    assert d, ("no g1_code(.tgz) under /kaggle/input", sorted(glob.glob("/kaggle/input/*/*"))[:20])
-    shutil.copytree(d[0], dst, dirs_exist_ok=True)
+src = (sorted(glob.glob("/kaggle/input/**/g1_code.tgz", recursive=True)) + sorted(glob.glob("/kaggle/input/**/g1_code", recursive=True)))
+if src and os.path.isfile(src[0]):
+    subprocess.run(["tar", "xzf", src[0], "-C", dst], check=True)
+else:   # Kaggle unpacked the archive: copy the tree that holds scripts/ and harness/
+    roots = src or [os.path.dirname(os.path.dirname(p)) for p in sorted(glob.glob("/kaggle/input/**/scripts/or_proxy.py", recursive=True))]
+    assert roots, ("no g1_code under /kaggle/input", sorted(glob.glob("/kaggle/input/*/*"))[:20])
+    shutil.copytree(roots[0], dst, dirs_exist_ok=True)
+# the driver travels inside this notebook, so a driver fix needs a kernel push, not a dataset upload
+os.makedirs(dst + "/aws/kaggle_g1", exist_ok=True)
+open(dst + "/aws/kaggle_g1/g1_kaggle.py", "wb").write(base64.b64decode("{driver_b64}"))
 r = subprocess.run([sys.executable, dst + "/aws/kaggle_g1/g1_kaggle.py", "{mode}"])
 print("driver exit", r.returncode, open("/kaggle/working/status.json").read() if os.path.exists("/kaggle/working/status.json") else "no status.json")
 '''
 
 
 def notebook(mode):
-    return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": CELL.replace("{mode}", mode)}],
+    import base64
+    driver = base64.b64encode((Path(__file__).resolve().parent / "g1_kaggle.py").read_bytes()).decode()
+    src = CELL.replace("{mode}", mode).replace("{driver_b64}", driver)
+    return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": src}],
             "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
             "nbformat": 4, "nbformat_minor": 5}
 

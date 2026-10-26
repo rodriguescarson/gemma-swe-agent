@@ -171,6 +171,9 @@ def test_kernels_are_private_internet_on_and_run_the_driver(tmp_path, monkeypatc
         src = nb["cells"][0]["source"]
         assert f'"/aws/kaggle_g1/g1_kaggle.py", "{mode}"]' in src and "G1_T0" in src
         compile(src, d, "exec")
+        import base64, re
+        b64 = re.search(r'b64decode\("([A-Za-z0-9+/=]+)"\)', src).group(1)
+        assert base64.b64decode(b64) == DRIVER.read_bytes()            # the notebook carries the current driver verbatim
 
 
 def test_stage_dataset_code_paths_exist_and_secret_scan_bites():
@@ -189,3 +192,22 @@ def test_driver_never_writes_submissions_and_uses_its_own_vllm():
     assert "wheelhouse" not in code.lower().replace("g4_wheelhouse", "") or "gemma-4-developer-agent-wheelhouse" not in code
     assert '"--tensor-parallel-size", "4"' in code and "--probe" in code and '"--capture"' in code and '"--max-usd", "1000"' in code
     assert 'str(ROOT / "submissions" / "v12b")' in code and "SCRATCH" in code
+
+
+@pytest.mark.parametrize("layout", ["unpacked_dir", "tar_root", "tar_folder"])
+def test_the_harness_unpacks_from_any_form_kaggle_mounts(tmp_path, layout):
+    import tarfile
+    env, w, _ = make_world(tmp_path)
+    ds = tmp_path / "input" / "g4-g1-harness"
+    if layout != "unpacked_dir":
+        h = ds / "harness_g1"
+        with tarfile.open(ds / "harness_g1.tar", "w") as t:
+            t.add(h, arcname="." if layout == "tar_root" else "harness_g1")
+        shutil.rmtree(h)
+    else:   # Kaggle unpacked an archive whose files sat at its root: tasks.jsonl and snapshots/ at the dataset root
+        for item in (ds / "harness_g1").iterdir():
+            shutil.move(str(item), str(ds / item.name))
+        (ds / "harness_g1").rmdir()
+    run(env, "gold")
+    assert json.loads((w / "gold_summary.json").read_text())["resolved"] == 30
+    assert (tmp_path / "h" / "tasks.jsonl").is_file() and (tmp_path / "h" / "snapshots" / f"{IDS[0]}.tgz").is_file()
