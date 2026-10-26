@@ -315,8 +315,11 @@ def summarise(out, ids):
     return s
 
 
-def conc_default(f):
-    return int(E("G1_CONC") or max(2, min(8, (f.get("cpus") or 8) // 4)))
+def conc_default(f, teacher=False):
+    """Tasks at a time. Gold runs only tests (CPU-bound): cpus // 4. Teacher tasks mostly wait on the model, and the
+    notebook-hours per usable criterion rewards overlap: cpus // 2, at least 4 and at most 8 (the EC2 plan ran 6)."""
+    cpus = f.get("cpus") or 8
+    return int(E("G1_CONC") or (max(4, min(8, cpus // 2)) if teacher else max(2, min(8, cpus // 4))))
 
 
 # ------------------------------------------------------------------------------------------------------------- modes
@@ -475,7 +478,7 @@ def teacher_mode():
             break
         time.sleep(1)
     mark("race_start")
-    conc = conc_default(f); STATUS["conc"] = conc
+    conc = conc_default(f, teacher=True); STATUS["conc"] = conc
     try:
         s = run_tasks(py, bundle, flags, ids, out, PPORT, conc)
     finally:

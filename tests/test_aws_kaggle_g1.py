@@ -248,3 +248,10 @@ def test_a_refused_harness_shaped_request_stops_before_the_race(tmp_path):
     run(env, "teacher")
     st = json.loads((w / "status.json").read_text())
     assert st["ok"] is False and "harness-shaped" in st["error"] and not (tmp_path / "runner.jsonl").exists()
+
+
+def test_concurrency_defaults():
+    import g1_kaggle
+    os.environ.pop("G1_CONC", None)
+    assert [g1_kaggle.conc_default({"cpus": c}, teacher=True) for c in (4, 8, 12, 16, 48)] == [4, 4, 6, 8, 8]
+    assert [g1_kaggle.conc_default({"cpus": c}) for c in (4, 8, 16, 48)] == [2, 2, 4, 8]
