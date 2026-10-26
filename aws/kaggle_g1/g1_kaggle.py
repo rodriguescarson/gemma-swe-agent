@@ -57,6 +57,7 @@ TIMES, STATUS = {}, {"mode": None, "stage": "start", "ok": False}
 # run: `VIRTUAL_ENV=/root/buildenv uv pip install pytest` exited 0 yet buildenv had no pytest; UV_SYSTEM_PYTHON overrides
 # VIRTUAL_ENV). Scrubbed from every subprocess the harness side starts; facts.json records what was there.
 SCRUB = ("UV_SYSTEM_PYTHON", "UV_PYTHON", "UV_BREAK_SYSTEM_PACKAGES", "UV_PROJECT_ENVIRONMENT", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL",
+         "UV_CONSTRAINT", "UV_BUILD_CONSTRAINT",   # gold run 2: Kaggle pins uv installs to its own image's versions
          "PIP_TARGET", "PIP_PREFIX", "PIP_USER", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE",
          "VIRTUAL_ENV", "CONDA_PREFIX")
 
@@ -113,6 +114,10 @@ def facts():
     f = {"python": sys.version.split()[0], "cpus": os.cpu_count(), "free_gb": {},
          "scrubbed_env": {k: os.environ[k] for k in SCRUB if k in os.environ},
          "uv_pip_env": sorted(k for k in os.environ if k.startswith(("UV_", "PIP_")))}
+    for k in ("UV_CONSTRAINT", "UV_BUILD_CONSTRAINT"):   # what the scrub keeps out, for the record
+        path = os.environ.get(k, "")
+        if path and os.path.isfile(path):
+            f.setdefault("kaggle_constraints", {})[k] = open(path).read().splitlines()[:400]
     for p in ("/", "/tmp", "/root", "/kaggle/working"):
         try:
             f["free_gb"][p] = free_gb(p)
@@ -213,6 +218,7 @@ def setup_harness():
         sh([uv, "pip", "install", "-q", "--python", py, "--system", "--break-system-packages", "--no-deps", *newest], "newest_wheels")
     sh(["bash", "-x", str(ROOT / "pod" / "buildenv.sh")], "buildenv")   # -x: the log shows which step failed
     sh([py, "-c", "import swegemma, adk_submission, google.adk, litellm, sys; print(sys.version)"], "harness_import")
+    sh([uv, "pip", "freeze", "--python", py], "harness_freeze", check=False)   # compared across the gold and teacher runs
     log("harness ready:", py, "| /wheels ->", cw)
     return py
 

@@ -216,7 +216,8 @@ def test_the_harness_unpacks_from_any_form_kaggle_mounts(tmp_path, layout):
 
 def test_clean_env_scrubs_what_redirects_installs_and_imports():
     import g1_kaggle
-    base = {"UV_SYSTEM_PYTHON": "1", "VIRTUAL_ENV": "/x", "PYTHONPATH": "/kaggle/lib", "PIP_TARGET": "/t", "PATH": "/usr/bin", "HOME": "/root"}
+    base = {"UV_SYSTEM_PYTHON": "1", "VIRTUAL_ENV": "/x", "PYTHONPATH": "/kaggle/lib", "PIP_TARGET": "/t", "PATH": "/usr/bin", "HOME": "/root",
+            "UV_CONSTRAINT": "/kaggle/c.txt", "UV_BUILD_CONSTRAINT": "/kaggle/b.txt"}   # all set on Kaggle (gold run 2 facts)
     env = g1_kaggle.clean_env(base)
     assert env == {"PATH": "/usr/bin", "HOME": "/root"}
 
