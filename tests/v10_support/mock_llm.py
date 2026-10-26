@@ -33,6 +33,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+
+class _Server(ThreadingHTTPServer):
+    """A listen backlog of 5 (socketserver's default) overflows under the contract test's 8 concurrent clients on
+    macOS 27 and the kernel resets connections (ECONNRESET); 64 holds them."""
+    request_queue_size = 64
 from typing import Any, Callable
 
 NAME_RE = re.compile(r'Your internal name is "([^"]+)"')
@@ -162,7 +168,7 @@ class MockLLM:
                 self.end_headers()
                 self.wfile.write(out)
 
-        self._srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._srv = _Server(("127.0.0.1", 0), Handler)
         self._srv.daemon_threads = True
         self._th = threading.Thread(target=self._srv.serve_forever, name="mock-llm", daemon=True)
         self._th.start()
