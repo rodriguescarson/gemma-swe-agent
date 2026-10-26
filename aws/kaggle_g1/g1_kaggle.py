@@ -186,11 +186,19 @@ def ensure_uv():
 
 
 def competition_wheels():
-    for pat in ("**/gemma-4-developer-agent/wheels", "**/gemma-4-developer-agent/**/wheels"):
+    """The competition's wheels/ when the competition is attached (CPU kernel), else the dataset's raw_wheels copy (the
+    4x L4 kernel cannot attach the competition with internet on; same 124 files, checked by name and size)."""
+    for pat in ("**/gemma-4-developer-agent/wheels", "**/gemma-4-developer-agent/**/wheels", "**/raw_wheels"):
         for d in sorted(glob.glob(str(INPUT / pat), recursive=True)):
-            if glob.glob(d + "/*.whl"):
+            if len(glob.glob(d + "/*.whl")) >= 100:
                 return Path(d)
-    raise FileNotFoundError("no competition wheels dir under /kaggle/input (attach the gemma-4-developer-agent data)")
+    tar = find_input("raw_wheels.tar")
+    if tar is not None:
+        dest = Path(E("G1_RAW_WHEELS", "/root/raw_wheels_x"))
+        dest.mkdir(parents=True, exist_ok=True)
+        sh(["tar", "xf", str(tar), "-C", str(dest)], "unpack")
+        return dest / "raw_wheels"
+    raise FileNotFoundError("no competition wheels and no raw_wheels(.tar) under /kaggle/input")
 
 
 def setup_harness():

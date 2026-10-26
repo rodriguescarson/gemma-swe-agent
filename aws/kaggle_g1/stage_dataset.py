@@ -8,6 +8,9 @@ Contents (no secrets: tracked code and the open-source task snapshots and PyPI w
                    aws/kaggle_g1/g1_kaggle.py (commit first)
   harness_g1.tar   the 30 G1 tasks cut from data/heldout1k/harness_all by aws/jobs/g1_stage.build_subset, the same subset
                    the EC2 path staged to S3 (tasks.jsonl, ids.txt, env.json, manifest.json, 30 snapshots, all wheels)
+  raw_wheels.tar   data/raw/wheels: the competition's 124 sandbox wheels (public PyPI packages; same names and sizes as the
+                   competition's wheels/, checked 2026-10-26), for /wheels on the 4x L4 kernel, which cannot attach the
+                   competition with internet on ("Internet cannot be enabled for this competition with the current accelerator")
 The first upload creates the dataset (private: no --public); later ones add a version. Then it waits until Kaggle reports
 the dataset ready.
 """
@@ -44,6 +47,11 @@ def build(stage, ref):
         info = g1_stage.build_subset(Path(td) / "harness_g1")
         with tarfile.open(stage / "harness_g1.tar", "w") as t:
             t.add(Path(td) / "harness_g1", arcname=".")
+    wheels = ROOT / "data" / "raw" / "wheels"
+    if len(list(wheels.glob("*.whl"))) != 124:
+        raise SystemExit(f"{wheels} should hold the competition's 124 wheels")
+    with tarfile.open(stage / "raw_wheels.tar", "w") as t:
+        t.add(wheels, arcname="raw_wheels")
     (stage / "dataset-metadata.json").write_text(json.dumps({"title": "g4-g1-harness", "id": DATASET, "licenses": [{"name": "other"}]}, indent=1))
     return sha, info
 

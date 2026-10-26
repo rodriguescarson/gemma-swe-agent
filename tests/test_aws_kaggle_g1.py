@@ -166,7 +166,8 @@ def test_kernels_are_private_internet_on_and_run_the_driver(tmp_path, monkeypatc
     for d, kid, mode, gpu in (("g1_gold", "g4-g1-gold", "gold", False), ("g1_devstral", "g4-g1-devstral", "teacher", True)):
         meta = json.loads((tmp_path / "kernels" / d / "kernel-metadata.json").read_text())
         assert meta["id"] == "carsonrodrigues/" + kid and meta["is_private"] and meta["enable_internet"] and meta["enable_gpu"] is gpu
-        assert meta["dataset_sources"] == ["carsonrodrigues/g4-g1-harness"] and meta["competition_sources"] == ["gemma-4-developer-agent"]
+        assert meta["dataset_sources"] == ["carsonrodrigues/g4-g1-harness"]
+        assert meta["competition_sources"] == ([] if gpu else ["gemma-4-developer-agent"])   # Kaggle: no internet + competition on 4x L4
         assert ("machine_shape" in meta) is gpu
         nb = json.loads((tmp_path / "kernels" / d / meta["code_file"]).read_text())
         src = nb["cells"][0]["source"]
@@ -256,3 +257,29 @@ def test_concurrency_defaults():
     os.environ.pop("G1_CONC", None)
     assert [g1_kaggle.conc_default({"cpus": c}, teacher=True) for c in (4, 8, 12, 16, 48)] == [4, 4, 6, 8, 8]
     assert [g1_kaggle.conc_default({"cpus": c}) for c in (4, 8, 16, 48)] == [2, 2, 4, 8]
+
+
+@pytest.mark.parametrize("form", ["competition", "dataset_dir", "dataset_tar", "missing"])
+def test_wheels_come_from_the_competition_or_the_datasets_copy(tmp_path, monkeypatch, form):
+    import tarfile
+    import g1_kaggle
+    inp = tmp_path / "input"; monkeypatch.setattr(g1_kaggle, "INPUT", inp); monkeypatch.setattr(g1_kaggle, "W", tmp_path / "w")
+    (tmp_path / "w").mkdir(); monkeypatch.setenv("G1_RAW_WHEELS", str(tmp_path / "x"))
+    src = tmp_path / "src" / "raw_wheels"; src.mkdir(parents=True)
+    for i in range(124):
+        (src / f"p{i}-1.0-py3-none-any.whl").write_bytes(b"x")
+    if form == "competition":
+        shutil.copytree(src, inp / "competitions" / "gemma-4-developer-agent" / "wheels")
+    elif form == "dataset_dir":
+        shutil.copytree(src, inp / "datasets" / "carsonrodrigues" / "g4-g1-harness" / "raw_wheels")
+    elif form == "dataset_tar":
+        d = inp / "datasets" / "carsonrodrigues" / "g4-g1-harness"; d.mkdir(parents=True)
+        with tarfile.open(d / "raw_wheels.tar", "w") as t:
+            t.add(src, arcname="raw_wheels")
+    else:
+        inp.mkdir()
+        with pytest.raises(FileNotFoundError):
+            g1_kaggle.competition_wheels()
+        return
+    got = g1_kaggle.competition_wheels()
+    assert len(list(got.glob("*.whl"))) == 124
