@@ -52,6 +52,19 @@ TEACHER = {
               "--tool-call-parser", "mistral", "--enable-auto-tool-choice", "--max-model-len", E("G1_MAX_LEN", "65536")],
 }
 TIMES, STATUS = {}, {"mode": None, "stage": "start", "ok": False}
+# Variables of the Kaggle image that would send installs or imports somewhere other than the container's (2026-10-26 gold
+# run: `VIRTUAL_ENV=/root/buildenv uv pip install pytest` exited 0 yet buildenv had no pytest; UV_SYSTEM_PYTHON overrides
+# VIRTUAL_ENV). Scrubbed from every subprocess the harness side starts; facts.json records what was there.
+SCRUB = ("UV_SYSTEM_PYTHON", "UV_PYTHON", "UV_BREAK_SYSTEM_PACKAGES", "UV_PROJECT_ENVIRONMENT", "UV_INDEX_URL", "UV_EXTRA_INDEX_URL",
+         "PIP_TARGET", "PIP_PREFIX", "PIP_USER", "PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PYTHONPATH", "PYTHONHOME", "PYTHONUSERBASE",
+         "VIRTUAL_ENV", "CONDA_PREFIX")
+
+
+def clean_env(base=None):
+    env = dict(os.environ if base is None else base)
+    for k in SCRUB:
+        env.pop(k, None)
+    return env
 
 
 def log(*a):
@@ -76,7 +89,9 @@ def mark(key):
 
 
 def sh(cmd, name, env=None, check=True, timeout=None, cwd=None):
-    """Run cmd (list or shell string), its output to W/logs/<name>.log; raise on failure when check."""
+    """Run cmd (list or shell string), its output to W/logs/<name>.log; raise on failure when check. The environment is
+    clean_env() unless one is given."""
+    env = clean_env() if env is None else env
     (W / "logs").mkdir(parents=True, exist_ok=True)
     with open(W / "logs" / f"{name}.log", "a") as out:
         r = subprocess.run(cmd, shell=isinstance(cmd, str), stdout=out, stderr=subprocess.STDOUT, env=env, timeout=timeout, cwd=cwd)
@@ -94,7 +109,9 @@ def free_gb(path):
 
 
 def facts():
-    f = {"python": sys.version.split()[0], "cpus": os.cpu_count(), "free_gb": {}}
+    f = {"python": sys.version.split()[0], "cpus": os.cpu_count(), "free_gb": {},
+         "scrubbed_env": {k: os.environ[k] for k in SCRUB if k in os.environ},
+         "uv_pip_env": sorted(k for k in os.environ if k.startswith(("UV_", "PIP_")))}
     for p in ("/", "/tmp", "/root", "/kaggle/working"):
         try:
             f["free_gb"][p] = free_gb(p)
@@ -178,7 +195,7 @@ def setup_harness():
     os.environ["PATH"] = str(Path(uv).parent) + os.pathsep + os.environ["PATH"]
     os.environ.update({"UV_LINK_MODE": "copy", "PYTHONDONTWRITEBYTECODE": "1"})
     sh([uv, "python", "install", "3.12"], "py312")
-    py = subprocess.run([uv, "python", "find", "3.12"], capture_output=True, text=True, check=True).stdout.strip()
+    py = subprocess.run([uv, "python", "find", "3.12"], capture_output=True, text=True, check=True, env=clean_env()).stdout.strip()
     if not shutil.which("patch"):
         sh("apt-get -qq update && apt-get -qq install -y patch", "apt", check=False)
     wheels = sorted(str(p) for p in (ROOT / "harness" / "wheels").glob("*.whl"))
@@ -190,10 +207,10 @@ def setup_harness():
         if Path("/wheels").is_symlink():
             Path("/wheels").unlink()
         os.symlink(cw, "/wheels")
-    newest = subprocess.run([py, "-c", NEWEST], capture_output=True, text=True, check=True).stdout.split()
+    newest = subprocess.run([py, "-c", NEWEST], capture_output=True, text=True, check=True, env=clean_env()).stdout.split()
     if newest:
         sh([uv, "pip", "install", "-q", "--python", py, "--system", "--break-system-packages", "--no-deps", *newest], "newest_wheels")
-    sh(["bash", str(ROOT / "pod" / "buildenv.sh")], "buildenv")
+    sh(["bash", "-x", str(ROOT / "pod" / "buildenv.sh")], "buildenv")   # -x: the log shows which step failed
     sh([py, "-c", "import swegemma, adk_submission, google.adk, litellm, sys; print(sys.version)"], "harness_import")
     log("harness ready:", py, "| /wheels ->", cw)
     return py
@@ -221,7 +238,8 @@ for n, (v, f) in sorted(best.items()):
 
 def make_bundle(py):
     out = subprocess.run([py, str(ROOT / "aws" / "jobs" / "g1_race.py"), "bundle", "--base", str(ROOT / "submissions" / "v12b"),
-                          "--dest", str(SCRATCH), "--min", "20", "--calls", "100"], capture_output=True, text=True, check=True).stdout.split("\n")
+                          "--dest", str(SCRATCH), "--min", "20", "--calls", "100"], capture_output=True, text=True, check=True,
+                         env=clean_env()).stdout.split("\n")
     bundle, budget = Path(out[0].strip()), json.loads(out[1])
     assert budget["max_time_minutes"] == 20.0 and budget["max_tool_calls"] == 100, budget
     shutil.copy(bundle / "eval_config.yaml", W / "bundle_eval_config.yaml")
@@ -240,7 +258,7 @@ def task_cmd(py, bundle, flags, task, results, oracle=False):
 
 
 def task_env(port, sbx):
-    env = dict(os.environ)
+    env = clean_env()
     env.update({"PYTHONDONTWRITEBYTECODE": "1", "UV_LINK_MODE": "copy", "G4_WHEELHOUSE": str(H / "wheels"), "G4_COMPACTION": "1",
                 "G4_L4_SCALE": "1.0", "G4_NO_EDITABLE": "1", "LITELLM_LOCAL_MODEL_COST_MAP": "True", "OPENAI_API_KEY": "EMPTY",
                 "OPENAI_BASE_URL": f"http://127.0.0.1:{port}/v1", "TMPDIR": str(sbx)})
@@ -346,7 +364,7 @@ def install_teacher_vllm(uv, out):
         sh([uv, "pip", "install", "-q", "--python", str(tv / "bin" / "python"), f"vllm=={VLLM_VERSION}"], "teacher_venv")
         r = subprocess.run([str(tv / "bin" / "python"), "-c", "import vllm, torch, mistral_common; print(vllm.__version__, torch.__version__, "
                             "torch.version.cuda, mistral_common.__version__, torch.cuda.is_available(), torch.cuda.device_count())"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=clean_env())
         out["versions"] = r.stdout.strip() or r.stderr.strip()[-500:]
         out["ok"] = r.returncode == 0 and r.stdout.strip().endswith("True 4")
         out["vllm"] = str(tv / "bin" / "vllm")
@@ -404,7 +422,7 @@ def teacher_mode():
     STATUS.update(download=dl, teacher_venv=tv); mark("weights_and_venv")
     if not (dl.get("ok") and tv.get("ok")):
         raise RuntimeError(f"download {dl} / teacher venv {tv}")
-    env = dict(os.environ, VLLM_NO_USAGE_STATS="1", VLLM_WORKER_MULTIPROC_METHOD="spawn")
+    env = dict(clean_env(), VLLM_NO_USAGE_STATS="1", VLLM_WORKER_MULTIPROC_METHOD="spawn")
     vlog = open(W / "vllm.log", "w")
     server = subprocess.Popen([tv["vllm"], "serve", str(mdir / TEACHER["name"]), "--served-model-name", TEACHER["served"],
                                "--tensor-parallel-size", "4", "--gpu-memory-utilization", "0.90", *TEACHER["flags"],
@@ -421,14 +439,14 @@ def teacher_mode():
     STATUS["tool_probe_tool_call"] = tool_probe()
     base = f"http://127.0.0.1:{VPORT}/v1"
     probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
-                           capture_output=True, text=True)
+                           capture_output=True, text=True, env=clean_env())
     (W / "probe.out").write_text(probe.stdout + probe.stderr)
     if probe.returncode != 0:
         raise RuntimeError("or_proxy probe failed: " + (probe.stdout + probe.stderr)[-500:])
     out = W / TEACHER["name"]; out.mkdir(exist_ok=True)
     proxy = subprocess.Popen([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"],
                               "--capture", str(W / f"capture_{TEACHER['name']}.jsonl"), "--max-usd", "1000", "--port", str(PPORT),
-                              "--log", str(out / "proxy.jsonl")], stdout=open(out / "proxy.out", "w"), stderr=subprocess.STDOUT)
+                              "--log", str(out / "proxy.jsonl")], stdout=open(out / "proxy.out", "w"), stderr=subprocess.STDOUT, env=clean_env())
     for _ in range(30):
         if http_ok(f"http://127.0.0.1:{PPORT}/v1/models") or proxy.poll() is not None:
             break

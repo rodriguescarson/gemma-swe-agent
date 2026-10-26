@@ -211,3 +211,26 @@ def test_the_harness_unpacks_from_any_form_kaggle_mounts(tmp_path, layout):
     run(env, "gold")
     assert json.loads((w / "gold_summary.json").read_text())["resolved"] == 30
     assert (tmp_path / "h" / "tasks.jsonl").is_file() and (tmp_path / "h" / "snapshots" / f"{IDS[0]}.tgz").is_file()
+
+
+def test_clean_env_scrubs_what_redirects_installs_and_imports():
+    import g1_kaggle
+    base = {"UV_SYSTEM_PYTHON": "1", "VIRTUAL_ENV": "/x", "PYTHONPATH": "/kaggle/lib", "PIP_TARGET": "/t", "PATH": "/usr/bin", "HOME": "/root"}
+    env = g1_kaggle.clean_env(base)
+    assert env == {"PATH": "/usr/bin", "HOME": "/root"}
+
+
+def test_every_harness_subprocess_gets_the_clean_env():
+    src = DRIVER.read_text()
+    assert "env = dict(os.environ)" not in src and "dict(os.environ," not in src
+    for call in ("[py, \"-c\", NEWEST]", "\"python\", \"find\", \"3.12\"]", "\"--probe\"]"):
+        i = src.index(call); assert "env=clean_env()" in src[i:i + 300], call
+
+
+def test_uv_system_python_in_the_environment_does_not_reach_the_runner(tmp_path):
+    env, w, _ = make_world(tmp_path)
+    env.update(UV_SYSTEM_PYTHON="1", PYTHONPATH="/nonexistent/kaggle/lib")
+    run(env, "gold")
+    facts = json.loads((w / "facts.json").read_text())
+    assert facts["scrubbed_env"] == {"UV_SYSTEM_PYTHON": "1", "PYTHONPATH": "/nonexistent/kaggle/lib"}
+    assert json.loads((w / "gold_summary.json").read_text())["resolved"] == 30
