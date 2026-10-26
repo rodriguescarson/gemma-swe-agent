@@ -4,10 +4,9 @@ and run aws/kaggle_g1/g1_kaggle.py.
     python aws/kaggle_g1/make_kernels.py        # -> kernels/g1_gold/ (CPU) and kernels/g1_devstral/ (4x L4)
 
 Push each with scripts/kaggle_push_wait.sh <dir> (KAGGLE_BIN=.venv/bin/kaggle, the 2.x CLI: only its --accelerator
-picks the 4x L4 machine); output lands in eval/kaggle/<dir>/. Both kernels are private, have internet on (pip, Hugging
-Face) and read carsonrodrigues/g4-g1-harness (aws/kaggle_g1/stage_dataset.py). The CPU kernel also attaches the
-competition's data (for /wheels only); the 4x L4 one cannot (Kaggle refuses internet + this competition + that accelerator)
-and takes /wheels from the dataset's identical raw_wheels copy. Neither is a competition submission.
+picks the 4x L4 machine); output lands in eval/kaggle/<dir>/. Both kernels are private; internet is on (pip, Hugging
+Face) for the CPU gold kernel; the 4x L4 kernel is offline (see metadata()). Both read carsonrodrigues/g4-g1-harness
+(aws/kaggle_g1/stage_dataset.py) and attach the competition's data (for /wheels only). Neither is a competition submission.
 """
 import json
 import sys
@@ -54,9 +53,11 @@ def metadata(kid, gpu):
             "dataset_sources": [DATASET], "competition_sources": ["gemma-4-developer-agent"], "kernel_sources": [], "model_sources": []}
     if gpu:
         meta["machine_shape"] = "NvidiaL4"   # ignored by the CLIs; kaggle_push_wait.sh passes --accelerator NvidiaL4
-        # 2026-10-26 SaveKernel 400: "Internet cannot be enabled for this competition with the current accelerator".
-        # The teacher needs internet (pip, Hugging Face), so /wheels comes from the dataset's raw_wheels copy instead.
-        meta["competition_sources"] = []
+        # 2026-10-26: Kaggle gives the 4x L4 machine only with the competition attached (without it the run got 2x T4) and
+        # then refuses internet (SaveKernel 400). So this kernel runs offline: uv, CPython 3.12 and every wheel come from
+        # the g4-g1-assets kernel's output, the weights from g4-g1-w1 / g4-g1-w2 (aws/kaggle_g1/assets_kernels.py).
+        meta["enable_internet"] = False
+        meta["kernel_sources"] = ["carsonrodrigues/g4-g1-assets", "carsonrodrigues/g4-g1-w1", "carsonrodrigues/g4-g1-w2"]
     return meta
 
 

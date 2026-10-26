@@ -165,9 +165,11 @@ def test_kernels_are_private_internet_on_and_run_the_driver(tmp_path, monkeypatc
     make_kernels.main()
     for d, kid, mode, gpu in (("g1_gold", "g4-g1-gold", "gold", False), ("g1_devstral", "g4-g1-devstral", "teacher", True)):
         meta = json.loads((tmp_path / "kernels" / d / "kernel-metadata.json").read_text())
-        assert meta["id"] == "carsonrodrigues/" + kid and meta["is_private"] and meta["enable_internet"] and meta["enable_gpu"] is gpu
-        assert meta["dataset_sources"] == ["carsonrodrigues/g4-g1-harness"]
-        assert meta["competition_sources"] == ([] if gpu else ["gemma-4-developer-agent"])   # Kaggle: no internet + competition on 4x L4
+        assert meta["id"] == "carsonrodrigues/" + kid and meta["is_private"] and meta["enable_gpu"] is gpu
+        assert meta["dataset_sources"] == ["carsonrodrigues/g4-g1-harness"] and meta["competition_sources"] == ["gemma-4-developer-agent"]
+        # 4x L4 only with the competition attached, and then no internet: the GPU kernel is offline, fed by three kernels
+        assert meta["enable_internet"] is (not gpu)
+        assert meta["kernel_sources"] == (["carsonrodrigues/g4-g1-assets", "carsonrodrigues/g4-g1-w1", "carsonrodrigues/g4-g1-w2"] if gpu else [])
         assert ("machine_shape" in meta) is gpu
         nb = json.loads((tmp_path / "kernels" / d / meta["code_file"]).read_text())
         src = nb["cells"][0]["source"]
@@ -283,3 +285,60 @@ def test_wheels_come_from_the_competition_or_the_datasets_copy(tmp_path, monkeyp
         return
     got = g1_kaggle.competition_wheels()
     assert len(list(got.glob("*.whl"))) == 124
+
+
+def test_offline_mode_links_the_weights_and_uses_the_assets(tmp_path):
+    import tarfile
+    env, w, _ = make_world(tmp_path)
+    env.pop("G1_SKIP_DOWNLOAD")
+    inp = tmp_path / "input"
+    a = inp / "notebooks" / "carsonrodrigues" / "g4-g1-assets"; (a / "bin").mkdir(parents=True); (a / "wheels").mkdir()
+    (a / "bin" / "uv").write_text("#!/bin/sh\nexit 0\n")
+    (a / "assets_manifest.json").write_text(json.dumps({"wheels": 412, "torch": ["torch-2.10.0"], "vllm": ["vllm-0.19.1"]}))
+    pyd = tmp_path / "pysrc" / "py312" / "bin"; pyd.mkdir(parents=True); (pyd / "python3.12").symlink_to(sys.executable)
+    with tarfile.open(a / "py312.tgz", "w:gz") as t:
+        t.add(tmp_path / "pysrc" / "py312", arcname="py312")
+    sizes = {"consolidated-00001-of-00002.safetensors": 70, "consolidated-00002-of-00002.safetensors": 31}
+    for part, files in (("g4-g1-w1", ["consolidated-00001-of-00002.safetensors"]),
+                        ("g4-g1-w2", ["consolidated-00002-of-00002.safetensors", "consolidated.safetensors.index.json", "params.json", "tekken.json"])):
+        d = inp / "notebooks" / "carsonrodrigues" / part; d.mkdir(parents=True)
+        for f in files:
+            (d / f).write_bytes(b"w" * sizes.get(f, 5))
+    env.update(G1_WEIGHTS_GB="0.0000001", G1_BIN=str(tmp_path / "g1bin"), G1_PYROOT=str(tmp_path / "py312"))
+    run(env, "teacher")
+    st = json.loads((w / "status.json").read_text())
+    assert st["ok"] is True and st["offline"]["wheels"] == 412 and st["download"]["linked"]["params.json"] == 5
+    model = tmp_path / "models" / "devstral"
+    for f in ("consolidated-00001-of-00002.safetensors", "consolidated-00002-of-00002.safetensors", "params.json", "tekken.json"):
+        assert (model / f).is_symlink() and (model / f).resolve().parent.name in ("g4-g1-w1", "g4-g1-w2")
+    assert (tmp_path / "py312" / "bin" / "python3.12").exists() and os.access(tmp_path / "g1bin" / "uv", os.X_OK)
+    assert f"serve {model}" in (w / "vllm.log").read_text()
+
+
+def test_offline_without_the_weight_kernels_fails_cleanly(tmp_path):
+    env, w, _ = make_world(tmp_path)
+    env.pop("G1_SKIP_DOWNLOAD")
+    a = tmp_path / "input" / "g4-g1-assets"; (a / "bin").mkdir(parents=True); (a / "wheels").mkdir()
+    (a / "bin" / "uv").write_text(""); (a / "assets_manifest.json").write_text("{}")
+    (tmp_path / "py312" / "bin").mkdir(parents=True)   # already unpacked: prepare_offline skips the tar
+    env.update(G1_BIN=str(tmp_path / "g1bin"), G1_PYROOT=str(tmp_path / "py312"))
+    run(env, "teacher")
+    st = json.loads((w / "status.json").read_text())
+    assert st["ok"] is False and "offline and no input holds" in st["error"] and not (w / "vllm.log").exists()
+
+
+def test_asset_kernels_are_cpu_with_internet_and_buildenv_matches_pod(tmp_path, monkeypatch):
+    import re
+    import shlex
+    import assets_kernels
+    monkeypatch.setattr(assets_kernels, "HERE", tmp_path)
+    assets_kernels.main()
+    for d, kid in (("g1_assets", "g4-g1-assets"), ("g1_w1", "g4-g1-w1"), ("g1_w2", "g4-g1-w2")):
+        meta = json.loads((tmp_path / d / "kernel-metadata.json").read_text())
+        assert meta["id"] == "carsonrodrigues/" + kid and meta["enable_internet"] and not meta["enable_gpu"] and meta["is_private"]
+        compile(json.loads((tmp_path / d / meta["code_file"]).read_text())["cells"][0]["source"], kid, "exec")
+    line = next(ln for ln in (ROOT / "pod" / "buildenv.sh").read_text().replace("\\\n", " ").splitlines() if "pytest==8.3.4" in ln)
+    assert assets_kernels.BUILDENV == [t for t in shlex.split(line.split("uv pip install -q", 1)[1]) if not t.startswith("-")]
+    w2 = json.loads((tmp_path / "g1_w2" / "g4-g1-w2.ipynb").read_text())["cells"][0]["source"]
+    import g1_kaggle
+    assert all(f in w2 or f.startswith("consolidated-00001") for f in g1_kaggle.WEIGHT_FILES)   # w1 + w2 = what the GPU kernel links

@@ -18,6 +18,9 @@ max_time_minutes 20 and max_tool_calls 100 (scratch copy via aws/jobs/g1_race.py
 Writes to /kaggle/working: facts.json, timing.json, status.json, g1.log, logs/, results.jsonl, and per mode gold/... or
 capture_devstral.jsonl + devstral/items/g1_v12b_t20/<task>/task_results.jsonl (the layout scripts/distill/usable.py reads).
 Every failure is caught and written to status.json, so the notebook still ends COMPLETE and its output can be fetched.
+Offline mode (the 4x L4 kernel: Kaggle gives that accelerator only with the competition attached, and then refuses internet):
+when an input holds assets_manifest.json (the g4-g1-assets kernel's output), uv and CPython 3.12 come from it, every install
+reads its wheel pool with --no-index, and the weights are the g4-g1-w1 / g4-g1-w2 kernels' outputs, symlinked, not downloaded.
 Test hooks (tests/test_aws_kaggle_g1.py; never set on Kaggle): G1_PY312 (skip the harness install), G1_TV_VLLM (a vllm
 executable instead of installing one), G1_SKIP_DOWNLOAD, G1_WEIGHTS_GB, G1_ALLOW_FEWER_GPUS, and the path variables G1_*.
 """
@@ -177,7 +180,54 @@ def check_tasks():
     return ids
 
 
+OFF = {}   # offline mode: assets dir, wheel pool, python, uv (prepare_offline)
+WEIGHT_FILES = ["consolidated-00001-of-00002.safetensors", "consolidated-00002-of-00002.safetensors",
+                "consolidated.safetensors.index.json", "params.json", "tekken.json"]
+
+
+def prepare_offline():
+    """Offline mode when an input holds assets_manifest.json: uv and CPython 3.12 from the assets kernel's output."""
+    hits = sorted(glob.glob(str(INPUT / "**" / "assets_manifest.json"), recursive=True))
+    if not hits:
+        return False
+    a = Path(hits[0]).parent
+    bind, pyroot = Path(E("G1_BIN", "/root/g1bin")), Path(E("G1_PYROOT", "/root/py312"))
+    bind.mkdir(parents=True, exist_ok=True)
+    shutil.copy(a / "bin" / "uv", bind / "uv"); os.chmod(bind / "uv", 0o755)
+    if not (pyroot / "bin").is_dir():
+        pyroot.parent.mkdir(parents=True, exist_ok=True)
+        sh(["tar", "xzf", str(a / "py312.tgz"), "-C", str(pyroot.parent)], "py312")   # the archive's top folder is py312/
+    py = pyroot / "bin" / "python3.12"
+    os.environ["PATH"] = f"{bind}{os.pathsep}{pyroot / 'bin'}{os.pathsep}{os.environ['PATH']}"
+    OFF.update(assets=str(a), wheels=str(a / "wheels"), py=str(py), uv=str(bind / "uv"))
+    man = json.loads((a / "assets_manifest.json").read_text())
+    STATUS["offline"] = {"assets": str(a), "wheels": man.get("wheels"), "torch": man.get("torch"), "vllm": man.get("vllm")}
+    log("OFFLINE: assets", a, "|", man.get("wheels"), "wheels |", man.get("vllm"))
+    return True
+
+
+def offline_env():
+    """uv reads only the asset wheel pool (buildenv.sh's own `uv pip install` takes these from the environment)."""
+    return dict(clean_env(), UV_OFFLINE="1", UV_NO_INDEX="1", UV_FIND_LINKS=OFF["wheels"]) if OFF else clean_env()
+
+
+def link_weights(dest):
+    """The weight files from the inputs (the g4-g1-w1 / g4-g1-w2 kernel outputs), symlinked into one model dir."""
+    found = {n: sorted(glob.glob(str(INPUT / "**" / n), recursive=True)) for n in WEIGHT_FILES}
+    missing = [n for n, h in found.items() if not h]
+    if missing:
+        return None, missing
+    dest.mkdir(parents=True, exist_ok=True)
+    for n, h in found.items():
+        if (dest / n).is_symlink() or (dest / n).exists():
+            (dest / n).unlink()
+        os.symlink(h[0], dest / n)
+    return {n: os.path.getsize(h[0]) for n, h in found.items()}, []
+
+
 def ensure_uv():
+    if OFF:
+        return OFF["uv"]
     uv = shutil.which("uv")
     if not uv:
         sh([sys.executable, "-m", "pip", "install", "-q", "uv"], "uv")
@@ -208,14 +258,18 @@ def setup_harness():
     uv = ensure_uv()
     os.environ["PATH"] = str(Path(uv).parent) + os.pathsep + os.environ["PATH"]
     os.environ.update({"UV_LINK_MODE": "copy", "PYTHONDONTWRITEBYTECODE": "1"})
-    sh([uv, "python", "install", "3.12"], "py312")
-    py = subprocess.run([uv, "python", "find", "3.12"], capture_output=True, text=True, check=True, env=clean_env()).stdout.strip()
+    if OFF:
+        py = OFF["py"]
+    else:
+        sh([uv, "python", "install", "3.12"], "py312")
+        py = subprocess.run([uv, "python", "find", "3.12"], capture_output=True, text=True, check=True, env=clean_env()).stdout.strip()
+    index = (["--no-index", "--find-links", OFF["wheels"]] if OFF else
+             ["--index-strategy", "unsafe-best-match", "--extra-index-url", "https://download.pytorch.org/whl/cu128"])
     if not shutil.which("patch"):
         sh("apt-get -qq update && apt-get -qq install -y patch", "apt", check=False)
     wheels = sorted(str(p) for p in (ROOT / "harness" / "wheels").glob("*.whl"))
-    sh([uv, "pip", "install", "-q", "--python", py, "--system", "--break-system-packages", "--index-strategy", "unsafe-best-match",
-        "--extra-index-url", "https://download.pytorch.org/whl/cu128", "-c", str(ROOT / "harness/constraints/box_venv_2026-10-18.txt"),
-        *wheels], "harness_install")
+    sh([uv, "pip", "install", "-q", "--python", py, "--system", "--break-system-packages", *index,
+        "-c", str(ROOT / "harness/constraints/box_venv_2026-10-18.txt"), *wheels], "harness_install", env=offline_env())
     cw = competition_wheels()
     if Path("/wheels").is_symlink() or not Path("/wheels").exists():
         if Path("/wheels").is_symlink():
@@ -224,7 +278,7 @@ def setup_harness():
     newest = subprocess.run([py, "-c", NEWEST], capture_output=True, text=True, check=True, env=clean_env()).stdout.split()
     if newest:
         sh([uv, "pip", "install", "-q", "--python", py, "--system", "--break-system-packages", "--no-deps", *newest], "newest_wheels")
-    sh(["bash", "-x", str(ROOT / "pod" / "buildenv.sh")], "buildenv")   # -x: the log shows which step failed
+    sh(["bash", "-x", str(ROOT / "pod" / "buildenv.sh")], "buildenv", env=offline_env())   # -x: the log shows which step failed
     sh([py, "-c", "import swegemma, adk_submission, google.adk, litellm, sys; print(sys.version)"], "harness_import")
     sh([uv, "pip", "freeze", "--python", py], "harness_freeze", check=False)   # compared across the gold and teacher runs
     log("harness ready:", py, "| /wheels ->", cw)
@@ -358,6 +412,12 @@ def pick_model_dir(need_gb):
 def download(dest, out):
     if E("G1_SKIP_DOWNLOAD"):
         out.update(ok=True, gb=0, skipped=True); return
+    if OFF:
+        sizes, missing = link_weights(dest)
+        if sizes is None:
+            out.update(ok=False, error=f"offline and no input holds {missing}"); return
+        shards = sum(v for k, v in sizes.items() if k.startswith("consolidated-")) / 1e9
+        out.update(ok=shards > TEACHER["weights_gb"] * 0.98, gb=round(shards, 2), linked=sizes); return
     try:
         try:
             from huggingface_hub import snapshot_download
@@ -378,8 +438,9 @@ def install_teacher_vllm(uv, out):
     if E("G1_TV_VLLM"):
         out.update(ok=True, vllm=E("G1_TV_VLLM"), versions="override (test)"); return
     try:
-        sh([uv, "venv", "-q", "-p", "3.12", str(tv)], "teacher_venv")
-        sh([uv, "pip", "install", "-q", "--python", str(tv / "bin" / "python"), f"vllm=={VLLM_VERSION}"], "teacher_venv")
+        sh([uv, "venv", "-q", "-p", OFF.get("py", "3.12"), str(tv)], "teacher_venv", env=offline_env())
+        sh([uv, "pip", "install", "-q", "--python", str(tv / "bin" / "python"), *(["--no-index", "--find-links", OFF["wheels"]] if OFF else []),
+            f"vllm=={VLLM_VERSION}"], "teacher_venv", env=offline_env())
         r = subprocess.run([str(tv / "bin" / "python"), "-c", "import vllm, torch, mistral_common; print(vllm.__version__, torch.__version__, "
                             "torch.version.cuda, mistral_common.__version__, torch.cuda.is_available(), torch.cuda.device_count())"],
                            capture_output=True, text=True, env=clean_env())
@@ -444,8 +505,9 @@ def teacher_mode():
     f = facts(); mark("facts")
     if len(f.get("gpus") or []) < 4 and not E("G1_ALLOW_FEWER_GPUS"):
         raise RuntimeError(f"needs 4 GPUs, found {f.get('gpus')}")
+    prepare_offline()
     mdir, have = pick_model_dir(TEACHER["weights_gb"])
-    need = TEACHER["weights_gb"] + 14   # + the teacher venv (torch + vLLM + CUDA libs) and uv's cache on the same disk
+    need = (0 if OFF else TEACHER["weights_gb"]) + 14   # + the teacher venv (torch + vLLM + CUDA libs) and uv's cache; offline weights are links
     STATUS.update(model_dir=str(mdir), model_dir_free_gb=have)
     if have < need:
         STATUS.update(stage="disk", error=f"only {have} GB free at {mdir}, need {need}"); save()
@@ -461,7 +523,8 @@ def teacher_mode():
     STATUS.update(download=dl, teacher_venv=tv); mark("weights_and_venv")
     if not (dl.get("ok") and tv.get("ok")):
         raise RuntimeError(f"download {dl} / teacher venv {tv}")
-    env = dict(clean_env(), VLLM_NO_USAGE_STATS="1", VLLM_WORKER_MULTIPROC_METHOD="spawn")
+    env = dict(clean_env(), VLLM_NO_USAGE_STATS="1", VLLM_WORKER_MULTIPROC_METHOD="spawn", DO_NOT_TRACK="1",
+               **({"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"} if OFF else {}))
     vlog = open(W / "vllm.log", "w")
     server = subprocess.Popen([tv["vllm"], "serve", str(mdir / TEACHER["name"]), "--served-model-name", TEACHER["served"],
                                "--tensor-parallel-size", "4", "--gpu-memory-utilization", "0.90", *TEACHER["flags"],
