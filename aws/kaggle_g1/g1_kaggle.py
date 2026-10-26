@@ -207,8 +207,9 @@ def prepare_offline():
 
 
 def offline_env():
-    """uv reads only the asset wheel pool (buildenv.sh's own `uv pip install` takes these from the environment)."""
-    return dict(clean_env(), UV_OFFLINE="1", UV_NO_INDEX="1", UV_FIND_LINKS=OFF["wheels"]) if OFF else clean_env()
+    """uv reads only the asset wheel pool (buildenv.sh's own `uv pip install` takes these from the environment). UV_OFFLINE +
+    UV_FIND_LINKS resolve from the folder with an empty cache (checked 2026-10-26, uv 0.12.5); uv has no UV_NO_INDEX."""
+    return dict(clean_env(), UV_OFFLINE="1", UV_FIND_LINKS=OFF["wheels"]) if OFF else clean_env()
 
 
 def link_weights(dest):
