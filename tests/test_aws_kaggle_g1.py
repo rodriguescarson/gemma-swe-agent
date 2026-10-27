@@ -25,6 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 a = sys.argv[1:]
 name, port = a[a.index("--served-model-name") + 1], int(a[a.index("--port") + 1])
 print("ARGS", " ".join(a), flush=True)
+print("PID", os.getpid(), flush=True)
 class H(BaseHTTPRequestHandler):
     def log_message(self, *x): pass
     def _send(self, obj):
@@ -105,7 +106,8 @@ def test_teacher_mode_end_to_end_against_stubs(tmp_path):
         assert k in timing, k
     vlog = (w / "vllm.log").read_text()
     for flag in ("--tensor-parallel-size 4", "--tokenizer-mode mistral --config-format mistral --load-format mistral",
-                 "--tool-call-parser mistral --enable-auto-tool-choice", "--max-model-len 65536", "--served-model-name devstral-small-2-24b"):
+                 "--tool-call-parser mistral --enable-auto-tool-choice", "--max-model-len 65536", "--served-model-name devstral-small-2-24b",
+                 "--language-model-only"):
         assert flag in vlog, flag
     assert vlog.count("REQUEST model=devstral-small-2-24b") == 33          # tool probe + harness probe + or_proxy probe + 30 tasks
     hp = json.loads((w / "harness_probe.json").read_text()); assert hp["status"] == 200
@@ -342,3 +344,48 @@ def test_asset_kernels_are_cpu_with_internet_and_buildenv_matches_pod(tmp_path, 
     w2 = json.loads((tmp_path / "g1_w2" / "g4-g1-w2.ipynb").read_text())["cells"][0]["source"]
     import g1_kaggle
     assert all(f in w2 or f.startswith("consolidated-00001") for f in g1_kaggle.WEIGHT_FILES)   # w1 + w2 = what the GPU kernel links
+
+
+def test_the_teacher_install_has_its_own_uv_cache(monkeypatch):
+    """Offline run 1: the harness and teacher installs shared one uv cache and cross-locked (300 s lock timeout)."""
+    import g1_kaggle
+    monkeypatch.setitem(g1_kaggle.OFF, "wheels", "/w")
+    te, oe = g1_kaggle.teacher_env(), g1_kaggle.offline_env()
+    assert te["UV_CACHE_DIR"] != oe.get("UV_CACHE_DIR") and te["UV_CACHE_DIR"] == "/root/.cache/uv-teacher"
+    assert te["UV_OFFLINE"] == "1" and te["UV_FIND_LINKS"] == "/w" and int(te["UV_LOCK_TIMEOUT"]) >= 1800
+    src = DRIVER.read_text()
+    assert src.count('"teacher_venv", env=teacher_env())') == 2
+
+
+def test_the_teacher_pins_transformers_and_imports_pixtral_before_serving():
+    """Offline run 2: vLLM 0.19.1 + transformers 5.20.2 failed to import its Pixtral module (Devstral's architecture)."""
+    import g1_kaggle
+    assert g1_kaggle.TEACHER_PINS == ["transformers==5.13.1"]
+    src = DRIVER.read_text()
+    assert 'f"vllm=={VLLM_VERSION}", *TEACHER_PINS]' in src and "import vllm.model_executor.models.pixtral" in src
+
+
+def _fake_server_gone(w):
+    import re, time
+    pid = int(re.search(r"^PID (\d+)$", (w / "vllm.log").read_text(), re.M).group(1))
+    for _ in range(50):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def test_vllm_is_stopped_when_a_probe_fails_and_when_the_race_ends(tmp_path):
+    env, w, _ = make_world(tmp_path)
+    run(env, "teacher")
+    assert json.loads((w / "status.json").read_text())["ok"] is True and _fake_server_gone(w)
+    env2, w2, _ = make_world(tmp_path / "b")
+    src = FAKE_VLLM.replace('        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")',
+        '        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")\n'
+        '        if "chat_template_kwargs" in body:\n'
+        '            self.send_response(400); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}"); return')
+    Path(env2["G1_TV_VLLM"]).write_text(src)
+    run(env2, "teacher")
+    assert json.loads((w2 / "status.json").read_text())["ok"] is False and _fake_server_gone(w2)   # the leak this fixes

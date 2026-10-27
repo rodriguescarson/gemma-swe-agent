@@ -47,13 +47,20 @@ SCRATCH = Path(E("G1_SCRATCH", "/root/g1_scratch"))
 INPUT = Path(E("G1_INPUT", "/kaggle/input"))
 ARM = "g1_v12b_t20"
 VLLM_VERSION = E("G1_VLLM", "0.19.1")
+# vLLM 0.19.1 only bounds transformers from below; 5.20 dropped PixtralRotaryEmbedding, which vllm/models/pixtral.py
+# imports (offline run 2, 2026-10-26: "Model architectures ['PixtralForConditionalGeneration'] failed to be inspected").
+# 5.13.1 is pod/bootstrap.sh's pairing for 0.19.1 and has every name pixtral.py imports (checked against the v5.13.1 tag).
+TEACHER_PINS = ["transformers==5.13.1"]
 VPORT, PPORT = int(E("G1_VPORT") or 8101), int(E("G1_PPORT") or 8201)
 TEACHER = {
     "name": "devstral", "repo": "mistralai/Devstral-Small-2-24B-Instruct-2512", "served": "devstral-small-2-24b",
     "allow": ["consolidated-*.safetensors", "consolidated.safetensors.index.json", "params.json", "tekken.json"],
     "weights_gb": float(E("G1_WEIGHTS_GB") or 25.8),   # the two consolidated FP8 shards (19.84 + 5.95 GB, HF tree API 2026-10-26)
     "flags": ["--tokenizer-mode", "mistral", "--config-format", "mistral", "--load-format", "mistral",
-              "--tool-call-parser", "mistral", "--enable-auto-tool-choice", "--max-model-len", E("G1_MAX_LEN", "65536")],
+              "--tool-call-parser", "mistral", "--enable-auto-tool-choice", "--max-model-len", E("G1_MAX_LEN", "65536"),
+              # text only: Devstral carries a Pixtral vision tower, and vLLM 0.19.1's MistralCommonImageProcessor lacks the
+              # fetch_images that transformers 5.13.1 calls while profiling a dummy image (offline run 3, 2026-10-26)
+              "--language-model-only"],
 }
 TIMES, STATUS = {}, {"mode": None, "stage": "start", "ok": False}
 # Variables of the Kaggle image that would send installs or imports somewhere other than the container's (2026-10-26 gold
@@ -209,7 +216,7 @@ def prepare_offline():
 def offline_env():
     """uv reads only the asset wheel pool (buildenv.sh's own `uv pip install` takes these from the environment). UV_OFFLINE +
     UV_FIND_LINKS resolve from the folder with an empty cache (checked 2026-10-26, uv 0.12.5); uv has no UV_NO_INDEX."""
-    return dict(clean_env(), UV_OFFLINE="1", UV_FIND_LINKS=OFF["wheels"]) if OFF else clean_env()
+    return dict(clean_env(), UV_OFFLINE="1", UV_FIND_LINKS=OFF["wheels"], UV_LOCK_TIMEOUT="1800") if OFF else clean_env()
 
 
 def link_weights(dest):
@@ -434,15 +441,23 @@ def download(dest, out):
         out["ok"] = False
 
 
+def teacher_env():
+    """The teacher install runs while the harness install does, from the same wheels: with one uv cache the two processes
+    cross-locked (offline run 1, 2026-10-26: the harness install timed out after 300 s waiting for nvidia-cusparse's cache
+    lock). Its own cache, and a long lock timeout as a backstop."""
+    return dict(offline_env(), UV_CACHE_DIR=E("G1_TV_CACHE", "/root/.cache/uv-teacher"), UV_LOCK_TIMEOUT="1800")
+
+
 def install_teacher_vllm(uv, out):
     tv = Path(E("G1_TV", "/tmp/g1_tvllm"))
     if E("G1_TV_VLLM"):
         out.update(ok=True, vllm=E("G1_TV_VLLM"), versions="override (test)"); return
     try:
-        sh([uv, "venv", "-q", "-p", OFF.get("py", "3.12"), str(tv)], "teacher_venv", env=offline_env())
+        sh([uv, "venv", "-q", "-p", OFF.get("py", "3.12"), str(tv)], "teacher_venv", env=teacher_env())
         sh([uv, "pip", "install", "-q", "--python", str(tv / "bin" / "python"), *(["--no-index", "--find-links", OFF["wheels"]] if OFF else []),
-            f"vllm=={VLLM_VERSION}"], "teacher_venv", env=offline_env())
-        r = subprocess.run([str(tv / "bin" / "python"), "-c", "import vllm, torch, mistral_common; print(vllm.__version__, torch.__version__, "
+            f"vllm=={VLLM_VERSION}", *TEACHER_PINS], "teacher_venv", env=teacher_env())
+        r = subprocess.run([str(tv / "bin" / "python"), "-c", "import vllm, torch, mistral_common, transformers; "
+                            "import vllm.model_executor.models.pixtral; print(vllm.__version__, transformers.__version__, torch.__version__, "
                             "torch.version.cuda, mistral_common.__version__, torch.cuda.is_available(), torch.cuda.device_count())"],
                            capture_output=True, text=True, env=clean_env())
         out["versions"] = r.stdout.strip() or r.stderr.strip()[-500:]
@@ -530,37 +545,46 @@ def teacher_mode():
     server = subprocess.Popen([tv["vllm"], "serve", str(mdir / TEACHER["name"]), "--served-model-name", TEACHER["served"],
                                "--tensor-parallel-size", "4", "--gpu-memory-utilization", "0.90", *TEACHER["flags"],
                                "--host", "127.0.0.1", "--port", str(VPORT)], stdout=vlog, stderr=subprocess.STDOUT, env=env)
-    for _ in range(240):
-        if http_ok(f"http://127.0.0.1:{VPORT}/v1/models"):
-            break
-        if server.poll() is not None:
-            raise RuntimeError("vLLM exited while loading: " + (W / "vllm.log").read_text()[-2000:])
-        time.sleep(10)
-    else:
-        raise RuntimeError("vLLM not up after 40 min")
-    mark("vllm_up")
-    STATUS["tool_probe_tool_call"] = tool_probe()
-    harness_probe()
-    base = f"http://127.0.0.1:{VPORT}/v1"
-    probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
-                           capture_output=True, text=True, env=clean_env())
-    (W / "probe.out").write_text(probe.stdout + probe.stderr)
-    if probe.returncode != 0:
-        raise RuntimeError("or_proxy probe failed: " + (probe.stdout + probe.stderr)[-500:])
-    out = W / TEACHER["name"]; out.mkdir(exist_ok=True)
-    proxy = subprocess.Popen([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"],
-                              "--capture", str(W / f"capture_{TEACHER['name']}.jsonl"), "--max-usd", "1000", "--port", str(PPORT),
-                              "--log", str(out / "proxy.jsonl")], stdout=open(out / "proxy.out", "w"), stderr=subprocess.STDOUT, env=clean_env())
-    for _ in range(30):
-        if http_ok(f"http://127.0.0.1:{PPORT}/v1/models") or proxy.poll() is not None:
-            break
-        time.sleep(1)
-    mark("race_start")
-    conc = conc_default(f, teacher=True); STATUS["conc"] = conc
+    procs = [server]   # stopped on every path out, success or failure (a failed probe used to leave vLLM running)
     try:
+        for _ in range(240):
+            if http_ok(f"http://127.0.0.1:{VPORT}/v1/models"):
+                break
+            if server.poll() is not None:
+                raise RuntimeError("vLLM exited while loading: " + (W / "vllm.log").read_text()[-2000:])
+            time.sleep(10)
+        else:
+            raise RuntimeError("vLLM not up after 40 min")
+        mark("vllm_up")
+        STATUS["tool_probe_tool_call"] = tool_probe()
+        harness_probe()
+        base = f"http://127.0.0.1:{VPORT}/v1"
+        probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
+                               capture_output=True, text=True, env=clean_env())
+        (W / "probe.out").write_text(probe.stdout + probe.stderr)
+        if probe.returncode != 0:
+            raise RuntimeError("or_proxy probe failed: " + (probe.stdout + probe.stderr)[-500:])
+        out = W / TEACHER["name"]; out.mkdir(exist_ok=True)
+        proxy = subprocess.Popen([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"],
+                                  "--capture", str(W / f"capture_{TEACHER['name']}.jsonl"), "--max-usd", "1000", "--port", str(PPORT),
+                                  "--log", str(out / "proxy.jsonl")], stdout=open(out / "proxy.out", "w"), stderr=subprocess.STDOUT, env=clean_env())
+        procs.append(proxy)
+        for _ in range(30):
+            if http_ok(f"http://127.0.0.1:{PPORT}/v1/models") or proxy.poll() is not None:
+                break
+            time.sleep(1)
+        mark("race_start")
+        conc = conc_default(f, teacher=True); STATUS["conc"] = conc
         s = run_tasks(py, bundle, flags, ids, out, PPORT, conc)
     finally:
-        proxy.terminate(); server.terminate()
+        for proc in procs:
+            if proc.poll() is None:
+                proc.terminate()
+        for proc in procs:
+            try:
+                proc.wait(timeout=60)
+            except subprocess.TimeoutExpired:
+                proc.kill()
     STATUS.update(ok=True, resolved=s["resolved"], with_result=s["with_result"],
                   capture_rows=sum(1 for _ in open(W / f"capture_{TEACHER['name']}.jsonl")) if (W / f"capture_{TEACHER['name']}.jsonl").exists() else 0)
     mark("race_done")
