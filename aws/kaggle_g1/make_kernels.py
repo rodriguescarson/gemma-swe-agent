@@ -30,18 +30,23 @@ else:   # Kaggle unpacked the archive: copy the tree that holds scripts/ and har
     roots = src or [os.path.dirname(os.path.dirname(p)) for p in sorted(glob.glob("/kaggle/input/**/scripts/or_proxy.py", recursive=True))]
     assert roots, ("no g1_code under /kaggle/input", sorted(glob.glob("/kaggle/input/*/*"))[:20])
     shutil.copytree(roots[0], dst, dirs_exist_ok=True)
-# the driver travels inside this notebook, so a driver fix needs a kernel push, not a dataset upload
+# the driver and its strip proxy travel inside this notebook, so a fix needs a kernel push, not a dataset upload
 os.makedirs(dst + "/aws/kaggle_g1", exist_ok=True)
-open(dst + "/aws/kaggle_g1/g1_kaggle.py", "wb").write(base64.b64decode("{driver_b64}"))
+for _name, _b64 in {files_b64}.items():
+    open(dst + "/aws/kaggle_g1/" + _name, "wb").write(base64.b64decode(_b64))
 r = subprocess.run([sys.executable, dst + "/aws/kaggle_g1/g1_kaggle.py", "{mode}"])
 print("driver exit", r.returncode, open("/kaggle/working/status.json").read() if os.path.exists("/kaggle/working/status.json") else "no status.json")
 '''
 
 
+EMBEDDED = ("g1_kaggle.py", "strip_proxy.py")
+
+
 def notebook(mode):
     import base64
-    driver = base64.b64encode((Path(__file__).resolve().parent / "g1_kaggle.py").read_bytes()).decode()
-    src = CELL.replace("{mode}", mode).replace("{driver_b64}", driver)
+    here = Path(__file__).resolve().parent
+    files = {n: base64.b64encode((here / n).read_bytes()).decode() for n in EMBEDDED}
+    src = CELL.replace("{mode}", mode).replace("{files_b64}", json.dumps(files))
     return {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": src}],
             "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
             "nbformat": 4, "nbformat_minor": 5}

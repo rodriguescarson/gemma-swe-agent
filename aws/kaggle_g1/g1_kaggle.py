@@ -52,6 +52,7 @@ VLLM_VERSION = E("G1_VLLM", "0.19.1")
 # 5.13.1 is pod/bootstrap.sh's pairing for 0.19.1 and has every name pixtral.py imports (checked against the v5.13.1 tag).
 TEACHER_PINS = ["transformers==5.13.1"]
 VPORT, PPORT = int(E("G1_VPORT") or 8101), int(E("G1_PPORT") or 8201)
+SPORT = int(E("G1_SPORT") or 8102)   # aws/kaggle_g1/strip_proxy.py: or_proxy -> strip_proxy -> vLLM
 TEACHER = {
     "name": "devstral", "repo": "mistralai/Devstral-Small-2-24B-Instruct-2512", "served": "devstral-small-2-24b",
     "allow": ["consolidated-*.safetensors", "consolidated.safetensors.index.json", "params.json", "tekken.json"],
@@ -480,9 +481,9 @@ TOOLS = [{"type": "function", "function": {"name": "run_shell", "description": "
           "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}}}]
 
 
-def direct(body, name):
-    """One request straight to vLLM (never through the capturing proxy); the reply or the error, kept as W/<name>.json."""
-    req = urllib.request.Request(f"http://127.0.0.1:{VPORT}/v1/chat/completions", data=json.dumps(body).encode(),
+def direct(body, name, port=None):
+    """One request to vLLM (or the strip proxy in front of it), never through the capturing proxy; kept as W/<name>.json."""
+    req = urllib.request.Request(f"http://127.0.0.1:{port or VPORT}/v1/chat/completions", data=json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -507,11 +508,12 @@ def tool_probe():
 
 def harness_probe():
     """A body shaped like the harness's (eval/collect captures: chat_template_kwargs, float top_k, max_completion_tokens,
-    tools); or_proxy --upstream vllm forwards bodies unchanged, so if vLLM refuses this, every task call would fail."""
+    tools), sent the way task calls go: through the strip proxy. If this is refused, every task call would be; offline run 4
+    caught vLLM refusing chat_template_kwargs this way, before any task ran."""
     res = direct({"model": TEACHER["served"], "max_completion_tokens": 256, "temperature": 0.2, "top_p": 0.95, "top_k": 64.0,
                   "chat_template_kwargs": {"enable_thinking": True}, "tools": TOOLS,
                   "messages": [{"role": "system", "content": "You are a coding agent."},
-                               {"role": "user", "content": "Show the files in the repository."}]}, "harness_probe")
+                               {"role": "user", "content": "Show the files in the repository."}]}, "harness_probe", port=SPORT)
     if res.get("status") != 200:
         raise RuntimeError(f"vLLM refused a harness-shaped request: {res}")
     return res
@@ -557,8 +559,17 @@ def teacher_mode():
             raise RuntimeError("vLLM not up after 40 min")
         mark("vllm_up")
         STATUS["tool_probe_tool_call"] = tool_probe()
+        strip = subprocess.Popen([py, str(Path(__file__).resolve().parent / "strip_proxy.py"), "--listen", str(SPORT),
+                                  "--upstream", f"http://127.0.0.1:{VPORT}", "--log", str(W / "strip_proxy.jsonl")],
+                                 stdout=open(W / "strip_proxy.out", "w"), stderr=subprocess.STDOUT, env=clean_env())
+        procs.append(strip)
+        for _ in range(30):
+            if http_ok(f"http://127.0.0.1:{SPORT}/v1/models") or strip.poll() is not None:
+                break
+            time.sleep(1)
+        STATUS["upstream_strips"] = ["chat_template_kwargs", "chat_template"]
         harness_probe()
-        base = f"http://127.0.0.1:{VPORT}/v1"
+        base = f"http://127.0.0.1:{SPORT}/v1"   # or_proxy captures the harness's own request; vLLM gets it minus those keys
         probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
                                capture_output=True, text=True, env=clean_env())
         (W / "probe.out").write_text(probe.stdout + probe.stderr)

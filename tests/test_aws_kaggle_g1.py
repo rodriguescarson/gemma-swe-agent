@@ -35,6 +35,9 @@ class H(BaseHTTPRequestHandler):
         self._send({"object": "list", "data": [{"id": name}]})
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
+        if "chat_template_kwargs" in body or "chat_template" in body:   # vLLM 0.19.1 + Mistral tokenizer (offline run 4)
+            b = json.dumps({"error": {"message": "chat_template is not supported for Mistral tokenizers."}}).encode()
+            self.send_response(400); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
         print("REQUEST model=%s tools=%s" % (body.get("model"), bool(body.get("tools"))), flush=True)
         msg = {"role": "assistant", "content": "ok"}
         if body.get("tools"):
@@ -56,7 +59,8 @@ with open(os.environ["FAKE_LOG"], "a") as f:
                         "tmpdir": os.environ.get("TMPDIR"), "base": os.environ.get("OPENAI_BASE_URL")}) + "\n")
 if not oracle:
     req = urllib.request.Request(os.environ["OPENAI_BASE_URL"] + "/chat/completions", method="POST", headers={"Content-Type": "application/json"},
-        data=json.dumps({"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "fix " + task}], "max_tokens": 8}).encode())
+        data=json.dumps({"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "fix " + task}], "max_completion_tokens": 8,
+                         "top_k": 64.0, "chat_template_kwargs": {"enable_thinking": True}}).encode())
     urllib.request.urlopen(req, timeout=30).read()
 res.mkdir(parents=True, exist_ok=True)
 (res / "task_results.jsonl").write_text(json.dumps({"instance_id": task, "resolved": oracle or task.startswith("tomlkit"), "tool_calls": 3}) + "\n")
@@ -111,6 +115,11 @@ def test_teacher_mode_end_to_end_against_stubs(tmp_path):
         assert flag in vlog, flag
     assert vlog.count("REQUEST model=devstral-small-2-24b") == 33          # tool probe + harness probe + or_proxy probe + 30 tasks
     hp = json.loads((w / "harness_probe.json").read_text()); assert hp["status"] == 200
+    strips = [json.loads(ln) for ln in (w / "strip_proxy.jsonl").read_text().splitlines()]
+    assert sum(r["stripped"] == ["chat_template_kwargs"] and r["status"] == 200 for r in strips) == 31   # harness probe + 30 tasks
+    assert st["upstream_strips"] == ["chat_template_kwargs", "chat_template"]
+    caps = [json.loads(ln) for ln in (w / "capture_devstral.jsonl").read_text().splitlines()]
+    assert all(c["body"]["chat_template_kwargs"] == {"enable_thinking": True} for c in caps)   # captured as the harness sent it
     runs = [json.loads(ln) for ln in (tmp_path / "runner.jsonl").read_text().splitlines()]
     assert sorted(r["argv"][r["argv"].index("--task-ids") + 1] for r in runs) == sorted(IDS)
     for r in runs:
@@ -178,8 +187,10 @@ def test_kernels_are_private_internet_on_and_run_the_driver(tmp_path, monkeypatc
         assert f'"/aws/kaggle_g1/g1_kaggle.py", "{mode}"]' in src and "G1_T0" in src
         compile(src, d, "exec")
         import base64, re
-        b64 = re.search(r'b64decode\("([A-Za-z0-9+/=]+)"\)', src).group(1)
-        assert base64.b64decode(b64) == DRIVER.read_bytes()            # the notebook carries the current driver verbatim
+        files = json.loads(re.search(r"for _name, _b64 in (\{.*?\})\.items\(\):", src, re.S).group(1))
+        assert sorted(files) == ["g1_kaggle.py", "strip_proxy.py"]
+        for name, b64 in files.items():                                 # the notebook carries the current files verbatim
+            assert base64.b64decode(b64) == (ROOT / "aws" / "kaggle_g1" / name).read_bytes(), name
 
 
 def test_stage_dataset_code_paths_exist_and_secret_scan_bites():
@@ -248,8 +259,8 @@ def test_a_refused_harness_shaped_request_stops_before_the_race(tmp_path):
     fake = Path(env["G1_TV_VLLM"])
     src = FAKE_VLLM.replace('        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")',
         '        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")\n'
-        '        if "chat_template_kwargs" in body:\n'
-        '            b = b"{\\"error\\": \\"bad kwargs\\"}"; self.send_response(400); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return')
+        '        if "top_k" in body:\n'
+        '            b = b"{\\"error\\": \\"bad top_k\\"}"; self.send_response(400); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return')
     fake.write_text(src)
     run(env, "teacher")
     st = json.loads((w / "status.json").read_text())
@@ -384,8 +395,46 @@ def test_vllm_is_stopped_when_a_probe_fails_and_when_the_race_ends(tmp_path):
     env2, w2, _ = make_world(tmp_path / "b")
     src = FAKE_VLLM.replace('        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")',
         '        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")\n'
-        '        if "chat_template_kwargs" in body:\n'
+        '        if "top_k" in body:\n'
         '            self.send_response(400); self.send_header("Content-Length", "2"); self.end_headers(); self.wfile.write(b"{}"); return')
     Path(env2["G1_TV_VLLM"]).write_text(src)
     run(env2, "teacher")
     assert json.loads((w2 / "status.json").read_text())["ok"] is False and _fake_server_gone(w2)   # the leak this fixes
+
+
+def test_strip_proxy_drops_only_the_refused_keys_and_passes_status_through():
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import strip_proxy
+    seen = []
+
+    class Up(BaseHTTPRequestHandler):
+        def log_message(self, *a): pass
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append(body)
+            code = 400 if body.get("top_k") == -1 else 200
+            b = json.dumps({"echo": body}).encode()
+            self.send_response(code); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+        def do_GET(self):
+            b = b'{"data": []}'; self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    up = ThreadingHTTPServer(("127.0.0.1", 0), Up); threading.Thread(target=up.serve_forever, daemon=True).start()
+    sp = strip_proxy.serve(0, f"http://127.0.0.1:{up.server_address[1]}", None); threading.Thread(target=sp.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{sp.server_address[1]}"
+    import urllib.request, urllib.error
+    def post(body):
+        req = urllib.request.Request(base + "/v1/chat/completions", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.load(r)
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+    body = {"model": "m", "messages": [{"role": "user", "content": "x"}], "top_k": 64.0, "tools": [{"type": "function"}],
+            "chat_template_kwargs": {"enable_thinking": True}, "chat_template": "{{x}}"}
+    status, out = post(body)
+    assert status == 200 and out["echo"] == {k: v for k, v in body.items() if k not in ("chat_template_kwargs", "chat_template")}
+    assert post({"model": "m", "top_k": -1})[0] == 400                    # upstream errors pass through as they are
+    with urllib.request.urlopen(base + "/v1/models", timeout=10) as r:
+        assert r.status == 200
+    sp.shutdown(); up.shutdown()
