@@ -59,3 +59,24 @@ thinking and reproduction scripts. Early editing is partly a sign of an easy tas
 - Distillation (teacher LoRA) stays gated on G1, waiting on the AWS GPU quota.
 - A local paired read on the 205-task repo-disjoint EVAL set (data/distill) on 4x L4 is the right instrument for any change
   below about four tasks; it needs the AWS quota and the owner's go on its cost.
+
+## 6. After sub26 (27 Oct): where the failures are, measured on 468 runs
+
+sub26 (edit early) read 0.13 and was dropped under its rule, so the first-edit correlation in section 4 was mostly task
+easiness. Two measurements then decided against a localization skill (literature change 2):
+- **Localization is not the bottleneck.** On the 46 public tasks with a known fix file, v12b first reads that file at call 2
+  (median; mean 2.7) and never misses it. On the 205 repo-disjoint EVAL tasks, `locate.py` (v5h2 version) puts the fix file
+  first in 74.1%, in its top 3 in 90.7%, in its top 8 in 95.6% (`eval/analysis/locate_recall_eval205.py`); it would save
+  about one call.
+- **What the failures are.** Over the 468 v12 runs of the P10 collection (TRAIN-pool tasks, reference patches known):
+
+  | Outcome | Runs | Share |
+  |---|---|---|
+  | solved | 159 | 34% |
+  | edited the right file, wrong fix | 149 | 32% |
+  | empty patch | 116 | 25% |
+  | edited only other files | 44 | 9% |
+
+The largest failure class is a wrong fix in the right file: fix quality, which prompt rules do not change. That points at
+the training track (teacher trajectories that contain correct fixes, G1/G2) rather than further prompt or scaffold changes,
+and it argues against spending more daily slots on single prompt edits that one read cannot rank.
