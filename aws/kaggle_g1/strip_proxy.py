@@ -4,10 +4,12 @@
 
 vLLM 0.19.1 rejects every request that carries `chat_template_kwargs` or `chat_template` when it serves a model with the
 Mistral tokenizer (vllm/tokenizers/mistral.py validate_request_params: "chat_template is not supported for Mistral
-tokenizers"; offline G1 run 4, 2026-10-26). The v12b harness sends `chat_template_kwargs: {"enable_thinking": ...}`, a
-variable of Gemma's chat template that means nothing to Devstral. This proxy sits between scripts/or_proxy.py (which still
-captures the request exactly as the harness sent it) and vLLM, drops those two keys, and passes everything else, the reply
-and the status code through unchanged. One JSON line per request: t, path, stripped keys, upstream status, latency_s.
+tokenizers"; offline G1 run 4, 2026-10-26), and every request with `thinking_token_budget` when the server has no
+reasoning config ("thinking_token_budget is set but reasoning_config is not configured"; run 5: all 180 calls). The v12b
+harness sends both (adk_submission/resolvers/generation.py bridges thinking_config into chat_template_kwargs.enable_thinking
+and thinking_token_budget): Gemma reasoning knobs that mean nothing to Devstral, which does not think. This proxy sits
+between scripts/or_proxy.py (which still captures the request exactly as the harness sent it) and vLLM, drops those
+keys, and passes everything else, the reply and the status code through unchanged. One JSON line per request: t, path, stripped keys, upstream status, latency_s.
 """
 import argparse
 import json
@@ -18,7 +20,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-STRIP = ("chat_template_kwargs", "chat_template")
+STRIP = ("chat_template_kwargs", "chat_template", "thinking_token_budget")
 
 
 def strip(body):

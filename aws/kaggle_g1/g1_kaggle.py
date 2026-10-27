@@ -382,12 +382,13 @@ def summarise(out, ids):
     for t in ids:
         f = out / "items" / ARM / t / "task_results.jsonl"
         r = json.loads(f.read_text().splitlines()[0]) if f.is_file() and f.read_text().strip() else {}
-        rows.append({"id": t, "resolved": bool(r.get("resolved")), "tool_calls": r.get("tool_calls"), "has_result": bool(r)})
+        rows.append({"id": t, "resolved": bool(r.get("resolved")), "tool_calls": r.get("tool_calls"), "llm_calls": r.get("total_llm_calls"),
+                     "has_result": bool(r), "error": (r.get("error") or "")[:200] or None})
     with open(W / "results.jsonl", "w") as f:
         for r in rows:
             f.write(json.dumps(r) + "\n")
     s = {"n": len(rows), "resolved": sum(r["resolved"] for r in rows), "with_result": sum(r["has_result"] for r in rows),
-         "resolved_ids": [r["id"] for r in rows if r["resolved"]]}
+         "with_llm_calls": sum(1 for r in rows if (r["llm_calls"] or 0) > 0), "resolved_ids": [r["id"] for r in rows if r["resolved"]]}
     log("SUMMARY", json.dumps({k: v for k, v in s.items() if k != "resolved_ids"}))
     return s
 
@@ -510,8 +511,11 @@ def harness_probe():
     """A body shaped like the harness's (eval/collect captures: chat_template_kwargs, float top_k, max_completion_tokens,
     tools), sent the way task calls go: through the strip proxy. If this is refused, every task call would be; offline run 4
     caught vLLM refusing chat_template_kwargs this way, before any task ran."""
+    # v12b's own fields: configs/sampling.yaml (temperature 0.2, top_p 0.95, thinking_budget 4096 with thoughts on), which
+    # adk_submission/resolvers/generation.py turns into chat_template_kwargs.enable_thinking + thinking_token_budget. Run 5's
+    # probe lacked thinking_token_budget, passed, and every task call was then refused.
     res = direct({"model": TEACHER["served"], "max_completion_tokens": 256, "temperature": 0.2, "top_p": 0.95, "top_k": 64.0,
-                  "chat_template_kwargs": {"enable_thinking": True}, "tools": TOOLS,
+                  "chat_template_kwargs": {"enable_thinking": True}, "thinking_token_budget": 4096, "tools": TOOLS,
                   "messages": [{"role": "system", "content": "You are a coding agent."},
                                {"role": "user", "content": "Show the files in the repository."}]}, "harness_probe", port=SPORT)
     if res.get("status") != 200:
@@ -567,7 +571,7 @@ def teacher_mode():
             if http_ok(f"http://127.0.0.1:{SPORT}/v1/models") or strip.poll() is not None:
                 break
             time.sleep(1)
-        STATUS["upstream_strips"] = ["chat_template_kwargs", "chat_template"]
+        STATUS["upstream_strips"] = ["chat_template_kwargs", "chat_template", "thinking_token_budget"]
         harness_probe()
         base = f"http://127.0.0.1:{SPORT}/v1"   # or_proxy captures the harness's own request; vLLM gets it minus those keys
         probe = subprocess.run([py, str(ROOT / "scripts" / "or_proxy.py"), "--upstream", "vllm", "--base", base, "--model", TEACHER["served"], "--probe"],
@@ -596,7 +600,8 @@ def teacher_mode():
                 proc.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 proc.kill()
-    STATUS.update(ok=True, resolved=s["resolved"], with_result=s["with_result"],
+    # ok only if the teacher actually worked: run 5 "finished" 30 tasks in 106 s with every model call refused
+    STATUS.update(ok=s["with_llm_calls"] > 0, resolved=s["resolved"], with_result=s["with_result"], with_llm_calls=s["with_llm_calls"],
                   capture_rows=sum(1 for _ in open(W / f"capture_{TEACHER['name']}.jsonl")) if (W / f"capture_{TEACHER['name']}.jsonl").exists() else 0)
     mark("race_done")
 

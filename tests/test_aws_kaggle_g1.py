@@ -35,8 +35,8 @@ class H(BaseHTTPRequestHandler):
         self._send({"object": "list", "data": [{"id": name}]})
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
-        if "chat_template_kwargs" in body or "chat_template" in body:   # vLLM 0.19.1 + Mistral tokenizer (offline run 4)
-            b = json.dumps({"error": {"message": "chat_template is not supported for Mistral tokenizers."}}).encode()
+        if "chat_template_kwargs" in body or "chat_template" in body or "thinking_token_budget" in body:   # vLLM 0.19.1 (runs 4, 5)
+            b = json.dumps({"error": {"message": "chat_template / thinking_token_budget refused"}}).encode()
             self.send_response(400); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
         print("REQUEST model=%s tools=%s" % (body.get("model"), bool(body.get("tools"))), flush=True)
         msg = {"role": "assistant", "content": "ok"}
@@ -60,10 +60,11 @@ with open(os.environ["FAKE_LOG"], "a") as f:
 if not oracle:
     req = urllib.request.Request(os.environ["OPENAI_BASE_URL"] + "/chat/completions", method="POST", headers={"Content-Type": "application/json"},
         data=json.dumps({"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "fix " + task}], "max_completion_tokens": 8,
-                         "top_k": 64.0, "chat_template_kwargs": {"enable_thinking": True}}).encode())
+                         "top_k": 64.0, "chat_template_kwargs": {"enable_thinking": True}, "thinking_token_budget": 4096}).encode())
     urllib.request.urlopen(req, timeout=30).read()
 res.mkdir(parents=True, exist_ok=True)
-(res / "task_results.jsonl").write_text(json.dumps({"instance_id": task, "resolved": oracle or task.startswith("tomlkit"), "tool_calls": 3}) + "\n")
+(res / "task_results.jsonl").write_text(json.dumps({"instance_id": task, "resolved": oracle or task.startswith("tomlkit"), "tool_calls": 3,
+                                                   "total_llm_calls": 0 if oracle else 1}) + "\n")
 '''
 
 
@@ -116,10 +117,11 @@ def test_teacher_mode_end_to_end_against_stubs(tmp_path):
     assert vlog.count("REQUEST model=devstral-small-2-24b") == 33          # tool probe + harness probe + or_proxy probe + 30 tasks
     hp = json.loads((w / "harness_probe.json").read_text()); assert hp["status"] == 200
     strips = [json.loads(ln) for ln in (w / "strip_proxy.jsonl").read_text().splitlines()]
-    assert sum(r["stripped"] == ["chat_template_kwargs"] and r["status"] == 200 for r in strips) == 31   # harness probe + 30 tasks
-    assert st["upstream_strips"] == ["chat_template_kwargs", "chat_template"]
+    assert sum(r["stripped"] == ["chat_template_kwargs", "thinking_token_budget"] and r["status"] == 200 for r in strips) == 31   # probe + 30 tasks
+    assert st["upstream_strips"] == ["chat_template_kwargs", "chat_template", "thinking_token_budget"] and st["with_llm_calls"] == 30
     caps = [json.loads(ln) for ln in (w / "capture_devstral.jsonl").read_text().splitlines()]
-    assert all(c["body"]["chat_template_kwargs"] == {"enable_thinking": True} for c in caps)   # captured as the harness sent it
+    assert all(c["body"]["chat_template_kwargs"] == {"enable_thinking": True} and c["body"]["thinking_token_budget"] == 4096
+               for c in caps)   # captured as the harness sent it
     runs = [json.loads(ln) for ln in (tmp_path / "runner.jsonl").read_text().splitlines()]
     assert sorted(r["argv"][r["argv"].index("--task-ids") + 1] for r in runs) == sorted(IDS)
     for r in runs:
@@ -438,3 +440,26 @@ def test_strip_proxy_drops_only_the_refused_keys_and_passes_status_through():
     with urllib.request.urlopen(base + "/v1/models", timeout=10) as r:
         assert r.status == 200
     sp.shutdown(); up.shutdown()
+
+
+def test_a_race_where_no_task_reached_the_model_is_not_ok(tmp_path):
+    """Run 5: every call refused, 30 'results' in 106 s, status ok. Now ok needs at least one task with model calls."""
+    env, w, root = make_world(tmp_path)
+    runner = root / "scripts" / "pallets" / "run_eval_pallets.py"
+    runner.write_text(runner.read_text().replace('"total_llm_calls": 0 if oracle else 1', '"total_llm_calls": 0'))
+    run(env, "teacher")
+    st = json.loads((w / "status.json").read_text())
+    assert st["ok"] is False and st["with_llm_calls"] == 0 and st["with_result"] == 30
+
+
+def test_the_harness_probe_carries_every_field_the_harness_adds():
+    """adk_submission bridges thinking_config into chat_template_kwargs.enable_thinking and thinking_token_budget; the probe
+    must send both (run 5's probe lacked the budget) and match v12b's sampling."""
+    src = DRIVER.read_text()
+    probe = src[src.index("def harness_probe"):src.index("def teacher_mode")]
+    for field in ('"chat_template_kwargs": {"enable_thinking": True}', '"thinking_token_budget": 4096', '"temperature": 0.2', '"top_p": 0.95'):
+        assert field in probe, field
+    sampling = (ROOT / "submissions" / "v12b" / "configs" / "sampling.yaml").read_text()
+    assert "temperature: 0.2" in sampling and "top_p: 0.95" in sampling and "thinking_budget: 4096" in sampling
+    import strip_proxy
+    assert set(strip_proxy.STRIP) >= {"chat_template_kwargs", "thinking_token_budget"}
