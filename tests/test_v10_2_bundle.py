@@ -299,7 +299,9 @@ def test_linux_script_python_parameter():
     s = p.read_text()
     assert 'PY="${PY:-3.12}"' in s and s.count('"python:${PY}-slim"') == 2 and "python:3.12-slim bash" not in s
     assert subprocess.run(["bash", "-n", str(p)]).returncode == 0
-    r = subprocess.run(["bash", str(p)], env=dict(os.environ, PY="3.11"), capture_output=True, text=True, timeout=30)
+    # MIN_FREE_GB far above any disk: a bad PY must still fail as a bad argument (exit 2), before the host free-disk guard
+    r = subprocess.run(["bash", str(p)], env=dict(os.environ, PY="3.11", MIN_FREE_GB="1000000"), capture_output=True, text=True,
+                       timeout=30)
     assert r.returncode == 2 and "PY must be 3.12 or 3.13" in r.stderr
     if shutil.which("shellcheck"):
         assert subprocess.run(["shellcheck", str(p)], capture_output=True).returncode == 0

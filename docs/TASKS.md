@@ -53,6 +53,10 @@ Status: [ ] open, [~] running, [x] done. Cost is in 4x L4 wall hours (quota hour
 
 ### 1. Evaluation (first, because it decides everything else)
 
+Budget rule: slots are plentiful (one a day, about 35 left) and 4x L4 hours are scarce (about 15 a week). Large effects
+(a model swap) go straight to a hidden read; small effects (prompt rules) need paired L4 runs, because one hidden read
+resolves about one task.
+
 - [ ] **V1 AWS GPU quota.** The G-instance quota requests have sat at CASE_OPENED since 24 Oct (0 vCPU). One reply on the
   support case is the owner's to send. If granted, a g6.12xlarge (4x L4, the scorer's hardware, $4.60/h, about $23 per
   74-task run, from the $1,100 credits) removes the weekly cap on faithful runs.
@@ -78,9 +82,8 @@ Status: [ ] open, [~] running, [x] done. Cost is in 4x L4 wall hours (quota hour
 
 ### 3. Performance (the time bottleneck)
 
-- [ ] **E-T1 Gemma 4 12B** with v12b's prompt, sampling and budget. Hypothesis: a faster decode cuts the 44% cap rate by
-  more than the smaller model loses in fix quality. A 5-task probe for speed and the 12B serve flags, then the 32-task
-  screen against v12b, then the full 74 only if within two tasks. Cost: about 0.5 + 1.5 + 4 h.
+- [ ] **E-T1 Gemma 4 12B**: demoted. Thread 750974 ran the same files on 31 tasks: 31B 9-11 solved, 12B 4, E4B 0, and
+  the 12B at an 8-minute cap broke the 12-hour limit. Not worth a slot unless new evidence appears.
 - [ ] **E-T2 Lean-run prompt**: fewer calls without less thinking (one search, one ranged read, edit, one check). Only
   after sub27 reads, since v12b_ctx already moves reads and output.
 - [ ] **E-T3 Thinking budget per stage**: SequentialAgent of a navigator (budget 1,024, read and search tools, ends by
@@ -96,10 +99,50 @@ Status: [ ] open, [~] running, [x] done. Cost is in 4x L4 wall hours (quota hour
 
 - [ ] **E-Q1 Close the check gap**: 269 of 740 runs edited and never checked afterwards. A rule that the last call before
   submit_patch is a check of the edited code, and a failed check gets one fix. Evidence: passed 61% vs none 52%.
-- [ ] **E-Q2 The 27 never-solved tasks**: classify them (unsolvable from the prompt, threads 745855 and 746944; broken test
-  environment, threads 744370 and 745775; truly hard) and drop the unsolvable ones from every screen.
+- [x] **E-Q2 The 27 never-solved tasks, task by task** (29 Oct; four reviewers replayed every distinct agent patch and the
+  gold patch against the hidden tests on scratch copies and searched the repository at base, its docs and git history).
+  - **Infeasible, 13**: the hidden test pins a name, message or design no source gives. fastapi_14258 (exact message),
+    14306 (`endpoint_ctx` kwarg and `Endpoint:` label), 14479 (the issue quotes a different message than the test), 14487
+    (two exact labels), 15280 (April-fool `vibe` raising a fixed sentence), 15661 (a new release script's whole API),
+    15800 (private names and six docs files); rich_3061 (`extend_style` absent everywhere), 3105 (issue is "Fix #3104",
+    offline), 3930 (new module and version tables), 3938 (`Segment.split_lines_terminator`), 3942 (a markdown restyle),
+    3944 (private-use code points, title "fix fonts").
+  - **Agent failure, 6**: fastapi_13920 (alias from `typing_extensions` never tried through TestClient), 14448 (28-route
+    cross product; 14 patches reach 24/28), 14986 (36 patches delete a documented feature that existing tests pin);
+    rich_3052 (returns the typed value; the sibling test asserts the declared choice), 3782 (2-line fix in `_get_syntax`;
+    two correct patches exist but were graded under a different Pygments), 3935 (fix is in table.py; all 25 patches
+    edited padding.py).
+  - **Partly feasible, 8**: fastapi_15588 (behaviour right in 30 of 36 patches, only the message is unknowable); rich_3468,
+    3472, 3535, 3934, 3953, 4006, 4076 (location or behaviour inferable, one element needs a guess).
+  - **Repeated mistakes behind the 14 that are not infeasible** (candidate rules, see E-Q3): checks that already pass before
+    the edit (a test that is green on the old code proves nothing); reverting or dismissing a fix because an old test that
+    encodes the old behaviour goes red; editing the first plausible site without listing every consumer of the option or
+    function; repro scripts with no `timeout` (16 of 39 runs on rich_4006 lost 180 s); identical commands repeated.
+  - **Eval-fidelity defects found on the way**: the box sandbox had network (a rich_3105 run fetched the issue), and
+    rich_3782's correct patches failed on the box's Pygments 2.21 against the scorer's 2.20.
+- [ ] **E-Q3 Verification discipline, one prompt change**: before editing, make a check that fails on the current code
+  (clone the nearest existing test with only the issue's change, or one script crossing the dimensions the issue lists);
+  after editing, run the touched module's existing test file, keep a fix whose only red tests encode the old behaviour the
+  issue changes, fix anything else; `timeout 10` on every repro. Evidence: the 6 agent failures above plus the solved vs
+  failed contrast on the 32 screen tasks (workflow running).
 
 ### 6. Models and research
+
+From the online scan (29 Oct, about 60 forum threads, public notebooks, papers; nothing found beats noise):
+- **Final picks: the private score is the better of the two finals** (thread 752220). Two decorrelated 31B finals add
+  about 0.56 of a run's spread (about two tasks, +0.02) at no slot cost, but that gives up an E4B pick (decision R2).
+- **12-hour cliff**: breaching it fails the whole submission (752017), and scorer speed varies run to run (753058: a
+  byte-identical zip scored, then timed out at about 25 h). Keep worst-case runtime well under 12 h.
+- **Parser prevention** (746336, 747168): vLLM 0.19.1's gemma4 parser mishandles plain-quoted strings and hangs on a `]`
+  inside a plain-quoted array (fixed in 0.21, scorer pins 0.19.1). One edit_file example written with Gemma's string
+  delimiters could prevent garbles, where v12b_garble only tried to recover from them.
+- **No visible text beside a tool call** (744844, scorer's June template closes the turn): small expected gain, no risk.
+- **Thinking budget 2,048** (746250: 50 vs 48 of 129); our 1,024 read 0.10 against 0.15, so only with an L4 run first.
+- **Better dev sets**: FreshSWE-Py and OOD-45 (750573) are out-of-repo task sets closer to the hidden repos than the 74.
+- **Papers** on pruning stale observations (AgentDiet 2509.23586, ACON 2510.00615, SWE-Pruner 2601.16746) need harness
+  control we do not have; their prompt-level form is what v12b_ctx tries. Overthinking lowers SWE-bench resolve
+  (2502.08235).
+- **LoRA**: every public report since 20 Oct is flat or negative against the base (751596, 750713). Stays dropped.
 
 - [~] **R1 Online scan**: forum since 18 Oct, public notebooks, 2025-2026 papers on efficient small-model agents, context
   pruning, verification; Gemma 4 and vLLM news.

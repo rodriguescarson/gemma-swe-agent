@@ -13,6 +13,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="${PY:-3.12}"
+case "$PY" in
+  3.12|3.13) ;;
+  *) echo "linux_test.sh: PY must be 3.12 or 3.13, not $PY" >&2; exit 2 ;;
+esac
 # Free-disk guard (2026-10-15: the Docker VM grew 11 GB in 5 min and took the Mac to 0 GB free twice in one afternoon). The
 # container needs ~10 GB (pip cache, torch site-packages, the 1.7 GB staged copy, per-test workspace copies). MIN_FREE_GB=0 disables.
 MIN_FREE_GB=${MIN_FREE_GB:-12}
@@ -29,10 +33,6 @@ LINUX_TEST_OUT="${LINUX_TEST_OUT:-$PWD/eval/linux_test_out}"; mkdir -p "$LINUX_T
 # data/ made test_committed_split_equals_recomputation record /tmp/g4/data/... instead of data/...).
 RO_MOUNTS=(-v "$PWD/data:/tmp/g4/data:ro")
 for d in golden kaggle collect; do if [ -d "eval/$d" ]; then RO_MOUNTS+=(-v "$PWD/eval/$d:/tmp/g4/eval/$d:ro"); fi; done
-case "$PY" in
-  3.12|3.13) ;;
-  *) echo "linux_test.sh: PY must be 3.12 or 3.13, not $PY" >&2; exit 2 ;;
-esac
 
 read -r -d '' STAGE_SCRIPT <<'SH' || true
 apt-get -qq update >/dev/null 2>&1 && apt-get -qq install -y git procps >/dev/null 2>&1   # procps: pgrep/ps for the A6000 + bounded tests

@@ -529,7 +529,8 @@ def teacher_mode():
         raise RuntimeError(f"needs 4 GPUs, found {f.get('gpus')}")
     prepare_offline()
     mdir, have = pick_model_dir(TEACHER["weights_gb"])
-    need = (0 if OFF else TEACHER["weights_gb"]) + 14   # + the teacher venv (torch + vLLM + CUDA libs) and uv's cache; offline weights are links
+    need = (0 if OFF else TEACHER["weights_gb"]) + (0 if E("G1_TV_VLLM") else 14)   # + the teacher venv (torch + vLLM + CUDA
+    # libs) and uv's cache, unless G1_TV_VLLM supplies vLLM and no venv is built; offline weights are links
     STATUS.update(model_dir=str(mdir), model_dir_free_gb=have)
     if have < need:
         STATUS.update(stage="disk", error=f"only {have} GB free at {mdir}, need {need}"); save()
