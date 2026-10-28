@@ -87,6 +87,13 @@ def test_the_issue_is_in_every_agent_request_and_injected(run):
         assert "{problem_description" not in sy
 
 
+def test_the_runner_logs_each_compaction_with_its_summary(run):
+    r, log = run
+    recs = [json.loads(line) for line in (r.results_dir / "compactions.jsonl").read_text().splitlines()]
+    assert len(recs) == sum(e["kind"] == "summarizer" for e in log) >= 1
+    assert recs[0]["events_in"] >= 1 and recs[0]["chars_in"] > 0 and recs[0]["summary"].startswith("Summary:")
+
+
 def test_after_the_compaction_only_the_pin_carries_the_issue(run):
     _, log = run
     i = next(n for n, e in enumerate(log) if e["kind"] == "summarizer")

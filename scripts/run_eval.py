@@ -196,6 +196,31 @@ def wrap_eval_config(enabled):
     return base
 
 
+def log_compactions(path):
+    """Append every in-flow compaction to a JSONL file (events in, characters the summarizer saw, the summary it wrote):
+    the trace records no compaction event, and the summary is what the agent keeps of everything before it."""
+    import json
+    import time
+    from google.adk.apps.llm_event_summarizer import LlmEventSummarizer
+    orig = getattr(LlmEventSummarizer.maybe_summarize_events, "__wrapped__", LlmEventSummarizer.maybe_summarize_events)
+
+    async def maybe_summarize_events(self, *, events):
+        t = time.perf_counter()
+        ev = await orig(self, events=events)
+        comp = ev.actions.compaction if ev is not None and ev.actions else None
+        parts = (comp.compacted_content.parts or []) if comp and comp.compacted_content else []
+        rec = {"t": round(time.time(), 3), "secs": round(time.perf_counter() - t, 2), "events_in": len(events),
+               "chars_in": len(self._format_events_for_prompt(events)),
+               "summary": "".join(p.text or "" for p in parts if not getattr(p, "thought", False))}
+        with open(path, "a") as f:
+            f.write(json.dumps(rec) + "\n")
+        return ev
+
+    maybe_summarize_events.__wrapped__ = orig
+    LlmEventSummarizer.maybe_summarize_events = maybe_summarize_events
+    return orig
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     oracle = "--oracle" in argv
@@ -206,6 +231,9 @@ def main(argv=None):
         argv = scale_argv(argv, scale)
     install_patches(faithful=env_flag("G4_FAITHFUL_ENV", "1"), scale=scale)
     wrap_eval_config(enabled=env_flag("G4_COMPACTION", "1"))
+    if env_flag("G4_COMPACTION", "1") and "--results-dir" in argv:
+        log_compactions(os.environ.get("G4_COMPACTION_LOG")
+                        or os.path.join(argv[argv.index("--results-dir") + 1], "compactions.jsonl"))
     log.info("run_eval: compaction=%s l4_scale=%s no_editable=%s", env_flag("G4_COMPACTION", "1"), scale,
              env_flag("G4_NO_EDITABLE"))
     if oracle:
