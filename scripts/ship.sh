@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The only supported path from a bundle to a Kaggle notebook: full test suite first, then build. Refuses on any failure.
-# Usage: scripts/ship.sh <bundle_dir> <slug> [eval|submit] [make_eval_kernel args...]
+# Usage: [ALLOW_ALL_TASKS=1] scripts/ship.sh <bundle_dir> <slug> [eval|submit] [make_eval_kernel args...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 B=$1; SLUG=$2; MODE=${3:-submit}; shift 3 2>/dev/null || shift $#
@@ -14,5 +14,14 @@ if [ "$lt_rc" -ne 0 ] || ! grep -qE "[0-9]+ passed" "$LT" || grep -qE "[0-9]+ fa
   echo "SHIP REFUSED: Linux tests failed (linux_test.sh exit $lt_rc; log $LT)"; exit 1
 fi
 rm -f "$LT"
-if [ "$MODE" = eval ]; then python3 scripts/make_eval_kernel.py "$B" "$SLUG" "$@"; else python3 scripts/make_kernel.py "$B" "$SLUG"; fi
+if [ "$MODE" = eval ]; then
+  EK=$(python3 scripts/make_eval_kernel.py "$B" "$SLUG" "$@") || { ek_rc=$?; echo "$EK"; exit "$ek_rc"; }
+  echo "$EK"
+  # make_eval_kernel.py without --ids (or with an empty ids file) builds a kernel for EVERY task in tasks.jsonl and says "all tasks":
+  # a GPU run of hours that nobody asked for. Refuse it, and take the metadata away so kaggle_push_wait.sh cannot push it anyway.
+  if echo "$EK" | grep -q " files all tasks " && [ "${ALLOW_ALL_TASKS:-0}" != 1 ]; then
+    rm -f "kernels/$SLUG/kernel-metadata.json"
+    echo "SHIP REFUSED: the eval kernel covers ALL tasks (no --ids, or an empty ids file); pass --ids <file>, or set ALLOW_ALL_TASKS=1 if every task is meant"; exit 1
+  fi
+else python3 scripts/make_kernel.py "$B" "$SLUG"; fi
 echo "SHIP OK: kernels/$SLUG"
