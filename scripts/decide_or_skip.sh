@@ -1,7 +1,9 @@
 #!/bin/bash
 # Pre-registered slot decision with NO fallback: submit the candidate iff its faithful Kaggle-L4 eval kernel passed the rule,
 # otherwise log and leave the day's slot unused (tests/test_decide_or_skip.py). The rule, fixed before the eval ran:
-#   the eval kernel finished (COMPLETE), solved >= MIN of its rows, no row carries a crash class, summed task seconds <= DECIDE_MAX_SECS.
+#   the eval kernel finished (COMPLETE), every id in data/kaggle_valid_ids.txt (the 74 graded tasks) has a row, and over those
+#   rows: solved >= MIN, no row carries a crash class, summed task seconds <= DECIDE_MAX_SECS. Rows for other ids (the
+#   competition's tasks.jsonl has 129, 55 of them ungradable) are not judged. The output download is tried up to 3 times.
 # Usage: [KERNEL_VERSION=N] decide_or_skip.sh <eval_kernel_slug> <candidate_submit_kernel> <HHMM UTC> <min_solved> <message>
 # The eval kernel may still be running at HHMM: we wait for it until the end of the UTC day (the slot stays valid all day).
 EVAL=$1; CAND=$2; AT=$3; MIN=$4; MSG=$5
@@ -10,6 +12,8 @@ LOG=${SUBMIT_LOG:-$HERE/../eval/submit_log.txt}; OUT=${DECIDE_OUT:-$HERE/../eval
 KAGGLE=${KAGGLE_BIN:-}
 if [ -z "$KAGGLE" ]; then for c in "$HERE/../.venv/bin/kaggle" "$HOME/.local/bin/kaggle"; do [ -x "$c" ] && { KAGGLE=$c; break; }; done; fi
 [ -x "$KAGGLE" ] || { echo "$(date -u) [$(hostname -s)] ABORT: kaggle binary not found (KAGGLE_BIN=$KAGGLE); not armed" >> "$LOG"; exit 2; }
+VALID_IDS=${DECIDE_IDS_FILE:-$HERE/../data/kaggle_valid_ids.txt}
+[ -s "$VALID_IDS" ] || { echo "$(date -u) [$(hostname -s)] ABORT: valid ids file not found or empty ($VALID_IDS); not armed" >> "$LOG"; exit 2; }
 export KAGGLE_BIN=$KAGGLE
 TARGET=${SUBMIT_TARGET_EPOCH:-$(python3 -c 'import datetime as d, sys
 n = d.datetime.now(d.timezone.utc); a = sys.argv[1]
@@ -28,25 +32,32 @@ while :; do
 done
 verdict="NO_EVAL status=${status:-unknown}"
 if [ "$status" = "KernelWorkerStatus.COMPLETE" ]; then
-  rm -rf "$OUT" && mkdir -p "$OUT" && "$KAGGLE" kernels output "carsonrodrigues/$EVAL" -p "$OUT" >/dev/null 2>&1
-  verdict=$(python3 - "$OUT/results.jsonl" "$MIN" "${DECIDE_MAX_SECS:-23000}" <<'PY'
+  for try in 1 2 3; do      # a failed download used to leave the slot unused (NO_RESULTS) after one attempt
+    rm -rf "$OUT" && mkdir -p "$OUT" && "$KAGGLE" kernels output "carsonrodrigues/$EVAL" -p "$OUT" >/dev/null 2>&1 && [ -f "$OUT/results.jsonl" ] && break
+    echo "$(date -u) [$(hostname -s)] output download of $EVAL failed (try $try of 3)" >> "$LOG"
+    [ "$try" -lt 3 ] && sleep "${DECIDE_RETRY_S:-30}"
+  done
+  verdict=$(python3 - "$OUT/results.jsonl" "$MIN" "${DECIDE_MAX_SECS:-23000}" "$VALID_IDS" <<'PY'
 import json, re, sys
 path, need, max_secs = sys.argv[1], int(sys.argv[2]), float(sys.argv[3])
+valid = set(open(sys.argv[4]).read().split())
 try:
-    rows = [json.loads(l) for l in open(path) if l.strip()]
+    allrows = [json.loads(l) for l in open(path) if l.strip()]
 except OSError:
-    print("NO_RESULTS 0 0 0 0"); sys.exit()
+    print("NO_RESULTS 0 0 0 0 %d" % len(valid)); sys.exit()
+byid = {r.get("id"): r for r in allrows if r.get("id") in valid}      # the graded ids only, one row each
+rows, missing = list(byid.values()), len(valid - set(byid))
 crash = re.compile(r"not found\.|Tool '[^']+' not found|ContextWindowExceeded|maximum context length|prompt contains at least|"
                    r"KeyError|Context variable not found|No LlmAgent model available")
 solved = sum(bool(r.get("resolved")) for r in rows)
 crashes = sum(bool(crash.search(str(r.get("err") or ""))) for r in rows)
 secs = sum(float(r.get("secs") or 0) for r in rows)
-ok = rows and solved >= need and crashes == 0 and secs <= max_secs
-print(("PASS" if ok else "FAIL"), solved, len(rows), crashes, int(secs))
+ok = rows and missing == 0 and solved >= need and crashes == 0 and secs <= max_secs
+print(("PASS" if ok else "FAIL"), solved, len(rows), crashes, int(secs), missing)
 PY
 )
 fi
-echo "$(date -u) [$(hostname -s)] decision: $verdict (fields: verdict solved rows crashes secs; need >= $MIN, 0 crashes, secs <= ${DECIDE_MAX_SECS:-23000})" >> "$LOG"
+echo "$(date -u) [$(hostname -s)] decision: $verdict (fields: verdict solved rows crashes secs missing; need >= $MIN, 0 crashes, 0 missing, secs <= ${DECIDE_MAX_SECS:-23000})" >> "$LOG"
 case "$verdict" in
   PASS*) SUBMIT_TARGET_EPOCH=0 SUBMIT_LOG="$LOG" KAGGLE_BIN="$KAGGLE" exec bash "$HERE/submit_at.sh" "$CAND" 0000 "$MSG" ;;
   *) echo "$(date -u) [$(hostname -s)] SKIPPED: slot left unused ($verdict)" >> "$LOG"; exit 3 ;;
