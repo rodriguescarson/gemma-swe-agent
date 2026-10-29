@@ -12,10 +12,16 @@ echo "$@" >> {calls}
 if [ "$1" = kernels ] && [ "$2" = status ]; then echo 'x has status "KernelWorkerStatus.{status}"'; exit 0; fi
 if [ "$1" = kernels ] && [ "$2" = output ]; then d=""; while [ $# -gt 0 ]; do [ "$1" = -p ] && d=$2; shift; done; cp {tmp}/res.jsonl "$d/results.jsonl"; exit 0; fi
 if [ "$1" = kernels ] && [ "$2" = list ]; then printf 'ref t\\n-- --\\n'; exit 0; fi
-if [ "$2" = submissions ]; then echo 'ref,fileName,date,description,status'; exit 0; fi
+if [ "$2" = submissions ]; then
+  echo 'ref,fileName,date,description,status'
+  while IFS= read -r m; do echo "9,submission.zip,d,\\"$m\\",SubmissionStatus.PENDING"; done < {tmp}/subs
+  exit 0
+fi
+if [ "$2" = submit ]; then while [ $# -gt 0 ]; do [ "$1" = -m ] && echo "$2" >> {tmp}/subs; shift; done; fi
 echo "Successfully submitted"
 """)
     fake.chmod(0o755)
+    (tmp / "subs").write_text("")     # a submission shows up in the listing, as on Kaggle: submit_at.sh exits 0 only when it can see its tag
     (tmp / "submit_at.sh").write_text((ROOT / "scripts/submit_at.sh").read_text())
     script = tmp / "decide_submit.sh"; script.write_text(SCRIPT.read_text())
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0", DECIDE_OUT=str(tmp / "out"))

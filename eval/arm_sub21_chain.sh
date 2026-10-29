@@ -44,4 +44,6 @@ echo "$out" | grep -q "COMPLETE\|output already present" || { say "v16 kernel pu
 V=$(echo "$out" | sed -n 's/.*Kernel version \([0-9]*\) successfully pushed.*/\1/p' | tail -1)
 MSG="sub21: v16 = v12 (hidden 0.15) + the public LB-0.24 lineage's prompt restated to v12's limits (40 calls, 5 min), nothing else; worst case 10 h; box 74: $GATE; $STATS; expectation 0.14-0.20"
 KERNEL_VERSION=${V:-1} SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$K bash scripts/submit_at.sh g4agent-v16 0000 "$MSG" "sub21:" >> "$LOG" 2>&1
-say "sub21 submit_at exited $?"
+rc=$?
+say "sub21 submit_at exited $rc"
+exit "$rc"   # submit_at's status, not say's

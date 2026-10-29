@@ -55,4 +55,6 @@ echo "$(date -u) nothing PENDING; pushing kernels/g4agent-pub024-6m" >> "$LOG"
 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/kaggle_push_wait.sh g4agent-pub024-6m >> "$LOG" 2>&1 || { echo "$(date -u) kaggle_push_wait failed; chain stops" >> "$LOG"; exit 1; }
 MSG="sub20: pub024_6m = the public LB-0.24 bundle (sub18 of it ERRORED on the 12-h runtime; the author's run scored) with max_time_minutes 8 -> 6 and the prompt's budget sentence saying 6 minutes, nothing else (28 calls, 240 s, 80 turns, temp 0.2, thinking 4096 unchanged); box 74: $GATE; $STATS; 12-h gate: mean <= 300 s = 10 h projected; expectation 0.18-0.24"
 KERNEL_VERSION=1 SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/submit_at.sh g4agent-pub024-6m 0000 "$MSG" "sub20:" >> "$LOG" 2>&1
-echo "$(date -u) submit_at.sh exited $?" >> "$LOG"
+rc=$?
+echo "$(date -u) submit_at.sh exited $rc" >> "$LOG"
+exit "$rc"   # submit_at's status, not echo's

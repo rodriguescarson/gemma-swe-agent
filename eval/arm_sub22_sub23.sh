@@ -27,6 +27,7 @@ for b in $BUNDLES; do
 done
 # ---- 2. gate and submit in order
 NEXT=${NEXT:-22}   # 21 Oct: NEXT=23 (sub22 is taken; submit_at skips a tag already on Kaggle)
+RC=0               # the first non-zero submit_at status; a chain that gave up used to exit 0
 for b in $BUNDLES; do
   say "waiting for the box END (or stop) of p4_$b"
   while :; do
@@ -64,7 +65,9 @@ EOF
     MSG="$TAG v15b = v12b (hidden 0.17) + L1 (heredoc edits, edit_file/write_file dropped) + L2 (60 s per command); 5-min cap; box 74: $GATE; $STATS; expectation 0.14-0.20"
   fi
   KERNEL_VERSION=${V:-1} SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$K bash scripts/submit_at.sh "g4agent-$b" 0000 "$MSG" "$TAG" >> "$LOG" 2>&1
-  say "$TAG ($b) submit_at exited $?"
+  rc=$?; [ "$RC" -ne 0 ] || RC=$rc
+  say "$TAG ($b) submit_at exited $rc"
   NEXT=$((NEXT + 1))
 done
 say "chain done"
+exit "$RC"

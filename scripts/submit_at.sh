@@ -4,6 +4,8 @@
 # submission.zip is submitted; 2026-09-29: g4agent-v10 v1 is v10.0, v2 is v10.1, so the version must be explicit)
 # Idempotent across machines: before submitting it asks Kaggle whether a
 # submission whose description starts with <tag> already exists.
+# Exit: 0 = <tag> is on Kaggle (submitted now, or already there); 1 = GAVE UP, <tag> is not in the final listing;
+# 2 = no kaggle binary; 4 = another submission was still scoring at PENDING_DEADLINE_EPOCH.
 KERNEL=$1; AT=$2; MSG=$3; TAG=${4:-${MSG%%:*}:}
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 LOG=${SUBMIT_LOG:-$HERE/eval/submit_log.txt}
@@ -37,7 +39,10 @@ until [ "$(date -u +%s)" -ge "$TARGET" ]; do sleep 20; done
 # submitting, wait while any of our own GPU eval kernels (slug prefix g4-l4- or g4-eval) is QUEUED or RUNNING, up to
 # the end of the UTC day (a later submission the same day still uses the day's slot). SKIP_GPU_GUARD=1 disables it.
 if [ "${SKIP_GPU_GUARD:-0}" != 1 ]; then
-  DAY_END=$(( TARGET - (TARGET % 86400) + 86400 - 600 ))
+  # The day is the one the later of TARGET and now falls in: every arm script passes SUBMIT_TARGET_EPOCH=0, which put the day end in
+  # 1970, so the guard saw a busy kernel and submitted at once (same base as scripts/decide_or_skip.sh).
+  base=$TARGET; now=$(date -u +%s); [ "$base" -lt "$now" ] && base=$now
+  DAY_END=$(( base - (base % 86400) + 86400 - 600 ))
   while :; do
     busy=$("$KAGGLE" kernels list --mine --page-size 50 2>/dev/null | awk 'NR>2{print $1}' | grep -E '/g4-(l4-|eval)' | while read -r k; do
       "$KAGGLE" kernels status "$k" 2>/dev/null | grep -qE 'QUEUED|RUNNING' && echo "$k"; done | tr '\n' ' ')
@@ -69,4 +74,17 @@ while [ $i -lt 6 ]; do
   echo "$out" | grep -qi "success" && break
   sleep 60
 done
+# The verdict is the listing, not the loop: six failed attempts or six unreadable listings used to fall through to exit 0, and the
+# chains then logged "submit_at exited 0" for a tag that never reached Kaggle. Exit 0 only when TAG is in the final listing (a
+# submission that just landed can take a moment to show, hence FINAL_TRIES x FINAL_POLL s).
+FINAL_TRIES=${FINAL_TRIES:-3}; f=0; fin=2
+while :; do
+  already; fin=$?
+  [ $fin -eq 0 ] && break
+  f=$((f + 1)); [ $f -ge "$FINAL_TRIES" ] && break
+  sleep "${FINAL_POLL:-30}"
+done
 "$KAGGLE" competitions submissions $COMP -v 2>&1 | head -2 >> "$LOG"
+if [ $fin -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG is on Kaggle (final listing)" >> "$LOG"; exit 0; fi
+echo "$(date -u) [$(hostname -s)] GAVE UP: $TAG is not on Kaggle ($([ $fin -eq 1 ] && echo 'absent from the final listing' || echo 'final listing unreadable')) after $i attempts" >> "$LOG"
+exit 1
