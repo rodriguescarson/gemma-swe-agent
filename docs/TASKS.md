@@ -150,6 +150,47 @@ From the online scan (29 Oct, about 60 forum threads, public notebooks, papers; 
   small-model board on 22 Oct. Thread 753277 reports a training-free one-tensor fix for E4B's copying bug (copy test: the
   unmodified model failed 15 of 18 inputs, the fixed one 1). Parked by the owner on 28 Oct; a decision for the final picks.
 
+## Verified optimisation backlog (29 Oct)
+
+Source: `docs/OPTIMISE_RANKING_2026-10-29.md` (75 findings, 49 survived an independent evidence check). Its bottom line:
+summing every submission candidate at its corrected gain gives about +0.9 tasks per 74 (+0.013); no single candidate is
+resolvable by one hidden read, and every procedural rule added since v12b has read at or below its base. So: one change per
+slot, judged on mechanism counts decided before the run, never on one solve total.
+
+**Pipeline fixes (implementing now, branch per group, adversarial review each):**
+- [~] A1 run_audit.py skips oracle/rescore rows (its reach line said 0 never-solved; truth 27) and counts first edits on
+  source files only.
+- [~] A2 make_eval_kernel.py defaults to the 74 valid ids (the garble run spent 3.8 h, 44%, on 55 tasks whose gold patch
+  also fails), asserts every id was found, keeps each row's test-output tail.
+- [~] A3/A4/A5 ship.sh keeps linux_test.sh's exit status; submit_at.sh's GPU-overlap guard works with target 0 and it exits
+  1 when the tag never appears; arm chains exit with submit_at's status; kaggle_push_wait.sh gets a deadline; tests no
+  longer depend on fixed ports or the 23:50-00:00 UTC window.
+- [~] A6 refresh data/HARNESS_README.md from the live copy and list what changed.
+- [~] A7 decide_or_skip.sh reads only the 74 ids and retries the download.
+- [ ] A8 GAPS wording: the 55 extra tasks fail with the gold patch too (21 import inline_snapshot or dirty_equals, 8 use the
+  httpbin fixture, 1 skipif, at least 17 unexplained); "grading not trusted" becomes "gold also fails".
+
+**Submission candidates (one per slot, after sub27 reads; base = v12b_ctx if it reads 0.15 or more, else v12b):**
+- [~] B1 `v12b_ctx_sed`: read code with `sed -n` through run_command, never a ranged read_file. 2.5% of ranged reads
+  lose their range to a parser garble (key `start_line"`) and silently return lines 1-150; v12b_ctx made ranges mandatory.
+  Corrected gain +0.05 to +0.15 per 74. Building now; no slot without the owner's OK.
+- [ ] B2 literal-change rule: do what the issue says, keep values raw, delegate like the sibling, and an old-behaviour test
+  going red is expected (19 failing patches over 4 tasks coerce or invent behaviour; about +0.1 hidden).
+- [ ] B3 when the first check passes on unmodified code, derive the failing variant from the function's branch conditions
+  (9425, 11194, 15589; about +0.1).
+- [ ] B4 `timeout_seconds` 180 -> 60 (51 command timeouts in 39 runs, mostly on never-solved hang tasks; 0 to +0.3; check
+  first that no successful command takes 60-180 s).
+- Not worth a slot: thinking 2,048, a "LOW thinking" line, lint guard, repetition guard, plan step, read-tests-first,
+  localization prompts, deleting "Think briefly".
+
+**Evaluation protocol (adopted):** judge by mechanism counts and within-task pairs; a swing set of about 11-12 tasks at
+k >= 3 when capacity allows; fastapi_14851 is a harm control (solved only by ending before the cap); 8- and 6-minute configs
+are not 5-minute evidence; hidden bands stay >= 0.19 promote, 0.15-0.18 neutral, <= 0.14 drop.
+
+**Finals:** best-of-two counts the better final; keep v12b plus the most different candidate of similar expected score.
+Submit the last new bundle by 28-29 Nov UTC (queue plus a possible rerun must land before 2 Dec 23:59 UTC); keep the worst
+case under 10 h.
+
 ## Calendar (5 weeks)
 
 | Week | Faithful runs (about 15 h of 4x L4) | Slots |
