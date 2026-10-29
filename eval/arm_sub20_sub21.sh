@@ -24,7 +24,8 @@ V=$(push_version g4agent-v12b) || { say "v12b kernel push/run failed; stop"; exi
 say "v12b kernel version ${V:-1} COMPLETE; submitting sub20"
 MSG="sub20: v12b = v12 (hidden 0.15) + pub024 sampling only (temperature 0.2, top_p 0.95, no top_k, no seed); 5-min cap (worst case 120 x 5 min = 10 h; both 8-min pub024 draws errored on runtime); box 74: 28/74 (v12 27), net +1, mean 247 s, 0 crash/errored; expectation 0.13-0.17"
 KERNEL_VERSION=${V:-1} SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$K bash scripts/submit_at.sh g4agent-v12b 0000 "$MSG" "sub20:" >> "$LOG" 2>&1
-say "sub20 submit_at exited $?"
+rc=$?; RC=$rc
+say "sub20 submit_at exited $rc"
 # ---- 2. package v16
 say "ship v16"
 bash scripts/ship.sh submissions/v16 g4agent-v16 submit > "$SP/ship_v16.log" 2>&1
@@ -57,4 +58,6 @@ until nothing_pending; do say "sub21 rule PASSED; waiting: a submission is PENDI
 V=$(push_version g4agent-v16) || { say "v16 kernel push/run failed; stop"; exit 1; }
 MSG="sub21: v16 = v12 (hidden 0.15) + the public LB-0.24 lineage's prompt restated to v12's limits (40 calls, 5 min), nothing else; worst case 10 h; box 74: $GATE; $STATS; expectation 0.14-0.20"
 KERNEL_VERSION=${V:-1} SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$K bash scripts/submit_at.sh g4agent-v16 0000 "$MSG" "sub21:" >> "$LOG" 2>&1
-say "sub21 submit_at exited $?"
+rc=$?; [ "$RC" -ne 0 ] || RC=$rc
+say "sub21 submit_at exited $rc"
+exit "$RC"   # the first non-zero submit_at status, else 0 (a chain that gave up used to exit 0)

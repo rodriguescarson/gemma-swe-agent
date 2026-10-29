@@ -15,15 +15,18 @@ def _rows(tmp, specs):
     return p
 
 
-def _run(tmp, rows_path, now_utc_hhmm="0023"):
+def _run(tmp, rows_path, now_utc_hhmm="0023", submit_rc=0):
+    """submit_rc: the stub submit_at.sh's exit status; the script must exit with it."""
     fake = tmp / "submit_at.sh"
-    fake.write_text('#!/bin/bash\necho "FAKE_SUBMIT kernel=$1 at=$2 epoch=${SUBMIT_TARGET_EPOCH:-unset} ver=${KERNEL_VERSION:-unset}" >> "$FAKE_LOG"\n')
+    fake.write_text('#!/bin/bash\necho "FAKE_SUBMIT kernel=$1 at=$2 epoch=${SUBMIT_TARGET_EPOCH:-unset} ver=${KERNEL_VERSION:-unset}" >> "$FAKE_LOG"\n'
+                    f'exit {submit_rc}\n')
     fake.chmod(0o755)
     env = dict(os.environ, DECIDE_AT="0000", SAMPLE2_RESULTS=str(rows_path), SUBMIT_AT_SH=str(fake), FAKE_LOG=str(tmp / "fake.log"),
                MARKER=str(tmp / "sub9_submitted"), SUBMIT_LOG=str(tmp / "submit_log.txt"), PROGRESS_LOG=str(tmp / "progress.log"),
                FAKE_UTC_HHMM=now_utc_hhmm)
     (tmp / "submit_log.txt").write_text("Mon Sep 28 02:10:44 UTC 2026 [old] attempt 1: HTTPSConnectionPool...\n")   # stale line
-    subprocess.run(["bash", str(SCRIPT)], env=env, check=True, timeout=60)
+    p = subprocess.run(["bash", str(SCRIPT)], env=env, timeout=60)
+    assert p.returncode == submit_rc
     return (tmp / "fake.log").read_text(), (tmp / "submit_log.txt").read_text()
 
 
@@ -69,3 +72,14 @@ def test_decision_before_0001_utc_waits_for_the_slot(tmp_path):
     rows = _rows(tmp_path, [(True, None)] * 20 + [(False, None)] * 60)
     fake, _ = _run(tmp_path, rows, now_utc_hhmm="2340")
     assert "at=0001" in fake and "epoch=unset" in fake
+
+
+def test_a_submit_at_give_up_writes_no_marker_logs_failed_and_is_the_scripts_exit_status(tmp_path):
+    # submit_at.sh exits 1 when it gave up (since 2026-10-29; it used to exit 0): the marker means "sub9 is on Kaggle" and must not be written
+    rows = _rows(tmp_path, [(True, None)] * 20 + [(False, None)] * 60)
+    fake, log = _run(tmp_path, rows, now_utc_hhmm="0023", submit_rc=1)
+    assert "kernel=g4agent-v4h2" in fake                                   # it did call submit_at
+    assert not (tmp_path / "sub9_submitted").exists()
+    progress = (tmp_path / "progress.log").read_text()
+    assert "decide_sub9: submit_at FAILED (exit 1); no marker" in log and "submit_at FAILED (exit 1); no marker" in progress
+    assert "submit_at returned 0" not in progress

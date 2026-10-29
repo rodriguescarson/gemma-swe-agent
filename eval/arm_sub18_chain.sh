@@ -29,4 +29,6 @@ if ! { echo "$GATE" | grep -q " crash 0 " && echo "$GATE" | grep -q " missing 0 
 fi
 MSG="sub18: pub024 = the public notebook honghanhhh/gemma-4-baseline-lb-0-24, byte-identical (CONTROL; the author's one sample 0.24); lineage matterhorn3838 SuperAgent 0.18 -> flexonafft budget-aware v2 0.22 -> prompt edits; limits 8 min / 28 calls / 240 s / 80 turns, temperature 0.2, thinking 4096; box 74: $GATE; purpose: calibrate the box against a known hidden score and the earliest 0.24 on the board; expectation 0.20-0.26"
 KERNEL_VERSION=1 SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/submit_at.sh g4agent-pub024 0000 "$MSG" "sub18:" >> "$LOG" 2>&1
-echo "$(date -u) submit_at.sh exited $?" >> "$LOG"
+rc=$?
+echo "$(date -u) submit_at.sh exited $rc" >> "$LOG"
+exit "$rc"   # submit_at's status, not echo's ($? inside the command substitution was date's: always 0)

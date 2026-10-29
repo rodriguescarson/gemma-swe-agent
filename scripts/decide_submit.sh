@@ -19,7 +19,8 @@ t = n.replace(hour=int(a[:2]), minute=int(a[2:]), second=0, microsecond=0)
 print(int((t if t > n else t + d.timedelta(days=1)).timestamp()))' "$AT")}
 echo "$(date -u) [$(hostname -s)] decide armed: eval=$EVAL candidate=$CAND fallback=$FALL min=$MIN target=$TARGET" >> "$LOG"
 until [ "$(date -u +%s)" -ge "$TARGET" ]; do sleep 20; done
-DAY_END=$(( TARGET - (TARGET % 86400) + 86400 - 900 ))
+base=$TARGET; now=$(date -u +%s); [ "$base" -lt "$now" ] && base=$now      # the end of the slot's UTC day, even when armed late (SUBMIT_TARGET_EPOCH=0: the day end was in 1970)
+DAY_END=$(( base - (base % 86400) + 86400 - 900 ))
 status=""
 while :; do
   status=$("$KAGGLE" kernels status "carsonrodrigues/$EVAL" 2>&1 | grep -oE 'KernelWorkerStatus\.[A-Z]+' | head -1)

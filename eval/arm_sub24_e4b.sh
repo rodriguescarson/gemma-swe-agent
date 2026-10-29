@@ -32,5 +32,7 @@ until nothing_pending; do say "$B shipped; waiting: a submission is PENDING"; sl
 V=$(push_version "$SLUG") || { say "$B kernel push/run failed; stop"; exit 1; }
 MSG="$TAG v12b_e4b = v12b (hidden 0.17) with the model 31B -> gemma-4-e4b-it-qat-w4a16-ct, nothing else (prompt, sampling, thinking 4096, 5-min cap unchanged); Small Model bonus entry, counts only as a selected final; no local read (box closed); small-model top 0.06 on 21 Oct; expectation 0.03-0.09"
 KERNEL_VERSION=${V:-1} SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$K bash scripts/submit_at.sh "$SLUG" 0000 "$MSG" "$TAG" >> "$LOG" 2>&1
-say "$TAG ($B) submit_at exited $?"
+rc=$?
+say "$TAG ($B) submit_at exited $rc"
 say "chain done"
+exit "$rc"   # submit_at's status: 0 only when the tag is on Kaggle (a chain that gave up used to exit 0)

@@ -6,6 +6,7 @@ the Mistral flags reach vLLM, the capture holds the 30 task calls and not the pr
 a disk shortfall stops cleanly before any download, and every failure ends in status.json. Plus the kernels' metadata."""
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -49,14 +50,26 @@ ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
 '''
 FAKE_RUNNER = r'''#!/usr/bin/env python3
 """Stands in for scripts/pallets/run_eval_pallets.py: one model call per task through OPENAI_BASE_URL, then a result row."""
-import json, os, sys, urllib.request
+import json, os, sys, time, urllib.request
 from pathlib import Path
 a = sys.argv[1:]
 oracle = "--oracle" in a
 res, task = Path(a[a.index("--results-dir") + 1]), a[a.index("--task-ids") + 1]
 with open(os.environ["FAKE_LOG"], "a") as f:
     f.write(json.dumps({"argv": a, "wheelhouse": os.environ.get("G4_WHEELHOUSE"), "scale": os.environ.get("G4_L4_SCALE"),
-                        "tmpdir": os.environ.get("TMPDIR"), "base": os.environ.get("OPENAI_BASE_URL")}) + "\n")
+                        "tmpdir": os.environ.get("TMPDIR"), "cwd": os.getcwd(), "base": os.environ.get("OPENAI_BASE_URL")}) + "\n")
+if os.environ.get("FAKE_RENDEZVOUS"):
+    # two runs at once (test_two_runs_at_once_do_not_share_sandboxes): leave a marker in this sandbox, wait until the other run is on the
+    # same task, hold FAKE_HOLD seconds (the other run's runner exits at once, and its driver removes ITS sandbox), then the marker
+    # must still be here. Under a shared sandbox path the other driver's rmtree deletes it.
+    d, me, other = Path(os.environ["FAKE_RENDEZVOUS"]), os.environ["FAKE_ME"], os.environ["FAKE_OTHER"]
+    marker = Path("marker-" + me); marker.write_text(me); (d / f"{me}_{task}").write_text("")
+    end = time.time() + 30
+    while not (d / f"{other}_{task}").exists() and time.time() < end:
+        time.sleep(0.02)
+    time.sleep(float(os.environ.get("FAKE_HOLD", "0")))
+    if not marker.exists():
+        sys.exit(3)
 if not oracle:
     req = urllib.request.Request(os.environ["OPENAI_BASE_URL"] + "/chat/completions", method="POST", headers={"Content-Type": "application/json"},
         data=json.dumps({"model": "gemma-4-31b-it-qat-w4a16-ct", "messages": [{"role": "user", "content": "fix " + task}], "max_completion_tokens": 8,
@@ -68,9 +81,20 @@ res.mkdir(parents=True, exist_ok=True)
 '''
 
 
+def free_ports(n):
+    """n distinct free ports, all held open while they are chosen (back-to-back free_port() calls can hand out one port twice)."""
+    socks = [socket.socket() for _ in range(n)]
+    try:
+        for s in socks:
+            s.bind(("127.0.0.1", 0))
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
+
+
 def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0)); return s.getsockname()[1]
+    return free_ports(1)[0]
 
 
 def make_world(tmp_path):
@@ -87,10 +111,11 @@ def make_world(tmp_path):
         (h / "snapshots" / f"{i}.tgz").write_bytes(b"x")
     (h / "wheels" / "a-1.0-py3-none-any.whl").write_bytes(b"x")
     vllm = tmp_path / "fake_vllm"; vllm.write_text(FAKE_VLLM); vllm.chmod(0o755)
+    vport, pport, sport = free_ports(3)   # every port the driver binds: its defaults (8101, 8102, 8201) collide with whatever else is on the host
     env = {**os.environ, "G1_W": str(tmp_path / "working"), "G1_ROOT": str(root), "G1_H": str(tmp_path / "h"), "G1_INPUT": str(tmp_path / "input"),
-           "G1_SCRATCH": str(tmp_path / "scratch"), "G1_MODELS": str(tmp_path / "models"), "G1_PY312": sys.executable, "G1_TV_VLLM": str(vllm),
-           "G1_SKIP_DOWNLOAD": "1", "G1_ALLOW_FEWER_GPUS": "1", "G1_WEIGHTS_GB": "0.1", "G1_CONC": "4", "G1_VPORT": str(free_port()),
-           "G1_PPORT": str(free_port()), "FAKE_LOG": str(tmp_path / "runner.jsonl"), "PYTHONDONTWRITEBYTECODE": "1"}
+           "G1_SCRATCH": str(tmp_path / "scratch"), "G1_MODELS": str(tmp_path / "models"), "G1_SBX": str(tmp_path / "sbx"), "G1_TV": str(tmp_path / "tvllm"), "G1_PY312": sys.executable, "G1_TV_VLLM": str(vllm),
+           "G1_SKIP_DOWNLOAD": "1", "G1_ALLOW_FEWER_GPUS": "1", "G1_WEIGHTS_GB": "0.1", "G1_CONC": "4", "G1_VPORT": str(vport),
+           "G1_PPORT": str(pport), "G1_SPORT": str(sport), "FAKE_LOG": str(tmp_path / "runner.jsonl"), "PYTHONDONTWRITEBYTECODE": "1"}
     return env, tmp_path / "working", root
 
 
@@ -463,3 +488,65 @@ def test_the_harness_probe_carries_every_field_the_harness_adds():
     assert "temperature: 0.2" in sampling and "top_p: 0.95" in sampling and "thinking_budget: 4096" in sampling
     import strip_proxy
     assert set(strip_proxy.STRIP) >= {"chat_template_kwargs", "thinking_token_budget"}
+
+
+def test_make_world_pins_every_port_the_driver_binds(tmp_path):
+    """The driver's strip proxy listens on G1_SPORT (default 8102); make_world pinned only G1_VPORT and G1_PPORT, so a run
+    failed whenever something else held 8102 (a second test run, a local vLLM). Every G1_*PORT variable the driver reads must be
+    set to its own free port, none of them a default."""
+    names = set(re.findall(r'E\("(G1_[A-Z]*PORT)"\)', DRIVER.read_text()))
+    assert names >= {"G1_VPORT", "G1_PPORT", "G1_SPORT"}
+    env, _, _ = make_world(tmp_path)
+    ports = [env[n] for n in sorted(names)]
+    assert len(set(ports)) == len(ports) and not {"8101", "8102", "8201"} & set(ports), ports
+
+
+def test_a_busy_default_port_does_not_break_a_run(tmp_path):
+    """Host state: with the driver's default strip-proxy port taken by another process the whole teacher run still goes through."""
+    held = []
+    for port in (8101, 8102, 8201):
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port)); s.listen(1); held.append(s)
+        except OSError:
+            s.close()                       # already taken by someone else: that is the situation under test anyway
+    try:
+        env, w, _ = make_world(tmp_path)
+        run(env, "teacher")
+        assert json.loads((w / "status.json").read_text())["ok"] is True
+    finally:
+        for s in held:
+            s.close()
+
+
+def test_task_sandboxes_live_under_g1_sbx_and_are_removed(tmp_path):
+    """The driver put every task's sandbox at /tmp/g1_sbx_{gold|run}_<task> and removed it when the task ended, so two runs on one
+    host (two test runs, a test beside a real run) deleted each other's working directories. The root is G1_SBX; make_world pins it."""
+    env, w, _ = make_world(tmp_path)
+    sbx = tmp_path / "sbx"
+    assert env["G1_SBX"] == str(sbx)
+    for mode, label in (("gold", "gold"), ("teacher", "run")):
+        (tmp_path / "runner.jsonl").unlink(missing_ok=True)
+        run(env, mode)
+        runs = [json.loads(ln) for ln in (tmp_path / "runner.jsonl").read_text().splitlines()]
+        assert len(runs) == 30
+        for r in runs:
+            cwd = Path(r["cwd"]).resolve()
+            task = r["argv"][r["argv"].index("--task-ids") + 1]
+            assert cwd == (sbx / f"g1_sbx_{label}_{task}").resolve() and Path(r["tmpdir"]).resolve() == cwd, (mode, r["cwd"], r["tmpdir"])
+        assert list(sbx.iterdir()) == [], mode          # every sandbox is gone when its task has ended
+
+
+def test_two_runs_at_once_do_not_share_sandboxes(tmp_path):
+    env_a, w_a, _ = make_world(tmp_path / "a")
+    env_b, w_b, _ = make_world(tmp_path / "b")
+    rdv = tmp_path / "rendezvous"; rdv.mkdir()
+    env_a.update(FAKE_RENDEZVOUS=str(rdv), FAKE_ME="a", FAKE_OTHER="b", FAKE_HOLD="0")
+    env_b.update(FAKE_RENDEZVOUS=str(rdv), FAKE_ME="b", FAKE_OTHER="a", FAKE_HOLD="0.5")      # b is still working when a's driver cleans up
+    procs = [subprocess.Popen([sys.executable, str(DRIVER), "gold"], env=e, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+             for e in (env_a, env_b)]
+    outs = [p.communicate(timeout=300)[0] for p in procs]
+    assert [p.returncode for p in procs] == [0, 0], [o[-2000:] for o in outs]
+    for w in (w_a, w_b):
+        s = json.loads((w / "gold_summary.json").read_text())
+        assert s["resolved"] == 30 and s["with_result"] == 30, s

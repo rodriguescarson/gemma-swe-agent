@@ -12,4 +12,6 @@ G=$(grep "gate:" "$L19" | tail -1 | cut -c1-320)
 echo "$(date -u) v16a not submitted; fallback = pub024 again (hidden A/A). v16a gate line: $G" >> "$LOG"
 MSG="sub19: pub024 again, byte-identical to sub18 (hidden A/A: the same bundle twice measures the hidden noise floor under the 0.10/0.13/0.15/0.24 comparisons; the v16a candidate failed its pre-registered 12-h gate on the box: $G); expectation 0.20-0.28"
 KERNEL_VERSION=1 SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/submit_at.sh g4agent-pub024 0000 "$MSG" "sub19:" >> "$LOG" 2>&1
-echo "$(date -u) submit_at.sh exited $?" >> "$LOG"
+rc=$?
+echo "$(date -u) submit_at.sh exited $rc" >> "$LOG"
+exit "$rc"   # submit_at's status, not echo's ($? inside the command substitution was date's: always 0)

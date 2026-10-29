@@ -54,4 +54,6 @@ echo "$(date -u) nothing PENDING; pushing kernels/g4agent-v16a" >> "$LOG"
 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/kaggle_push_wait.sh g4agent-v16a >> "$LOG" 2>&1 || { echo "$(date -u) kaggle_push_wait failed; chain stops" >> "$LOG"; exit 1; }
 MSG="sub19: v16a = pub024 (sub18, the public LB-0.24 bundle) + L1 only: edit_file/write_file removed, edits through a run_command python heredoc that asserts the old block occurs once and compiles (pub024 wasted 56 of 203 edit calls on malformed edit_file args inside its 28-call budget); limits, sampling, prompt otherwise identical; box 74: $GATE; $SCREEN; $NET; expectation 0.22-0.28"
 KERNEL_VERSION=1 SUBMIT_TARGET_EPOCH=0 PENDING_DEADLINE_EPOCH=0 KAGGLE_BIN=$PWD/.venv/bin/kaggle bash scripts/submit_at.sh g4agent-v16a 0000 "$MSG" "sub19:" >> "$LOG" 2>&1
-echo "$(date -u) submit_at.sh exited $?" >> "$LOG"
+rc=$?
+echo "$(date -u) submit_at.sh exited $rc" >> "$LOG"
+exit "$rc"   # submit_at's status, not echo's ($? inside the command substitution was date's: always 0)
