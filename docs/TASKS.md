@@ -158,20 +158,28 @@ resolvable by one hidden read, and every procedural rule added since v12b has re
 slot, judged on mechanism counts decided before the run, never on one solve total.
 
 **Pipeline fixes (implementing now, branch per group, adversarial review each):**
-- [~] A1 run_audit.py skips oracle/rescore rows (its reach line said 0 never-solved; truth 27) and counts first edits on
+- [x] A1 run_audit.py skips oracle/rescore rows (its reach line said 0 never-solved; truth 27) and counts first edits on
   source files only.
-- [~] A2 make_eval_kernel.py defaults to the 74 valid ids (the garble run spent 3.8 h, 44%, on 55 tasks whose gold patch
+- [x] A2 make_eval_kernel.py defaults to the 74 valid ids (the garble run spent 3.8 h, 44%, on 55 tasks whose gold patch
   also fails), asserts every id was found, keeps each row's test-output tail.
-- [~] A3/A4/A5 ship.sh keeps linux_test.sh's exit status; submit_at.sh's GPU-overlap guard works with target 0 and it exits
+- [x] A3/A4/A5 ship.sh keeps linux_test.sh's exit status; submit_at.sh's GPU-overlap guard works with target 0 and it exits
   1 when the tag never appears; arm chains exit with submit_at's status; kaggle_push_wait.sh gets a deadline; tests no
   longer depend on fixed ports or the 23:50-00:00 UTC window.
-- [~] A6 refresh data/HARNESS_README.md from the live copy and list what changed.
-- [~] A7 decide_or_skip.sh reads only the 74 ids and retries the download.
-- [ ] A8 GAPS wording: the 55 extra tasks fail with the gold patch too (21 import inline_snapshot or dirty_equals, 8 use the
+- [x] A6 refresh data/HARNESS_README.md from the live copy and list what changed (docs/HARNESS_README_DIFF_2026-10-29.md;
+  the 25 Sep copy kept as data/HARNESS_README_2026-09-25.md; tests/test_harness_readme_sync.py ties the README to the kernel).
+- [x] A7 decide_or_skip.sh reads only the 74 ids and retries the download.
+- [x] A8 GAPS wording: the 55 extra tasks fail with the gold patch too (21 import inline_snapshot or dirty_equals, 8 use the
   httpbin fixture, 1 skipif, at least 17 unexplained); "grading not trusted" becomes "gold also fails".
 
+- [x] Found and fixed on the way (merged 29 Oct, a054aea7): make_eval_kernel.py refused nothing when a bundle declared the
+  12B/E4B/E2B and served the 31B under that name (now refuses unless --allow-model-mismatch); kaggle_push_wait.sh's deadline
+  counts from RUNNING with a separate 48 h total cap; submit_at.sh matches its tag as a fixed string and exits 5 for
+  "submitted, unconfirmed"; the G1 kit's shared /tmp sandbox path is per-run; scripts/run_eval.py compacts every 15
+  invocations like the scorer (was 5). Known gap, documented in the kernel: our kernel grades with the bundle's 180 s
+  command timeout where the scorer uses 300 s, so kernel grades can only err low.
+
 **Submission candidates (one per slot, after sub27 reads; base = v12b_ctx if it reads 0.15 or more, else v12b):**
-- [~] B1 `v12b_ctx_sed`: read code with `sed -n` through run_command, never a ranged read_file. 2.5% of ranged reads
+- [x] B1 `v12b_ctx_sed` built and tested (bundle, flow and leakage tests; eval/analysis/silent_range_drops.py): read code with `sed -n` through run_command, never a ranged read_file. 2.5% of ranged reads
   lose their range to a parser garble (key `start_line"`) and silently return lines 1-150; v12b_ctx made ranges mandatory.
   Corrected gain +0.05 to +0.15 per 74. Building now; no slot without the owner's OK.
 - [ ] B2 literal-change rule: do what the issue says, keep values raw, delegate like the sibling, and an old-behaviour test

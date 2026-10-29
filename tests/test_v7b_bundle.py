@@ -5,9 +5,11 @@ byte-identical with the same modes: commit "v7b step 1"); every later step names
   fix 1  the read-cap refusal stops being a loop trap: view.py + _ws.py (tests/test_v7b_helpers.py, _sandbox, _counters)
   fix 2  submit_patch is a tool, commands never start with run_command: one new line in fixer.md and verifier.md
          (tests/test_v7b_prompts.py)"""
-import filecmp, os
+import filecmp, os, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kernel_pins import as_pinned, pinned  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 SUB = ROOT / "submissions"
 V7, V7B = SUB / "v7", SUB / "v7b"
@@ -130,7 +132,7 @@ def test_eval_kernel_matches_the_recipe_and_ships_v7b(tmp_path):
                        cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
     for f in ("kernel-metadata.json", KERNEL_SLUG + ".ipynb"):
-        assert (tmp_path / "kernels" / KERNEL_DIR / f).read_bytes() == (kd / f).read_bytes(), f
+        assert as_pinned(tmp_path / "kernels" / KERNEL_DIR / f) == pinned(kd / f), f   # builder changes since: tests/kernel_pins.py
 
 
 def test_the_v7b_kernel_is_the_queued_v7_kernel_but_the_four_files_and_the_slug():

@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kernel_pins import as_pinned, pinned  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts")); sys.path.insert(0, str(ROOT / "tests"))
 import swe_compat  # noqa: E402
@@ -82,4 +84,4 @@ def test_eval_kernel_ships_v5h2_think_on_the_proven_slug(tmp_path):
                         "--pin", "original", "--kernel-id", KERNEL_SLUG], cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
     for f in ("kernel-metadata.json", KERNEL_SLUG + ".ipynb"):
-        assert (tmp_path / "kernels" / KERNEL_DIR / f).read_bytes() == (kd / f).read_bytes(), f
+        assert as_pinned(tmp_path / "kernels" / KERNEL_DIR / f) == pinned(kd / f), f   # builder changes since: tests/kernel_pins.py

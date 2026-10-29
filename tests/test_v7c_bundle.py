@@ -10,9 +10,11 @@ commit "v7c step 1"); every later step names the files it may change.
 
 Below: the compiled tree (v7b's), the helpers (install + Kaggle PROBES, and the Kaggle helper check run on v7c), packing,
 the call arithmetic and the kernel."""
-import filecmp, os
+import filecmp, os, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kernel_pins import as_pinned, pinned  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 SUB = ROOT / "submissions"
 V7B, V7C = SUB / "v7b", SUB / "v7c"
@@ -188,7 +190,7 @@ def test_eval_kernel_matches_the_recipe_and_ships_v7c(tmp_path):
                        cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
     for f in ("kernel-metadata.json", KERNEL_SLUG + ".ipynb"):
-        assert (tmp_path / "kernels" / KERNEL_DIR / f).read_bytes() == (kd / f).read_bytes(), f
+        assert as_pinned(tmp_path / "kernels" / KERNEL_DIR / f) == pinned(kd / f), f   # builder changes since: tests/kernel_pins.py
 
 
 def test_the_v7c_kernel_is_the_v7b_kernel_but_the_changed_files_and_the_slug():

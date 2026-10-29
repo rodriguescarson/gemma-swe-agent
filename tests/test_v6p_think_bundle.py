@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kernel_pins import as_pinned, pinned  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 V6P, THINK = ROOT / "submissions" / "v6p", ROOT / "submissions" / "v6p-think"
 KERNEL_DIR, KERNEL_SLUG = "g4-l4-v6p-think-p312", "g4-l4-v9-eog"
@@ -96,4 +98,4 @@ def test_eval_kernel_slug_is_free_and_regenerates_identically(tmp_path):
                         "--kernel-id", KERNEL_SLUG], cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
     for f in ("kernel-metadata.json", KERNEL_SLUG + ".ipynb"):
-        assert (tmp_path / "kernels" / KERNEL_DIR / f).read_bytes() == (kd / f).read_bytes(), f
+        assert as_pinned(tmp_path / "kernels" / KERNEL_DIR / f) == pinned(kd / f), f   # builder changes since: tests/kernel_pins.py

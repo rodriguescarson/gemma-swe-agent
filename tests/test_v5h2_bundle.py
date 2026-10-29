@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pytest
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from kernel_pins import as_pinned, pinned  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 SUB = ROOT / "submissions"
 V4H2, V4H2F, V4H6G, V5ALL, V5B = (SUB / n for n in ("v4h2", "v4h2f", "v4h6g", "v5all", "v5b"))
@@ -205,7 +207,7 @@ def test_eval_kernel_matches_the_v5b_recipe(name, tmp_path):
                        cwd=tmp_path, capture_output=True, text=True, timeout=120)
     assert r.returncode == 0, r.stderr[-1500:]
     for f in ("kernel-metadata.json", slug + ".ipynb"):
-        assert (tmp_path / "kernels" / kdir / f).read_bytes() == (kd / f).read_bytes(), f
+        assert as_pinned(tmp_path / "kernels" / kdir / f) == pinned(kd / f), f   # builder changes since: tests/kernel_pins.py
 
 
 def test_eval_kernel_slugs_are_distinct():
