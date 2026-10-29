@@ -9,10 +9,14 @@ Per run directory (eval/kaggle/<cfg>, with results/traces/trace_<id>.json, or a 
 under traces/) it counts
   garbled   read_file calls whose argument keys are not a subset of {filepath, start_line, end_line}
   silent    garbled calls the tool answered with status ok (the range was dropped without an error)
-  ranged    read_file calls that asked for a range (a key that is start_line or end_line once stray quotes are stripped)
-  sed       run_command calls that read lines with `sed -n '<address>p'` (line numbers or a /pattern/ range; `sed -i`
-            edits and `sed s///p` are not reads; awk, head|tail and python one-liners are not counted)
-and the sed share of all range reads, sed / (ranged + sed).
+  ranged    read_file calls that asked for a range: an argument key that is start_line or end_line once everything but
+            letters and underscores is stripped from it (`start_line"`, `"end_line"` and the backslash-escaped
+            `start_line\\"` all count)
+  sed       run_command calls that read lines with `sed -n`, by the rule in is_sed_read(): a print over line numbers, `$`
+            or a range, not an in-place edit, not a search by one pattern, not a filter on a program's output (a pipe
+            from `cat file` is a file read); awk, head|tail and python one-liners are not counted
+and the sed share of all range reads, sed / (ranged + sed). A trace file that is not JSON, not a JSON object or not
+made of step objects is counted as unreadable, never a crash.
 
     python eval/analysis/silent_range_drops.py RUN_DIR [RUN_DIR ...] [--json out.json]
 """
@@ -20,13 +24,52 @@ import argparse, collections, glob, json, os, re
 
 READ_FILE_KEYS = frozenset({'filepath', 'start_line', 'end_line'})
 RANGE_KEYS = frozenset({'start_line', 'end_line'})
-# sed -n [-e] '<address>p' with the script quoted or bare; the script must start with a line number, $ or a /pattern/
-SED_READ = re.compile(r"""\bsed\s+(?:-[A-Za-z-]+\s+)*?-[A-Za-z]*n[A-Za-z]*\s+(?:-e\s+)?"""
-                      r"""(?:'[\d$/][^']*p'|"[\d$/][^"]*p"|[\d$/][^\s'"]*p)(?=\s|$)""")
+# `sed` + its option words + the script (quoted, or one bare word), up to the next blank or the end of the command
+SED_CALL = re.compile(r"""\bsed((?:\s+-[A-Za-z-]\S*)*)\s+('[^']*'|"[^"]*"|[^\s'"-]\S*)(?=\s|$)""")
+# one line or pattern address; a range ends in another address or in +N
+_ADDR = r"(?:\d+|\$|/(?:\\.|[^/\\])*/)"
+_END = rf"(?:{_ADDR}|\+\d+)"
+# a print that reads by position (line number or $, alone or ending a range) or by a range between two addresses
+_READ_CMD = rf"(?:(?:\d+|\$)(?:,{_END})?|{_ADDR},{_END})p"
+# the command just before a pipe into sed, when it only hands over a file's lines (cat or nl, options, then a file)
+PIPE_BREAK = re.compile(r'\|\|?|&&|;|\n')
+FILE_PIPE = re.compile(r'\s*(?:cat|nl)(?:\s+-\S+)*\s+[^\s<>|&;()-]')
+_READ_IN_SCRIPT = re.compile(rf"(?:^|[;\n])\s*{_READ_CMD}\s*(?=[;\n]|$)")
+
+
+def normal_key(k):
+    """An argument key with everything but letters and underscores removed: `start_line"`, `"end_line"` and the
+    backslash-escaped `start_line\\"` all become the key the model meant."""
+    return re.sub(r'[^A-Za-z_]', '', str(k))
 
 
 def is_sed_read(cmd):
-    return bool(SED_READ.search(cmd or ''))
+    """True when a run_command string reads lines of a file with sed. The rule, pinned by the table in
+    tests/test_silent_range_drops.py:
+      - the command is `sed` with -n (or --quiet / --silent) among its options, in any spelling (-n, -ne, -n -e, -En)
+        and without -i / --in-place in any spelling (-i, -ni, -in, -i.bak): an in-place edit is not a read;
+      - the script prints by position or by range: `A,Bp`, `Np`, `$p`, `/pat1/,/pat2/p`, `A,+Np`, also with a quit
+        after it (`A,Bp;Bq`, `A,B{p;q}`). One pattern address alone (`/pat/p`) is a search, and `s/a/b/p` is a
+        substitution; neither is a read;
+      - sed reads a file, not program output: `git log | sed -n '1p'` and `pytest | sed -n '5,9p'` filter what a
+        program printed and are not reads. A pipe from `cat` or `nl` of a file is a read (`cat -n f.py | sed -n
+        '5,9p'` picks lines of f.py); so are `sed -n '5,9p' f | head`, `a && sed ...` and `a || sed ...`."""
+    if not isinstance(cmd, str):
+        return False
+    for m in SED_CALL.finditer(cmd):
+        before = cmd[:m.start()].rstrip()
+        if before.endswith('|') and not before.endswith('||') and not FILE_PIPE.match(re.split(PIPE_BREAK, before[:-1])[-1]):
+            continue
+        opts = m.group(1).split()
+        if any(o.startswith('--in-place') or (not o.startswith('--') and 'i' in o) for o in opts):
+            continue
+        if not any(o in ('--quiet', '--silent') or (not o.startswith('--') and 'n' in o) for o in opts):
+            continue
+        script = m.group(2)
+        script = script[1:-1] if script[0] in '\'"' else script
+        if _READ_IN_SCRIPT.search(re.sub(r'\{\s*p\s*;\s*q\s*;?\s*\}', 'p', script)):
+            return True
+    return False
 
 
 def status_of(observation):
@@ -50,7 +93,7 @@ def scan_trace(d):
             elif name == 'read_file':
                 ks = set(args) if isinstance(args, dict) else set()
                 out['read_file'] += 1
-                out['ranged'] += any(k.strip('"\'`') in RANGE_KEYS for k in ks)
+                out['ranged'] += any(normal_key(k) in RANGE_KEYS for k in ks)
                 extra = ks - READ_FILE_KEYS
                 if extra:
                     out['garbled'] += 1
@@ -66,11 +109,15 @@ def collect(run_dir):
     rows, bad = [], 0
     for p in sorted(paths):
         try:
-            d = json.load(open(p))
-        except (ValueError, OSError):
+            with open(p) as f:
+                d = json.load(f)
+            row = scan_trace(d) if isinstance(d, dict) else None      # valid JSON that is not an object is not a trace
+        except (ValueError, OSError, AttributeError, TypeError):      # not JSON, unreadable, or steps that are not objects
+            row = None
+        if row is None:
             bad += 1
             continue
-        rows.append(dict(run=os.path.basename(p)[len('trace_'):-len('.json')], **scan_trace(d)))
+        rows.append(dict(run=os.path.basename(p)[len('trace_'):-len('.json')], **row))
     return rows, bad
 
 
