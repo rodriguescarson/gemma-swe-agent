@@ -1,6 +1,6 @@
 """submit_at.sh must never double-submit when two machines are armed, must exit 0 only when its tag is on Kaggle, and its
 GPU-overlap guard must work from the day the slot falls in. Chain exit statuses (eval/arm_sub2*.sh) are tested here too."""
-import os, re, signal, subprocess, datetime, pathlib, time
+import json, os, re, shutil, signal, subprocess, sys, datetime, pathlib, time
 
 import pytest
 
@@ -14,13 +14,35 @@ LATE = int(datetime.datetime(2026, 10, 29, 23, 55, tzinfo=UTC).timestamp())     
 def _fake_clock(tmp, now_epoch, sleeps=True):
     """A bin dir for the front of PATH: `date -u +%s` reports now_epoch (every other form of date is the real one), so the
     scripts' day arithmetic is the same at any hour (the guard tests failed from 23:50 to 00:00 UTC while they used the wall
-    clock). sleeps=False also makes `sleep` return at once, for the retry loops (6 x 60 s, 2 x 120 s, 2 x 30 s)."""
+    clock). sleeps=False also makes `sleep` return at once, for the retry loops (6 x 60 s, 2 x 120 s, 2 x 30 s); sleeps=<a path>
+    does that and appends each call's arguments to the file, so a test can pin how long the script waits."""
     b = tmp / "fakebin"; b.mkdir(exist_ok=True)
     (b / "date").write_text(f'#!/bin/bash\n[ "$1 $2" = "-u +%s" ] && {{ echo {now_epoch}; exit 0; }}\nexec /bin/date "$@"\n')
     (b / "date").chmod(0o755)
-    if not sleeps:
-        (b / "sleep").write_text("#!/bin/bash\nexit 0\n"); (b / "sleep").chmod(0o755)
+    if sleeps is not True:
+        record = f'echo "$@" >> {sleeps}\n' if sleeps else ""
+        (b / "sleep").write_text(f"#!/bin/bash\n{record}exit 0\n"); (b / "sleep").chmod(0o755)
     return {"PATH": f"{b}:{os.environ['PATH']}"}
+
+
+def _run_for(args, env, seconds):
+    """Run a script that is expected to still be waiting after `seconds`; True if it finished by itself. A script still running is
+    killed with its whole process group: killing only bash (p.kill()) left its `sleep 600` / `sleep 20` / `sleep 120` behind."""
+    p = subprocess.Popen(args, env=env, start_new_session=True)
+    try:
+        p.wait(timeout=seconds); return True
+    except subprocess.TimeoutExpired:
+        return False
+    finally:
+        if p.poll() is None:
+            os.killpg(p.pid, signal.SIGKILL); p.wait()
+
+
+def test_run_for_leaves_no_orphaned_sleep_behind(tmp_path):
+    # the three tests that stop a waiting script with it used p.kill(): bash died, its `sleep 600` was re-parented to pid 1 and ran on
+    script = tmp_path / "waits.sh"; script.write_text("#!/bin/bash\nsleep 987\n")
+    assert _run_for(["bash", str(script)], dict(os.environ), 1) is False
+    assert subprocess.run(["pgrep", "-f", "^sleep 987$"], capture_output=True).returncode == 1
 
 
 # One fake Kaggle CLI. `submit` registers its -m text as a PENDING row of the listing (like Kaggle), unless submit="fail";
@@ -91,13 +113,7 @@ def test_afternoon_arming_does_not_fire_early(tmp_path):
     past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).strftime("%H%M")
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"))
     env.pop("SUBMIT_TARGET_EPOCH", None)
-    p = subprocess.Popen(["bash", str(SCRIPT), "k", past, "sub9: x"], env=env)
-    try:
-        p.wait(timeout=4); fired = True
-    except subprocess.TimeoutExpired:
-        fired = False
-    finally:
-        p.kill()
+    fired = _run_for(["bash", str(SCRIPT), "k", past, "sub9: x"], env, 4)
     assert not fired and not calls.exists()
     log = (tmp_path / "log.txt").read_text()
     target = int(log.split("target epoch ")[1].split()[0])
@@ -114,10 +130,7 @@ echo "Successfully submitted"
 """)
     fake.chmod(0o755)
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1")
-    p = subprocess.Popen(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env)
-    try: p.wait(timeout=5)
-    except subprocess.TimeoutExpired: pass
-    finally: p.kill()
+    _run_for(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env, 5)
     assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
     assert "not submitting blind" in (tmp_path / "log.txt").read_text()
 
@@ -137,13 +150,7 @@ echo "Successfully submitted"
     # the clock is fixed at noon UTC: with the wall clock this test fell over from 23:50 to 00:00 UTC, when "now" is already past
     # the guard's day end and it submits anyway
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH=str(NOON), **_fake_clock(tmp_path, NOON))
-    p = subprocess.Popen(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env)
-    try:
-        p.wait(timeout=4)
-    except subprocess.TimeoutExpired:
-        pass
-    finally:
-        p.kill()
+    _run_for(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env, 4)
     log = (tmp_path / "log.txt").read_text()
     assert "own GPU kernels busy: carsonrodrigues/g4-l4-v10" in log
     assert not any(l.startswith("competitions submit ") for l in calls.read_text().splitlines())
@@ -303,10 +310,10 @@ def test_guard_day_end_follows_a_target_in_the_future(tmp_path):
 
 # ---- the exit status is the listing's verdict: 0 only when the tag is on Kaggle
 
-def _status_run(tmp, fake, msg="sub9: x", **env_extra):
+def _status_run(tmp, fake, msg="sub9: x", tag=(), **env_extra):
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1",
                FINAL_POLL="0", **_fake_clock(tmp, NOON, sleeps=False), **env_extra)
-    p = subprocess.run(["bash", str(SCRIPT), "k", "0000", msg], env=env, capture_output=True, text=True, timeout=60)
+    p = subprocess.run(["bash", str(SCRIPT), "k", "0000", msg, *tag], env=env, capture_output=True, text=True, timeout=60)
     return p, (tmp / "log.txt").read_text()
 
 
@@ -353,17 +360,93 @@ def test_a_slow_listing_is_waited_for_but_not_forever(tmp_path):
     (tmp_path / "b").mkdir()
     fake2, calls2 = _fake_kaggle(tmp_path / "b", [], lag=3)
     p2, log2 = _status_run(tmp_path / "b", fake2)
-    assert p2.returncode == 1 and len(_submits(calls2)) == 1 and "GAVE UP" in log2     # it submitted once and could not confirm it
+    # it submitted once and could not confirm it: Kaggle printed success, so that is not a give-up (exit 3, not 1)
+    assert p2.returncode == 3 and len(_submits(calls2)) == 1 and "GAVE UP" not in log2
+    assert "SUBMITTED, UNCONFIRMED: sub9: (absent from the final listing) after 1 attempts" in log2
 
 
-# ---- the chains exit with submit_at's status (eval/arm_sub2*.sh logged "submit_at exited $?" and then exited 0)
+def test_the_final_listing_is_polled_every_30_s_by_default(tmp_path):
+    # FINAL_POLL defaults to 30 s: with the sleep deleted or the default 0 the three listings run back to back and the lag tolerance is gone
+    fake, calls = _fake_kaggle(tmp_path, [], lag=2)
+    sleeps = tmp_path / "sleeps.txt"
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1",
+               **_fake_clock(tmp_path, NOON, sleeps=sleeps))
+    env.pop("FINAL_POLL", None); env.pop("FINAL_TRIES", None)
+    p = subprocess.run(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0 and len(_submits(calls)) == 1
+    assert sleeps.read_text().split() == ["30", "30"]               # two hidden listings, one wait after each; the third confirms
 
-CHAINS = sorted((ROOT / "eval").glob("arm_sub2*.sh"))
+
+def test_no_final_listing_wait_when_the_submission_shows_at_once(tmp_path):
+    fake, calls = _fake_kaggle(tmp_path, [])
+    sleeps = tmp_path / "sleeps.txt"
+    env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp_path / "log.txt"), SUBMIT_TARGET_EPOCH="0", SKIP_GPU_GUARD="1",
+               **_fake_clock(tmp_path, NOON, sleeps=sleeps))
+    env.pop("FINAL_POLL", None)
+    p = subprocess.run(["bash", str(SCRIPT), "k", "0000", "sub9: x"], env=env, capture_output=True, text=True, timeout=60)
+    assert p.returncode == 0 and len(_submits(calls)) == 1 and not sleeps.exists()
+
+
+def test_success_printed_but_the_final_listing_unreadable_is_submitted_unconfirmed_exit_3(tmp_path):
+    # the listing works until the submit goes through and then fails for good: the submission went out, so this is not a give-up
+    # (exit 1) and the chain must not log a failure for it; a re-run asks the listing first and never submits blind
+    calls = tmp_path / "calls.txt"; fake = tmp_path / "kaggle"
+    fake.write_text(f"""#!/bin/bash
+echo "$@" >> {calls}
+if [ "$2" = submissions ]; then
+  [ -e {tmp_path}/sent ] && {{ echo ConnectionError >&2; exit 1; }}
+  echo 'ref,fileName,date,description,status'; exit 0
+fi
+if [ "$2" = submit ]; then touch {tmp_path}/sent; echo "Successfully submitted"; exit 0; fi
+""")
+    fake.chmod(0o755)
+    p, log = _status_run(tmp_path, fake)
+    assert p.returncode == 3 and len(_submits(calls)) == 1
+    assert "SUBMITTED, UNCONFIRMED: sub9: (final listing unreadable) after 1 attempts" in log and "GAVE UP" not in log and "is on Kaggle" not in log
+
+
+def test_a_tag_is_matched_as_a_fixed_string_not_a_regex(tmp_path):
+    # "." and "[x]" are regex metacharacters: "sub1.5:" matched the lookalike "sub1x5:" (so the submission was skipped), and "[x] foo:" never
+    # matched itself (so it was submitted twice)
+    cases = [("sub1.5: new", ["sub1x5: older"], 1),            # a lookalike is not the tag: submit
+             ("sub1.5: new", ["sub1.5: staged"], 0),           # the tag itself: already there
+             ("[x] foo: bar", ["x foo: other"], 1), ("[x] foo: bar", ["[x] foo: staged"], 0),
+             ("sub9*: x", ["sub99: y"], 1), ("sub9*: x", ["sub9*: y"], 0)]
+    for n, (msg, existing, expected) in enumerate(cases):
+        d = tmp_path / str(n); d.mkdir()
+        fake, calls = _fake_kaggle(d, existing)
+        p, log = _status_run(d, fake, msg)
+        assert p.returncode == 0 and len(_submits(calls)) == expected, (msg, existing, log)
+
+
+def test_a_message_without_a_colon_is_its_own_tag(tmp_path):
+    # the default tag is the message up to the first colon; with no colon it used to be "<message>:", which no listing row starts with
+    fake, calls = _fake_kaggle(tmp_path, ["plain message"])
+    p, log = _status_run(tmp_path, fake, "plain message")
+    assert p.returncode == 0 and _submits(calls) == [] and "plain message already on Kaggle" in log
+    (tmp_path / "b").mkdir()
+    fake2, calls2 = _fake_kaggle(tmp_path / "b", [])
+    p2, log2 = _status_run(tmp_path / "b", fake2, "plain message")
+    assert p2.returncode == 0 and len(_submits(calls2)) == 1 and "plain message is on Kaggle (final listing)" in log2
+
+
+def test_an_explicit_tag_that_the_listing_cannot_show_is_unconfirmed_not_a_give_up(tmp_path):
+    # the 4th argument is not a prefix of the message, so the listing can never confirm it; Kaggle did accept the submission
+    fake, calls = _fake_kaggle(tmp_path, [])
+    p, log = _status_run(tmp_path, fake, "sub9: x", tag=("other:",))
+    assert p.returncode == 3 and len(_submits(calls)) == 1 and "SUBMITTED, UNCONFIRMED: other: (absent from the final listing)" in log
+
+
+# ---- the chains exit with submit_at's status (eval/arm_sub*.sh logged "submit_at exited $?" and then exited 0)
+
+# Every chain, not a numbered subset: a new arm_sub*.sh that does not capture rc fails here until it does.
+CHAINS = sorted((ROOT / "eval").glob("arm_sub*.sh"))
 
 
 def test_there_are_chains_to_check():
-    assert {c.name for c in CHAINS} >= {"arm_sub20_chain.sh", "arm_sub20_sub21.sh", "arm_sub21_aa.sh", "arm_sub21_chain.sh",
-                                       "arm_sub22_sub23.sh", "arm_sub24_e4b.sh", "arm_sub25_e4b_card.sh", "arm_sub26_edit6.sh", "arm_sub27_ctx.sh"}
+    assert {c.name for c in CHAINS} >= {"arm_sub18_chain.sh", "arm_sub19_chain.sh", "arm_sub19b_chain.sh", "arm_sub20_chain.sh", "arm_sub20_sub21.sh",
+                                       "arm_sub21_aa.sh", "arm_sub21_chain.sh", "arm_sub22_sub23.sh", "arm_sub24_e4b.sh", "arm_sub25_e4b_card.sh",
+                                       "arm_sub26_edit6.sh", "arm_sub27_ctx.sh"}
 
 
 @pytest.mark.parametrize("chain", CHAINS, ids=lambda c: c.name)
@@ -381,16 +464,22 @@ def test_every_chain_captures_and_returns_submit_ats_status(chain):
 
 def _checkout(tmp, chain_text, files):
     """A throwaway checkout for a chain: the chain text with its hard-coded `cd` swapped for the sandbox, stubs for ship.sh
-    (SHIP OK), kaggle_push_wait.sh (COMPLETE, version 3) and submit_at.sh (records its call, exits $SUBMIT_AT_RC), and a kaggle
-    stub whose listing has no PENDING row. Nothing here can reach the real checkout or Kaggle."""
+    (SHIP OK), kaggle_push_wait.sh (COMPLETE, version 3) and submit_at.sh (records its call, exits $SUBMIT_AT_RC, or the next of
+    $SUBMIT_AT_RCS), and a kaggle stub whose listing has no PENDING row. Nothing here can reach the real checkout or Kaggle."""
     real = "/Users/carson/Projects/gemma-swe-agent"
     assert f"cd {real} " in chain_text
     text = chain_text.replace(f"cd {real} ", f"cd {tmp} ")
     assert real not in text
-    (tmp / "scripts").mkdir(parents=True); (tmp / "eval").mkdir(); (tmp / ".venv" / "bin").mkdir(parents=True); (tmp / "sp").mkdir()
+    for d in ("scripts", "eval", ".venv/bin", "sp"):
+        (tmp / d).mkdir(parents=True, exist_ok=True)       # tmp may already be a git clone (the two-submit chains need an origin)
+    text = re.sub(r"\bSP=/private/\S+", f"SP={tmp / 'sp'}", text)       # arm_sub20_sub21 and arm_sub22_sub23 hard-code the scratchpad for the ship logs
+    assert "/private/tmp/claude-501" not in text
     (tmp / "scripts" / "ship.sh").write_text('#!/bin/bash\necho "SHIP OK: kernels/$2"\n')
     (tmp / "scripts" / "kaggle_push_wait.sh").write_text('#!/bin/bash\necho "$1: Kernel version 3 successfully pushed"; echo "$1: COMPLETE"\n')
-    (tmp / "scripts" / "submit_at.sh").write_text(f'#!/bin/bash\necho "$@" >> {tmp / "submit_calls.txt"}\nexit "$SUBMIT_AT_RC"\n')
+    # exit status: SUBMIT_AT_RC for every call, or SUBMIT_AT_RCS="1 0" = the 1st call exits 1, the 2nd exits 0 (a chain with two submits)
+    (tmp / "scripts" / "submit_at.sh").write_text(
+        f'#!/bin/bash\necho "$@" >> {tmp / "submit_calls.txt"}\necho >> {tmp / "submit_n"}\nn=$(wc -l < {tmp / "submit_n"} | tr -d " ")\n'
+        'rcs=(${SUBMIT_AT_RCS:-})\n[ -n "${SUBMIT_AT_RCS:-}" ] && exit "${rcs[$((n - 1))]}"\nexit "$SUBMIT_AT_RC"\n')
     (tmp / ".venv" / "bin" / "kaggle").write_text("#!/bin/bash\necho 'ref,fileName,date,description,status'\n")
     for f in (tmp / "scripts").iterdir():
         f.chmod(0o755)
@@ -447,3 +536,51 @@ def test_the_aa_chain_is_stood_down_only_by_a_v16_chain_whose_submission_landed(
         assert p.returncode == 0, p.stdout + p.stderr
     assert not (landed / "submit_calls.txt").exists()                  # stood down: the v16 chain submitted sub21 itself
     assert len((gave_up / "submit_calls.txt").read_text().splitlines()) == 1      # it had given up: the A/A takes the slot
+
+
+# ---- the two chains with two submits keep the FIRST non-zero submit_at status (a later success must not hide an earlier give-up)
+
+GIT_ENV = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x", "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def _git(cwd, *a):
+    return subprocess.run(["git", *a], cwd=cwd, env=GIT_ENV, capture_output=True, text=True, check=True).stdout
+
+
+def _mac_clone(tmp, steps, baseline):
+    """The Mac's checkout for a two-submit chain: a clone of a bare origin on wip/gemma-agent where the box has pushed an END line
+    and a results.jsonl (the 74 public ids, 30 solved, 100 s each: it passes the gate) for every step and for the baseline, plus the
+    real scripts/box_p4_gate.py."""
+    bare = tmp / "origin.git"; _git(tmp, "init", "-q", "--bare", "-b", "wip/gemma-agent", str(bare))
+    box = tmp / "box"; _git(tmp, "clone", "-q", str(bare), str(box)); _git(box, "checkout", "-q", "-b", "wip/gemma-agent")
+    ids = [l.strip() for l in open(ROOT / "data" / "kaggle_valid_ids.txt") if l.strip()]
+    (box / "docs" / "a6000" / "channel").mkdir(parents=True)
+    (box / "docs" / "a6000" / "channel" / "box_to_mac.md").write_text("".join(f"- x | step=p4_{n} | END done: done=74/74 solved=30\n" for n in steps))
+    for n in (*steps, baseline):
+        d = box / "eval" / "a6000" / "results" / f"p4_{n}"; d.mkdir(parents=True)
+        d.joinpath("results.jsonl").write_text("".join(json.dumps({"id": t, "resolved": i < 30, "secs": 100, "err": None}) + "\n" for i, t in enumerate(ids)))
+    _git(box, "add", "-A"); _git(box, "commit", "-q", "-m", "box"); _git(box, "push", "-q", "-u", "origin", "wip/gemma-agent")
+    mac = tmp / "mac"; _git(tmp, "clone", "-q", "-b", "wip/gemma-agent", str(bare), str(mac))
+    (mac / "scripts").mkdir(); (mac / "data").mkdir()
+    shutil.copy(ROOT / "scripts" / "box_p4_gate.py", mac / "scripts"); shutil.copy(ROOT / "data" / "kaggle_valid_ids.txt", mac / "data")
+    return mac
+
+
+@pytest.mark.parametrize("chain, steps, baseline, tags", [
+    ("arm_sub20_sub21.sh", ["v16"], "v12", ["sub20:", "sub21:"]),
+    ("arm_sub22_sub23.sh", ["v12b6", "v15b"], "v12b", ["sub22:", "sub23:"]),
+])
+@pytest.mark.parametrize("rcs, expected", [("1 0", 1), ("0 4", 4), ("0 0", 0), ("1 4", 1)])
+def test_a_two_submit_chain_exits_with_the_first_non_zero_submit_at_status(tmp_path, chain, steps, baseline, tags, rcs, expected):
+    mac = _mac_clone(tmp_path, steps, baseline)
+    script = _checkout(mac, (ROOT / "eval" / chain).read_text(), {})
+    (mac / ".venv" / "bin" / "python").write_text(f'#!/bin/bash\nexec {sys.executable} "$@"\n'); (mac / ".venv" / "bin" / "python").chmod(0o755)
+    env = dict(GIT_ENV, SUBMIT_AT_RCS=rcs)
+    for var in ("BUNDLES", "NEXT", "MEAN_GATE", "V", "OLD_PID"):
+        env.pop(var, None)
+    p = subprocess.run(["bash", str(script)], env=env, capture_output=True, text=True, timeout=120, cwd=mac)
+    assert p.returncode == expected, p.stdout + p.stderr
+    calls = (mac / "submit_calls.txt").read_text().splitlines()
+    assert [c.split()[-1] for c in calls] == tags, calls              # both submits ran, whatever the first one returned
+    log = (mac / "eval" / (chain[:-3] + ".out")).read_text()
+    assert re.findall(r"submit_at exited (\d+)", log) == rcs.split(), log

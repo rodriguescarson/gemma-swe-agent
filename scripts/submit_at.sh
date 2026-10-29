@@ -4,9 +4,14 @@
 # submission.zip is submitted; 2026-09-29: g4agent-v10 v1 is v10.0, v2 is v10.1, so the version must be explicit)
 # Idempotent across machines: before submitting it asks Kaggle whether a
 # submission whose description starts with <tag> already exists.
-# Exit: 0 = <tag> is on Kaggle (submitted now, or already there); 1 = GAVE UP, <tag> is not in the final listing;
-# 2 = no kaggle binary; 4 = another submission was still scoring at PENDING_DEADLINE_EPOCH.
-KERNEL=$1; AT=$2; MSG=$3; TAG=${4:-${MSG%%:*}:}
+# <tag> defaults to the message up to and including its first colon (the whole message when it has none) and is matched as a
+# fixed string, never a regex: a tag like "sub1.5:" or "[x] foo:" must not match, or miss, a lookalike.
+# Exit: 0 = <tag> is on Kaggle (submitted now, or already there); 1 = GAVE UP, nothing was submitted and <tag> is not in the final
+# listing; 2 = no kaggle binary; 3 = SUBMITTED, UNCONFIRMED: Kaggle printed success for an attempt but the final listing does not show
+# <tag> (unreadable, or still absent after FINAL_TRIES x FINAL_POLL s), so the submission very likely went out; 4 = another submission
+# was still scoring at PENDING_DEADLINE_EPOCH. (Callers that exec this script inherit the codes: decide_or_skip.sh's own exit 3 is SKIPPED.)
+KERNEL=$1; AT=$2; MSG=$3
+case "$MSG" in *:*) TAG=${4:-${MSG%%:*}:} ;; *) TAG=${4:-$MSG} ;; esac
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 LOG=${SUBMIT_LOG:-$HERE/eval/submit_log.txt}
 KAGGLE=${KAGGLE_BIN:-kaggle}
@@ -25,7 +30,7 @@ command -v "$KAGGLE" >/dev/null 2>&1 || { echo "$(date -u) [$(hostname -s)] ABOR
 already() { local out; out=$("$KAGGLE" competitions submissions $COMP -v 2>/dev/null) || return 2
   # header: 'ref,fileName,...' (CLI 2.x) or 'fileName,date,...' (CLI 1.7, no ref column; 2026-10-05 sub11 stalled on it)
   echo "$out" | grep -qE "^(ref,)?fileName," || return 2
-  echo "$out" | grep -q ",\"\?$TAG" && return 0 || return 1; }
+  echo "$out" | grep -qF -e ",$TAG" -e ",\"$TAG" && return 0 || return 1; }
 echo "$(date -u) [$(hostname -s)] armed $KERNEL v${KERNEL_VERSION:-1} for $AT UTC (tag $TAG)" >> "$LOG"
 # Target = the NEXT occurrence of AT (UTC) after arming, as an absolute epoch; a late wake still fires, an afternoon
 # arming never fires early (2026-09-27: an HHMM ">=" check fired at 16:12 for a 00:01 target).
@@ -56,7 +61,7 @@ fi
 # Request"). Wait on the listing while any submission is PENDING (PENDING_POLL s, default 600), up to
 # PENDING_DEADLINE_EPOCH (0 = no deadline); a wait does not use up an attempt.
 pending() { "$KAGGLE" competitions submissions $COMP -v 2>/dev/null | grep -qiE ',(SubmissionStatus\.)?PENDING(,|$)'; }
-POLL_P=${PENDING_POLL:-600}; PDEAD=${PENDING_DEADLINE_EPOCH:-0}; waited=0; i=0
+POLL_P=${PENDING_POLL:-600}; PDEAD=${PENDING_DEADLINE_EPOCH:-0}; waited=0; i=0; sent=0     # sent=1: an attempt printed "success"
 while [ $i -lt 6 ]; do
   already; st=$?
   if [ $st -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG already on Kaggle, skipping" >> "$LOG"; break; fi
@@ -71,7 +76,7 @@ while [ $i -lt 6 ]; do
   i=$((i + 1))
   out=$("$KAGGLE" competitions submit $COMP -k "carsonrodrigues/$KERNEL" -v "${KERNEL_VERSION:-1}" -f submission.zip -m "$MSG" 2>&1 | tr "\n" " ")
   echo "$(date -u) [$(hostname -s)] attempt $i: $out" >> "$LOG"
-  echo "$out" | grep -qi "success" && break
+  echo "$out" | grep -qi "success" && { sent=1; break; }
   sleep 60
 done
 # The verdict is the listing, not the loop: six failed attempts or six unreadable listings used to fall through to exit 0, and the
@@ -86,5 +91,9 @@ while :; do
 done
 "$KAGGLE" competitions submissions $COMP -v 2>&1 | head -2 >> "$LOG"
 if [ $fin -eq 0 ]; then echo "$(date -u) [$(hostname -s)] $TAG is on Kaggle (final listing)" >> "$LOG"; exit 0; fi
-echo "$(date -u) [$(hostname -s)] GAVE UP: $TAG is not on Kaggle ($([ $fin -eq 1 ] && echo 'absent from the final listing' || echo 'final listing unreadable')) after $i attempts" >> "$LOG"
+why=$([ $fin -eq 1 ] && echo 'absent from the final listing' || echo 'final listing unreadable')
+# Kaggle said success but the listing cannot confirm it: not a give-up (the submission went out; a re-run asks the listing first and
+# never submits blind), so it has its own status instead of 1.
+if [ $sent -eq 1 ]; then echo "$(date -u) [$(hostname -s)] SUBMITTED, UNCONFIRMED: $TAG ($why) after $i attempts; Kaggle printed success, check the listing" >> "$LOG"; exit 3; fi
+echo "$(date -u) [$(hostname -s)] GAVE UP: $TAG is not on Kaggle ($why) after $i attempts" >> "$LOG"
 exit 1
