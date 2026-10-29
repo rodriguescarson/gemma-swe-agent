@@ -114,10 +114,12 @@ def test_run_eval_compaction_scale_noeditable(tmp_path, monkeypatch, harness_res
     assert {m: m.install_test_dependencies for m in (ar, vf, cs)} == orig
     assert ev.EvalConfig.__dataclass_fields__["events_compaction_config"].default is None
 
-    # default: compaction on with the README values; budgets untouched
+    # default: compaction on with the scorer's values (HARNESS_README section 7.2: interval 15, the same as the Kaggle kernel
+    # scripts/make_eval_kernel.py; the 25 Sep README said 5 and the pod used it); budgets untouched
     assert RE.main(_argv(tmp_path, "--max-time-minutes", "5", "--timeout-seconds", "120")) == 0
     c = captured["events_compaction_config"]
-    assert (c.compaction_interval, c.overlap_size, c.token_threshold, c.event_retention_size) == (5, 2, 14336, 5)
+    assert (c.compaction_interval, c.overlap_size, c.token_threshold, c.event_retention_size) == (15, 2, 14336, 5)
+    assert RE.COMPACTION == _load("make_eval_kernel").COMPACTION      # the pod and the kernel compact alike
     assert captured["max_time_minutes"] == 5.0 and captured["timeout_seconds"] == 120
     assert ar.install_test_dependencies is RE.faithful_install          # the pod environment stays the default
     assert vf.install_test_dependencies is RE.faithful_install

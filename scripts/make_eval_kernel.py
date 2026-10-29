@@ -8,11 +8,33 @@ Budget (2026-09-29): the four keys come from the bundle's eval_config.yaml, read
 None, max_llm_calls as the turns fallback). CLI flags only override single keys. The kernel reads the bundle's file
 itself with the host's code and stops before vLLM starts if the result differs from the budget printed here.
 
-Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> --ids ids.txt [--oracle | --patches labels.json]
-       [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir]"""
+Tasks (2026-10-29): the competition's tasks.jsonl holds 129 tasks and only the 74 in data/kaggle_valid_ids.txt are graded
+(55 are ungradable even with the gold patch; one garble run spent 3.8 h on them). A non-oracle build therefore defaults
+--ids to that file, resolved from the repository root, and --all-tasks is the only way to run every task. The kernel stops
+before any task runs if one requested id is missing from tasks.jsonl, and each result row keeps the tail of the test output.
+
+Model (2026-10-29): the notebook always serves the 31B weights (MODEL_PATH, the registry aliases and model_sources name
+gemma-4-31b-it-qat-w4a16-ct), whatever the bundle declares, so a bundle that declares the 12B, E4B or E2B would be graded
+with 31B weights under the small model's name. A non-oracle build therefore refuses a bundle that does not declare exactly
+that model, unless --allow-model-mismatch says the 31B run is what is wanted (it then prints a warning; a bundle that declares
+no model or several is refused regardless, as the kernel's own check would stop it). Oracle builds serve no model and are not
+checked.
+
+Timeout (2026-10-29): the installed swegemma 0.2.11 copies timeout_seconds into harness.command_timeout_seconds, which its
+Phase 2 verification also uses as the pytest timeout; it has no separate field. The scorer fixes Phase 2 at 300 s (live
+HARNESS_README 7.1). With timeout_seconds below 300 a test that takes longer fails here and passes there, so kernel grades
+can only err low; the build prints a note when timeout_seconds is not 300.
+
+Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> [--ids ids.txt | --all-tasks] [--oracle | --patches labels.json]
+       [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir] [--allow-model-mismatch]"""
 import argparse, inspect, base64, json, os, re, sys
 
 BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_seconds")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VALID_IDS = os.path.join(REPO_ROOT, "data", "kaggle_valid_ids.txt")        # the 74 graded tasks, the default --ids
+KERNEL_MODEL = "gemma-4-31b-it-qat-w4a16-ct"      # the only weights the notebook serves: CELL_VLLM (MODEL_PATH, the aliases), model_sources
+SCORER_VERIFY_TIMEOUT = 300                       # the scorer's fixed Phase 2 pytest timeout (live HARNESS_README 7.1)
+MODEL_KEY = re.compile(r"^\s*(?:-\s+)?model\s*:\s*(.*)$")
 # The host notebook's defaults when a key is absent (cell 10 of the 2026-09-27 run; HARNESS_README 7.1 agrees).
 HOST_DEFAULTS = {"timeout_seconds": 300, "max_tool_calls": 100, "max_time_minutes": 60.0, "max_turns": None}
 # Settings the host notebook passes (ref/getting_started_20260927, cells 8 and 10); tests/test_make_eval_kernel.py
@@ -105,6 +127,58 @@ def read_budget(bundle, overrides=None, use_yaml=True):
     if overrides and src == "eval_config.yaml":
         src += " + flags " + ",".join(sorted(overrides))
     return budget, src
+
+
+def declared_models(bundle):
+    """The model names a bundle declares: the `model:` keys of its YAML files (agent.yaml and the sub-agents it includes),
+    read with the stdlib. adk_submission's discover_declared_models finds the same set; every bundle in submissions/ has one."""
+    found = set()
+    for root, dirs, fs in os.walk(bundle):
+        dirs[:] = sorted(d for d in dirs if not d.startswith("."))
+        for f in sorted(fs):
+            if not f.endswith((".yaml", ".yml")) or f.startswith("."):
+                continue
+            with open(os.path.join(root, f), encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    m = MODEL_KEY.match(line.rstrip("\n"))
+                    if m:
+                        try:
+                            v = _scalar(m.group(1))
+                        except ValueError:
+                            v = m.group(1).strip()
+                        if v:
+                            found.add(str(v))
+    return found
+
+
+def check_kernel_model(bundle, allow_mismatch=False):
+    """Refuse (SystemExit) a bundle that does not declare exactly KERNEL_MODEL: the notebook would serve the 31B weights
+    under whatever name it declares. allow_mismatch turns that refusal into a warning, but not for a bundle that declares no
+    model or several, which the kernel's own declared-model check (exactly one) stops anyway."""
+    declared = sorted(declared_models(bundle))
+    if declared == [KERNEL_MODEL]:
+        return
+    if len(declared) != 1:
+        raise SystemExit("make_eval_kernel: %s declares %s; the kernel needs exactly one declared model (%s)"
+                         % (bundle, ", ".join(declared) or "no model", KERNEL_MODEL))
+    msg = ("%s declares %s, but this notebook always serves %s (MODEL_PATH, model_sources and the model registry aliases), "
+           "so it would be evaluated with the 31B weights under that name." % (bundle, declared[0], KERNEL_MODEL))
+    if not allow_mismatch:
+        raise SystemExit("make_eval_kernel: " + msg + " Pass --allow-model-mismatch if a 31B run of this bundle is what you want.")
+    print("make_eval_kernel: WARNING: " + msg, file=sys.stderr)
+
+
+def verification_timeout_note(timeout_seconds):
+    """A one-line build note when the kernel's Phase 2 pytest timeout (swegemma 0.2.11 reuses timeout_seconds, no separate
+    field) differs from the scorer's fixed 300 s, else None."""
+    if timeout_seconds == SCORER_VERIFY_TIMEOUT:
+        return None
+    lower = timeout_seconds < SCORER_VERIFY_TIMEOUT
+    return ("note: Phase 2 verification here uses timeout_seconds=%d as its pytest timeout (swegemma 0.2.11 has no separate field); "
+            "the scorer fixes it at %d s, so a test that takes %d-%d s %s here and %s there: kernel grades can only err %s."
+            % (timeout_seconds, SCORER_VERIFY_TIMEOUT, min(timeout_seconds, SCORER_VERIFY_TIMEOUT),
+               max(timeout_seconds, SCORER_VERIFY_TIMEOUT), "fails" if lower else "passes", "passes" if lower else "fails",
+               "low" if lower else "high"))
 
 
 def bundle_files(bundle):
@@ -204,8 +278,10 @@ assert BUDGET == EXPECTED_BUDGET, ('budget differs from the builder', BUDGET, EX
 CELL_DATA_TAIL = r'''
 from swegemma.models import load_tasks
 tasks = load_tasks(DATA_DIR / 'tasks.jsonl')
-if IDS: tasks = [t for t in tasks if t.instance_id in set(IDS)]
-print(len(tasks), 'tasks', 'ORACLE' if ORACLE else 'AGENT', BUDGET)
+if IDS:
+    tasks = [t for t in tasks if t.instance_id in set(IDS)]
+    assert len(tasks) == len(set(IDS)), ('requested ids missing from tasks.jsonl', sorted(set(IDS) - {t.instance_id for t in tasks})[:10])
+print(len(tasks), 'tasks', ('of %d requested ids' % len(set(IDS))) if IDS else '(no id filter)', 'ORACLE' if ORACLE else 'AGENT', BUDGET)
 '''
 
 CELL_VLLM = r'''
@@ -260,6 +336,10 @@ def run_sync(fn):
         with concurrent.futures.ThreadPoolExecutor(1) as pool: return pool.submit(lambda: asyncio.run(fn())).result()
     return asyncio.run(fn())
 limits, gen = build_submission_limits()
+# Phase 2 (swegemma verification.py) runs pytest with config.harness.command_timeout_seconds, which EvalConfig copies from
+# timeout_seconds (**BUDGET below); swegemma 0.2.11 has no separate verification timeout. The scorer fixes Phase 2 at 300 s
+# (HARNESS_README 7.1), so with timeout_seconds < 300 this kernel fails a test that runs longer than timeout_seconds but under
+# 300 s, which the scorer passes: kernel grades can only err low on those.
 ec = EvalConfig(tasks_path=DATA_DIR / 'tasks.jsonl', snapshots_dir=DATA_DIR / 'snapshots', results_dir=W / 'results',
     submission_dir=AGENT_DIR, models=models or _fallback_registry(), sandbox='subprocess', limits=limits,
     generation_constraints=gen, adapter_manifest=adapters,
@@ -281,7 +361,7 @@ for cfg, pmap in RUNS:
         try:
             r = run_sync(lambda: ev.evaluate_task(task=t, task_index=i, total_tasks=len(run_tasks)))
             row = dict(cfg=cfg, id=t.instance_id, resolved=bool(r.resolved), exit=r.test_exit_code, calls=r.tool_calls, secs=round(time.time() - s, 1),
-                       err=(str(r.error)[:300] if r.error else None), patch=r.agent_patch or '')
+                       err=(str(r.error)[:300] if r.error else None), patch=r.agent_patch or '', test_tail=(r.test_output or '')[-2500:])
         except Exception as e:
             row = dict(cfg=cfg, id=t.instance_id, resolved=False, err='EXC ' + repr(e)[:300], secs=round(time.time() - s, 1))
         out.write(json.dumps(row) + '\n'); out.flush()
@@ -460,8 +540,12 @@ for rel, b in FILES.items():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("bundle"); ap.add_argument("slug"); ap.add_argument("--ids")
+    ap.add_argument("bundle"); ap.add_argument("slug")
+    ap.add_argument("--ids", help="file of task ids to run (default for a non-oracle build: data/kaggle_valid_ids.txt)")
+    ap.add_argument("--all-tasks", action="store_true", help="run every task in tasks.jsonl (129, of which 55 cannot be graded)")
     ap.add_argument("--oracle", action="store_true")
+    ap.add_argument("--allow-model-mismatch", action="store_true",
+                    help="build although the bundle does not declare %s (the notebook serves that model's weights regardless)" % KERNEL_MODEL)
     ap.add_argument("--patches", help="rescore agent patches: json list of {task,cfg,patch} (CPU, Kaggle env)")
     ap.add_argument("--helper-check", help="skill scripts dir to test for sandbox reachability on the Kaggle image (CPU)")
     ap.add_argument("--probe", choices=["lora"], help="lora: run the G-A adapter probe (docs/v11/GA_PROBE.md) before the agent smoke")
@@ -488,13 +572,21 @@ def main(argv=None):
             for r in json.load(f):
                 if r["patch"].strip():
                     patches.setdefault(r["cfg"], {})[r["task"]] = r["patch"]
+    if not a.oracle:
+        check_kernel_model(a.bundle, a.allow_model_mismatch)
     files = bundle_files(a.bundle)
     if a.adapters_dataset:
         files = {k: v for k, v in files.items() if not k.endswith(".safetensors")}
-    ids = []
-    if a.ids:
-        with open(a.ids) as f:
+    if a.all_tasks and a.ids:
+        raise SystemExit("make_eval_kernel: --all-tasks and --ids are exclusive")
+    ids, ids_file = [], a.ids or (None if a.all_tasks or a.oracle else VALID_IDS)
+    if ids_file:
+        if not os.path.isfile(ids_file):
+            raise SystemExit("make_eval_kernel: ids file %s not found (pass --ids FILE, or --all-tasks to run every task)" % ids_file)
+        with open(ids_file) as f:
             ids = [l.strip() for l in f if l.strip()]
+        if not ids:       # an empty IDS list means "no filter" in the kernel, so it would run all 129 tasks
+            raise SystemExit("make_eval_kernel: %s lists no task ids (--all-tasks runs every task)" % ids_file)
     hb = None
     if a.helper_check:
         hb = {}
@@ -515,7 +607,7 @@ def main(argv=None):
             "is_private": True, "enable_gpu": not a.oracle, "enable_tpu": False, "enable_internet": False,
             "dataset_sources": ["metric/gemma-4-developer-agent-wheelhouse"] + ([a.adapters_dataset] if a.adapters_dataset else []),
             "competition_sources": ["gemma-4-developer-agent"],
-            "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/gemma-4-31b-it-qat-w4a16-ct/2"]}
+            "kernel_sources": [], "model_sources": [] if a.oracle else ["google/gemma-4/Other/%s/2" % KERNEL_MODEL]}
     if not a.oracle:
         meta["machine_shape"] = "NvidiaL4"
     if a.pin:
@@ -523,6 +615,9 @@ def main(argv=None):
     with open(os.path.join(kd, "kernel-metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)
     print(kd, len(files), "files", len(ids) or "all", "tasks", "budget", json.dumps(budget, sort_keys=True), "from", src)
+    note = verification_timeout_note(budget["timeout_seconds"])
+    if note:
+        print(note)
     return 0
 
 

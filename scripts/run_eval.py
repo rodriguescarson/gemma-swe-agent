@@ -7,8 +7,9 @@ pip-installs /workspace plus its test requirements from the competition wheels, 
 Usage: python scripts/run_eval.py [--oracle] eval <swegemma eval args>
 
 Faithfulness switches (SPEC section 10.1, R115); every default leaves other callers of swegemma untouched:
-  G4_COMPACTION   default 1: EvalConfig gets EventsCompactionConfig(compaction_interval=5, overlap_size=2,
-                  token_threshold=14336, event_retention_size=5), the organiser README value (HARNESS_README 553-561).
+  G4_COMPACTION   default 1: EvalConfig gets EventsCompactionConfig(compaction_interval=15, overlap_size=2,
+                  token_threshold=14336, event_retention_size=5), the live organiser README value (HARNESS_README section
+                  7.2; the 25 Sep copy said interval 5) and the one scripts/make_eval_kernel.py COMPACTION uses on Kaggle.
                   Pod races never compacted before this (config_space finding 6). 0 disables it.
   G4_L4_SCALE=s   divides --max-time-minutes and --timeout-seconds by s (H100 -> L4 wall ratio, time_model 6) and
                   writes s to /tmp/swe/clock_scale in every AGENT sandbox (the command text is rewritten by the
@@ -25,7 +26,9 @@ import sys
 
 log = logging.getLogger("run_eval")
 
-COMPACTION = {"compaction_interval": 5, "overlap_size": 2, "token_threshold": 14336, "event_retention_size": 5}
+# The scorer's values, HARNESS_README section 7.2 (compaction_interval 15; the 25 Sep README said 5) and the host notebook;
+# tests/test_v10_runner.py pins them equal to scripts/make_eval_kernel.py COMPACTION.
+COMPACTION = {"compaction_interval": 15, "overlap_size": 2, "token_threshold": 14336, "event_retention_size": 5}
 
 SETUP_HEAD = r'''
 set -e
