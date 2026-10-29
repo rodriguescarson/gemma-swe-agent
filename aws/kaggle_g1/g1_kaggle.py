@@ -44,6 +44,7 @@ W = Path(E("G1_W", "/kaggle/working"))
 ROOT = Path(E("G1_ROOT", "/root/g4"))           # the code archive; not under /tmp, /workspace, /usr/local/bin or /wheels
 H = Path(E("G1_H", "/root/h"))                  # p2_race's /root/h: G4_WHEELHOUSE = H/wheels must avoid those prefixes too
 SCRATCH = Path(E("G1_SCRATCH", "/root/g1_scratch"))
+SBX = Path(E("G1_SBX", "/tmp"))                 # per-task sandboxes g1_sbx_{gold|run}_<task>, removed when the task ends (one shared root lets two runs delete each other's)
 INPUT = Path(E("G1_INPUT", "/kaggle/input"))
 ARM = "g1_v12b_t20"
 VLLM_VERSION = E("G1_VLLM", "0.19.1")
@@ -355,7 +356,7 @@ def run_tasks(py, bundle, flags, ids, out, port, conc, oracle=False, per_task_ti
                 if idx[0] >= len(todo):
                     return
                 t = todo[idx[0]]; idx[0] += 1
-            sbx = Path(f"/tmp/g1_sbx_{'gold' if oracle else 'run'}_{t}"); sbx.mkdir(parents=True, exist_ok=True)
+            sbx = SBX / f"g1_sbx_{'gold' if oracle else 'run'}_{t}"; sbx.mkdir(parents=True, exist_ok=True)
             res = out / "items" / ARM / t
             t0 = time.time(); rc = None
             try:
