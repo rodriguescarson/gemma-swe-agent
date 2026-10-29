@@ -18,8 +18,9 @@ def _fake_clock(tmp, now_epoch):
     return {"PATH": f"{b}:{os.environ['PATH']}"}
 
 
-def _run(tmp, status, rows, now=None):
-    """status: one KernelWorkerStatus name for every read, or a list consumed one per read (the last one repeats). now: a fixed UTC epoch."""
+def _run(tmp, status, rows, now=None, submit_at_rc=None):
+    """status: one KernelWorkerStatus name for every read, or a list consumed one per read (the last one repeats). now: a fixed UTC epoch.
+    submit_at_rc: replace submit_at.sh with a stub that exits with it (the script execs it, so it must be the script's own status)."""
     (tmp / "res.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     seq = [status] if isinstance(status, str) else list(status)
     (tmp / "statuses").write_text("\n".join(seq) + "\n")
@@ -43,12 +44,14 @@ echo "Successfully submitted"
 """)
     fake.chmod(0o755)
     (tmp / "subs").write_text("")     # a submission shows up in the listing, as on Kaggle: submit_at.sh exits 0 only when it can see its tag
-    (tmp / "submit_at.sh").write_text((ROOT / "scripts/submit_at.sh").read_text())
+    (tmp / "submit_at.sh").write_text((ROOT / "scripts/submit_at.sh").read_text() if submit_at_rc is None else
+                                     f'#!/bin/bash\necho "STUB $@" >> {tmp}/stub_calls.txt\nexit {submit_at_rc}\n')
     script = tmp / "decide_submit.sh"; script.write_text(SCRIPT.read_text())
     env = dict(os.environ, KAGGLE_BIN=str(fake), SUBMIT_LOG=str(tmp / "log.txt"), SUBMIT_TARGET_EPOCH="0", DECIDE_OUT=str(tmp / "out"),
                **(_fake_clock(tmp, now) if now else {}))
-    subprocess.run(["bash", str(script), "g4-l4-v10-1", "g4agent-v10", "g4agent-sub3", "0000", "29", "sub6: v10.1", "sub6: v4"],
-                   env=env, timeout=60, check=True)
+    p = subprocess.run(["bash", str(script), "g4-l4-v10-1", "g4agent-v10", "g4agent-sub3", "0000", "29", "sub6: v10.1", "sub6: v4"],
+                       env=env, timeout=60)
+    assert p.returncode == (submit_at_rc or 0), p.stdout + p.stderr
     subs = [l for l in calls.read_text().splitlines() if l.startswith("competitions submit ")]
     return subs, (tmp / "log.txt").read_text()
 
@@ -93,3 +96,11 @@ def test_the_eval_wait_ends_fifteen_minutes_before_the_end_of_the_utc_day(tmp_pa
     subs, log = _run(tmp_path, ["RUNNING"], rows(40), now=LATE)
     assert "waiting for eval kernel" not in log and "eval status KernelWorkerStatus.RUNNING" in log
     assert len(subs) == 1 and "g4agent-sub3" in subs[0]
+
+
+@pytest.mark.parametrize("submit_rc", [1, 3, 4])
+def test_the_script_exits_with_submit_ats_status(tmp_path, submit_rc):
+    # exec: a give-up (1), an unconfirmed submission (3) or a scoring submission at the deadline (4) is the chain's status, never 0
+    subs, log = _run(tmp_path, "COMPLETE", rows(30), submit_at_rc=submit_rc)
+    stub = (tmp_path / "stub_calls.txt").read_text().splitlines()
+    assert len(stub) == 1 and stub[0].startswith("STUB g4agent-v10 0000 sub6: v10.1")

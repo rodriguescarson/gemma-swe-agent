@@ -75,6 +75,19 @@ def test_pass_submits_the_candidate_with_the_message_and_version(tmp_path):
     assert "decision: PASS 31 74 0 8880" in log and "SUBMIT g4agent-v5h2-think at=0000 msg=sub13: test version=1" in log, log
 
 
+def test_a_failing_submit_at_is_the_scripts_exit_status_not_skipped(tmp_path):
+    # PASS execs submit_at.sh: its give-up (exit 1) must come out as 1, not 0 and not the SKIPPED status 3
+    sdir, kaggle = harness(tmp_path, ["KernelWorkerStatus.COMPLETE"], rows(31))
+    (sdir / "submit_at.sh").write_text('#!/bin/bash\necho "SUBMIT $1 at=$2" >> "$SUBMIT_LOG"\nexit 1\n')
+    log = tmp_path / "log.txt"
+    e = dict(os.environ, KAGGLE_BIN=str(kaggle), SUBMIT_LOG=str(log), DECIDE_OUT=str(tmp_path / "out"), SUBMIT_TARGET_EPOCH="0",
+             DECIDE_POLL_S="0", KERNEL_VERSION="1", **fake_clock(tmp_path))
+    p = subprocess.run(["bash", str(sdir / "decide_or_skip.sh"), "g4-eval74-v4", "g4agent-v5h2-think", "0001", "29", "sub13: test"],
+                       capture_output=True, text=True, env=e, timeout=60)
+    text = log.read_text()
+    assert p.returncode == 1 and "decision: PASS 31 74 0" in text and "SUBMIT g4agent-v5h2-think at=0000" in text and "SKIPPED" not in text, text
+
+
 def test_too_few_solved_skips_the_slot(tmp_path):
     rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], rows(28))
     assert rc == 3 and "decision: FAIL 28 74 0" in log and "SKIPPED: slot left unused" in log and "SUBMIT" not in log, log
