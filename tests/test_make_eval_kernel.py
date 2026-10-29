@@ -5,8 +5,12 @@ Regressions this pins:
   180), while the host notebook reads the bundle's eval_config.yaml (research/org_update_0928.md 2.1 and 2.2).
 - The kernel passed default_chat_template_kwargs={'enable_thinking': True}, which the host removed in its 2026-09-27
   19:50 UTC run (ref/getting_started_20260927 is that run's notebook).
+- A build without --ids ran every task in the competition's tasks.jsonl (129, of which 55 are ungradable even with the gold
+  patch); a garble run spent 3.8 h on them. Non-oracle builds now default --ids to data/kaggle_valid_ids.txt (74 ids),
+  --all-tasks is the only way to run everything, the kernel asserts every requested id was found, and failed grades keep
+  the tail of their test output (2026-10-29).
 """
-import ast, importlib.util, json, pathlib, subprocess, sys, time
+import ast, importlib.util, json, pathlib, subprocess, sys, time, types
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -351,3 +355,94 @@ def test_helper_check_probes_view_py_with_a_repeat(tmp_path):
           str(ROOT / "submissions" / "v4h6g" / "skills" / "swe-tools" / "scripts"))
     cell = cells(tmp_path, "hc6")[1]
     assert cell.count("python3 /tmp/swe/view.py pkg/mod.py 1 2") >= 2 and "ALREADY SHOWN" in cell
+
+
+# ------------------------------------------------------------------------------------------------------ task selection
+def ids_of(tmp_path, slug):
+    return ns_value(cells(tmp_path, slug)[1], "IDS")
+
+
+def test_default_build_embeds_the_74_valid_ids_from_any_cwd(tmp_path):
+    """No --ids: the 74 graded ids, read from the repository's data/ (build() runs with cwd=tmp_path, which has none)."""
+    want = IDS.read_text().split()
+    assert len(want) == 74
+    r = build(tmp_path, ROOT / "submissions" / "v10", "t-default")
+    assert ids_of(tmp_path, "t-default") == want
+    assert " 74 tasks " in r.stdout
+
+
+def test_all_tasks_flag_embeds_no_id_filter(tmp_path):
+    r = build(tmp_path, ROOT / "submissions" / "v10", "t-all", "--all-tasks")
+    assert ids_of(tmp_path, "t-all") == [] and " all tasks " in r.stdout
+
+
+def test_explicit_ids_win_over_the_default(tmp_path):
+    ids = tmp_path / "ids.txt"; ids.write_text("rich_3006\n\nrich_3067\n")
+    build(tmp_path, ROOT / "submissions" / "v10", "t-two", "--ids", str(ids))
+    assert ids_of(tmp_path, "t-two") == ["rich_3006", "rich_3067"]
+
+
+def test_oracle_builds_keep_running_every_task_without_ids(tmp_path):
+    """oracle_all grades the gold patch of every task in tasks.jsonl; only agent builds default to the 74."""
+    build(tmp_path, ROOT / "submissions" / "v10", "t-oracle", "--oracle")
+    assert ids_of(tmp_path, "t-oracle") == []
+    build(tmp_path, ROOT / "submissions" / "v10", "t-oracle74", "--oracle", "--ids", str(IDS))
+    assert len(ids_of(tmp_path, "t-oracle74")) == 74
+
+
+def test_all_tasks_and_ids_are_exclusive(tmp_path):
+    r = build(tmp_path, ROOT / "submissions" / "v10", "t-both", "--all-tasks", "--ids", str(IDS), check=False)
+    assert r.returncode != 0 and "--all-tasks and --ids are exclusive" in r.stderr
+    assert not (tmp_path / "kernels" / "t-both").exists()
+
+
+def test_a_missing_or_empty_ids_file_stops_the_build_instead_of_running_everything(tmp_path):
+    """An empty IDS list is 'no filter' in the kernel, so an empty file would silently run all 129 tasks."""
+    r = build(tmp_path, ROOT / "submissions" / "v10", "t-nofile", "--ids", str(tmp_path / "nope.txt"), check=False)
+    assert r.returncode != 0 and "not found" in r.stderr and "--all-tasks" in r.stderr
+    empty = tmp_path / "empty.txt"; empty.write_text("\n \n")
+    r = build(tmp_path, ROOT / "submissions" / "v10", "t-empty", "--ids", str(empty), check=False)
+    assert r.returncode != 0 and "lists no task ids" in r.stderr
+    assert not (tmp_path / "kernels" / "t-nofile").exists() and not (tmp_path / "kernels" / "t-empty").exists()
+
+
+def _run_tasks_cell(src, ids, available, monkeypatch, capsys):
+    """Execute the data cell's task-loading tail against a fake swegemma.models.load_tasks returning `available`."""
+    fake = types.ModuleType("swegemma.models")
+    fake.load_tasks = lambda path: [types.SimpleNamespace(instance_id=i) for i in available]
+    monkeypatch.setitem(sys.modules, "swegemma", types.ModuleType("swegemma"))
+    monkeypatch.setitem(sys.modules, "swegemma.models", fake)
+    body = "from swegemma.models import load_tasks" + src.split("\nfrom swegemma.models import load_tasks", 1)[1]
+    ns = {"DATA_DIR": pathlib.Path("/none"), "IDS": ids, "ORACLE": False, "BUDGET": {"max_turns": 1}}
+    exec(compile(body, "cell", "exec"), ns)
+    return ns["tasks"], capsys.readouterr().out
+
+
+def test_generated_cell_asserts_every_requested_id_was_found_and_prints_the_count(tmp_path, monkeypatch, capsys):
+    build(tmp_path, ROOT / "submissions" / "v10", "t-assert")
+    src = cells(tmp_path, "t-assert")[1]
+    assert "assert len(tasks) == len(set(IDS))" in src
+    available = ["a", "b", "c", "d"]
+    tasks, out = _run_tasks_cell(src, ["a", "c"], available, monkeypatch, capsys)
+    assert [t.instance_id for t in tasks] == ["a", "c"] and "2 tasks of 2 requested ids" in out
+    tasks, out = _run_tasks_cell(src, ["a", "a", "c"], available, monkeypatch, capsys)       # a repeated id is one task
+    assert len(tasks) == 2 and "2 tasks of 2 requested ids" in out
+    with pytest.raises(AssertionError, match="requested ids missing from tasks.jsonl") as e:
+        _run_tasks_cell(src, ["a", "zz_1", "yy_2"], available, monkeypatch, capsys)
+    assert "yy_2" in str(e.value) and "zz_1" in str(e.value)
+    tasks, out = _run_tasks_cell(src, [], available, monkeypatch, capsys)                    # --all-tasks: no filter
+    assert len(tasks) == 4 and "4 tasks (no id filter)" in out
+
+
+def test_result_rows_keep_the_last_2500_characters_of_the_test_output(tmp_path):
+    """Failed grades could not be diagnosed: err is empty in 54 of 55 failing gold rows, and the test output was dropped."""
+    build(tmp_path, ROOT / "submissions" / "v10", "t-tail")
+    run_cell = next(c for c in cells(tmp_path, "t-tail") if "evaluate_task(" in c)
+    exprs = [kw.value for node in ast.walk(ast.parse(run_cell)) if isinstance(node, ast.Call)
+             and getattr(node.func, "id", None) == "dict" for kw in node.keywords if kw.arg == "test_tail"]
+    assert len(exprs) == 1
+    tail = eval(compile(ast.Expression(exprs[0]), "cell", "eval"),
+                {"r": types.SimpleNamespace(test_output="x" * 3000 + "FAILED tests/test_a.py::test_b - AssertionError")})
+    assert len(tail) == 2500 and tail.endswith("FAILED tests/test_a.py::test_b - AssertionError") and set(tail[:10]) == {"x"}
+    assert eval(compile(ast.Expression(exprs[0]), "cell", "eval"), {"r": types.SimpleNamespace(test_output=None)}) == ""
+    assert eval(compile(ast.Expression(exprs[0]), "cell", "eval"), {"r": types.SimpleNamespace(test_output="short")}) == "short"

@@ -8,11 +8,18 @@ Budget (2026-09-29): the four keys come from the bundle's eval_config.yaml, read
 None, max_llm_calls as the turns fallback). CLI flags only override single keys. The kernel reads the bundle's file
 itself with the host's code and stops before vLLM starts if the result differs from the budget printed here.
 
-Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> --ids ids.txt [--oracle | --patches labels.json]
+Tasks (2026-10-29): the competition's tasks.jsonl holds 129 tasks and only the 74 in data/kaggle_valid_ids.txt are graded
+(55 are ungradable even with the gold patch; one garble run spent 3.8 h on them). A non-oracle build therefore defaults
+--ids to that file, resolved from the repository root, and --all-tasks is the only way to run every task. The kernel stops
+before any task runs if one requested id is missing from tasks.jsonl, and each result row keeps the tail of the test output.
+
+Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> [--ids ids.txt | --all-tasks] [--oracle | --patches labels.json]
        [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir]"""
 import argparse, inspect, base64, json, os, re, sys
 
 BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_seconds")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+VALID_IDS = os.path.join(REPO_ROOT, "data", "kaggle_valid_ids.txt")        # the 74 graded tasks, the default --ids
 # The host notebook's defaults when a key is absent (cell 10 of the 2026-09-27 run; HARNESS_README 7.1 agrees).
 HOST_DEFAULTS = {"timeout_seconds": 300, "max_tool_calls": 100, "max_time_minutes": 60.0, "max_turns": None}
 # Settings the host notebook passes (ref/getting_started_20260927, cells 8 and 10); tests/test_make_eval_kernel.py
@@ -204,8 +211,10 @@ assert BUDGET == EXPECTED_BUDGET, ('budget differs from the builder', BUDGET, EX
 CELL_DATA_TAIL = r'''
 from swegemma.models import load_tasks
 tasks = load_tasks(DATA_DIR / 'tasks.jsonl')
-if IDS: tasks = [t for t in tasks if t.instance_id in set(IDS)]
-print(len(tasks), 'tasks', 'ORACLE' if ORACLE else 'AGENT', BUDGET)
+if IDS:
+    tasks = [t for t in tasks if t.instance_id in set(IDS)]
+    assert len(tasks) == len(set(IDS)), ('requested ids missing from tasks.jsonl', sorted(set(IDS) - {t.instance_id for t in tasks})[:10])
+print(len(tasks), 'tasks', ('of %d requested ids' % len(set(IDS))) if IDS else '(no id filter)', 'ORACLE' if ORACLE else 'AGENT', BUDGET)
 '''
 
 CELL_VLLM = r'''
@@ -281,7 +290,7 @@ for cfg, pmap in RUNS:
         try:
             r = run_sync(lambda: ev.evaluate_task(task=t, task_index=i, total_tasks=len(run_tasks)))
             row = dict(cfg=cfg, id=t.instance_id, resolved=bool(r.resolved), exit=r.test_exit_code, calls=r.tool_calls, secs=round(time.time() - s, 1),
-                       err=(str(r.error)[:300] if r.error else None), patch=r.agent_patch or '')
+                       err=(str(r.error)[:300] if r.error else None), patch=r.agent_patch or '', test_tail=(r.test_output or '')[-2500:])
         except Exception as e:
             row = dict(cfg=cfg, id=t.instance_id, resolved=False, err='EXC ' + repr(e)[:300], secs=round(time.time() - s, 1))
         out.write(json.dumps(row) + '\n'); out.flush()
@@ -460,7 +469,9 @@ for rel, b in FILES.items():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("bundle"); ap.add_argument("slug"); ap.add_argument("--ids")
+    ap.add_argument("bundle"); ap.add_argument("slug")
+    ap.add_argument("--ids", help="file of task ids to run (default for a non-oracle build: data/kaggle_valid_ids.txt)")
+    ap.add_argument("--all-tasks", action="store_true", help="run every task in tasks.jsonl (129, of which 55 cannot be graded)")
     ap.add_argument("--oracle", action="store_true")
     ap.add_argument("--patches", help="rescore agent patches: json list of {task,cfg,patch} (CPU, Kaggle env)")
     ap.add_argument("--helper-check", help="skill scripts dir to test for sandbox reachability on the Kaggle image (CPU)")
@@ -491,10 +502,16 @@ def main(argv=None):
     files = bundle_files(a.bundle)
     if a.adapters_dataset:
         files = {k: v for k, v in files.items() if not k.endswith(".safetensors")}
-    ids = []
-    if a.ids:
-        with open(a.ids) as f:
+    if a.all_tasks and a.ids:
+        raise SystemExit("make_eval_kernel: --all-tasks and --ids are exclusive")
+    ids, ids_file = [], a.ids or (None if a.all_tasks or a.oracle else VALID_IDS)
+    if ids_file:
+        if not os.path.isfile(ids_file):
+            raise SystemExit("make_eval_kernel: ids file %s not found (pass --ids FILE, or --all-tasks to run every task)" % ids_file)
+        with open(ids_file) as f:
             ids = [l.strip() for l in f if l.strip()]
+        if not ids:       # an empty IDS list means "no filter" in the kernel, so it would run all 129 tasks
+            raise SystemExit("make_eval_kernel: %s lists no task ids (--all-tasks runs every task)" % ids_file)
     hb = None
     if a.helper_check:
         hb = {}
