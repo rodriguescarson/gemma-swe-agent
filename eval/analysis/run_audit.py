@@ -21,6 +21,8 @@ MARK = 'mandatory input parameters are not present'
 TEST_PATH = re.compile(r'(^|/)(tests?/|test_[^/]*\.py$|[^/]*_test\.py$|conftest\.py$)')
 SAFE_PATH = re.compile(r'[\w.+@/-]+')
 DIFF_FILE = re.compile(r'^diff --git a/\S+ b/(\S+)$', re.M)
+PLUS_FILE = re.compile(r'^\+\+\+ b/(\S+)', re.M)      # a patch without 'diff --git' headers names its files only here
+SANDBOX_ROOT = re.compile(r'^/workspace/+')               # the repository root inside the sandbox
 HELPER_EDIT = re.compile(r'(?:^|[\s;&|(])python3?\s+(?:\S*/)?edit\.py\s+(\S+)')   # the swe-tools edit helper: edit.py <path> <<EOF
 WHOLE_SUITE = re.compile(r'pytest(\s+-{1,2}[\w=-]+)*\s*(\||;|&|$)')
 SWALLOWED = re.compile(r'<\|tool_call>|\bcall:(run_command|read_file|edit_file|write_file|submit_patch|get_status)\{')
@@ -30,18 +32,26 @@ ERRS = [('old_string not found', 'edit_miss'), ('occurs', 'edit_ambiguous'), ('t
 
 
 def is_src_path(p):
-    """A non-test source file inside the repository: a relative path (an absolute one such as /tmp/repro.py is outside it)
-    with a directory part, so root-level scripts (repro.py, reproduce_issue.py, module_a.py: scratch files in the benchmark's
-    package repos, which keep their code under fastapi/ and rich/) and config files do not count, and not under tests."""
-    p = str(p or '').strip()
+    """A non-test source file inside the repository: a relative path (or one under the sandbox root /workspace/; any other
+    absolute path such as /tmp/repro.py is outside the repository) with a directory part, so root-level scripts (repro.py,
+    reproduce_issue.py, module_a.py: scratch files in the benchmark's package repos, which keep their code under fastapi/
+    and rich/) and config files do not count, and not under tests."""
+    p = SANDBOX_ROOT.sub('', str(p or '').strip())
     if not SAFE_PATH.fullmatch(p) or p.startswith('/'):       # empty, absolute, or a parser-garbled path (backticks, spaces)
         return False
     p = posixpath.normpath(p)
     return '/' in p and not p.startswith('../') and not TEST_PATH.search(p)
 
 
+def patch_files(patch):
+    """The files a unified diff names: the 'diff --git' headers, or, for a patch that has none, its '+++ b/<path>' lines
+    ('+++ /dev/null', a deleted file, is not one of them)."""
+    patch = patch or ''
+    return DIFF_FILE.findall(patch) or PLUS_FILE.findall(patch)
+
+
 def patch_touches_src(patch):
-    return any(is_src_path(f) for f in DIFF_FILE.findall(patch or ''))
+    return any(is_src_path(f) for f in patch_files(patch))
 
 
 def runs():
