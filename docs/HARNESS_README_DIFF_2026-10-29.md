@@ -1,14 +1,19 @@
 # HARNESS_README diff: the 25 Sep copy against the live 13 Oct file (checked 29 Oct 2026)
 
-Old: `data/HARNESS_README.md` as copied on 25 Sep (49,356 bytes, 671 lines; in git at `e0e924e6`). New: the file the
-competition serves today, fetched with `kaggle competitions download gemma-4-developer-agent -f HARNESS_README.md`
-(55,940 bytes, 692 lines, created 2026-10-13 11:47:41 UTC; the competition file list still shows that version on 29 Oct).
-15 diff hunks. `docs/GAPS_2026-10-06.md` ("The scorer docs changed on 13 Oct") listed some of them on 14 Oct; this is the
-full list, plus the check against `submissions/v12b`, `submissions/v12b_ctx` and `scripts/make_eval_kernel.py`.
+Old: `data/HARNESS_README_2026-09-25.md`, the copy `data/HARNESS_README.md` held from 25 Sep to 29 Oct (49,356 bytes,
+671 lines; also in git at `e0e924e6`; sha256 `3d6e57a13234cb4e783ba24eaab486459af76e0923ea4c6607cd41cc8961bbbb`).
+New: `data/HARNESS_README.md`, the file the competition serves today, fetched with
+`kaggle competitions download gemma-4-developer-agent -f HARNESS_README.md` (55,940 bytes, 692 lines, created
+13 Oct 2026 17:17:41 IST (11:47:41 UTC); the competition file list still shows that version on 29 Oct; sha256
+`445000219b803942c469391ec8b69791a31e9cec2f934738c767e34b5ca0aa1f`). 15 diff hunks. `docs/GAPS_2026-10-06.md` ("The
+scorer docs changed on 13 Oct") listed some of them on 14 Oct; this is the full list, plus the check against
+`submissions/v12b`, `submissions/v12b_ctx` and `scripts/make_eval_kernel.py`.
 
 Line numbers below are `old/new`. About 40 citations of the form `data/HARNESS_README.md:NNN` in `research/` and `docs/`
-(and `scripts/run_eval.py:11`, `scripts/replay_l4.py:44`) point at the old copy: read it with
-`git show e0e924e6:data/HARNESS_README.md`. The compaction block cited as 553-561 is now 568-576.
+(and `scripts/run_eval.py:11`, `scripts/replay_l4.py:44`) point at the old copy. The 25 Sep README is kept in the tree as
+`data/HARNESS_README_2026-09-25.md` (byte-identical to `git show e0e924e6:data/HARNESS_README.md`), so **line-number
+citations dated before 29 Oct 2026 refer to that copy**, not to `data/HARNESS_README.md`. The compaction block cited as
+553-561 is now 568-576.
 
 ## 1. Changes that matter to us
 
@@ -23,13 +28,14 @@ Line numbers below are `old/new`. About 40 citations of the form `data/HARNESS_R
   alias registry is now `models.yaml` / `_build_cli_model_registry()` instead of `setup_gemma_model_registry()`. The bf16
   variants stay local-CLI only.
 
-### 1.2 Thinking and sampling (2.x generation table; old 148-153, new 148-153)
+### 1.2 Thinking and sampling (2.4 generation table; old 148-153, new 148-153)
 - Unchanged: every `GenerateContentConfig` field is allowed; `max_output_tokens` 1 to 32,768 (default 16,384);
   `thinking_budget` 0 to 32,768 (default 4,096); `temperature >= 0`, `0 <= top_p <= 1`, `top_k >= 1`; the advice to omit
   `thinking_level` on the vLLM `/v1` endpoint.
 - `thinking_budget`. Old: "use `0` or `include_thoughts: false` to disable thinking". New: a positive value sets
   `enable_thinking: true` and forwards `extra_body.thinking_token_budget` to vLLM's `ThinkingTokenBudgetLogitsProcessor`
-  (a hard cap on thought tokens); `0` sets `enable_thinking: false`.
+  (the README says only that the value is forwarded, not how strictly the processor enforces it); `0` sets
+  `enable_thinking: false`.
 - `include_thoughts`. Old: "`true` or `false`", no semantics. New: with a positive budget (or an active `thinking_level`),
   `true` keeps `Part(thought=True)` in the response and in later tool-call context; `false` still reasons on the current
   turn but strips thought parts from the response and from the outgoing history. With neither budget nor level set,
@@ -63,7 +69,7 @@ Line numbers below are `old/new`. About 40 citations of the form `data/HARNESS_R
 - Unchanged: PEFT directory with `adapter_config.json` and `adapter_model.safetensors`, `.safetensors` only, under 3 GiB
   unpacked in total.
 
-### 1.6 Sandbox (4.2; old 253, new 258)
+### 1.6 Sandbox (4.1; old 253, new 258)
 - Old: `reuse_containers=True` warm pooling (wipe `/workspace`, return the container to an idle pool).
 - New: `reuse_containers=False` by default, a fresh container per phase; the wipe-and-pool path applies only if reuse is
   switched on. Limits unchanged (4 GiB, 2 vCPUs, `/workspace`); the subprocess backend is unchanged.
@@ -77,7 +83,7 @@ Line numbers below are `old/new`. About 40 citations of the form `data/HARNESS_R
   fallback and again in Phase 2, before the 4-pass apply. The reset now filters tracked pathspecs through `git ls-tree`.
   The path list itself is the same as the old anti-tamper list.
 
-### 1.8 Time limits and `eval_config.yaml` (2.2, 7.1; old 545-546, new 559-561, 654-655)
+### 1.8 Time limits and `eval_config.yaml` (2.2, 7.1, 9.1; old 545-546, new 559-561, 654-655)
 - Unchanged: the four honoured keys (`evaluation.timeout_seconds`, `max_tool_calls`, `max_time_minutes`, `max_turns`) and
   their defaults (300 s, 100 calls in `inference.py`, 60.0 min, 500 turns), `max_stdout_chars` 5,000, `read_file` 150
   lines and 10,000 chars, the env overrides `SWE_TIMEOUT_SECONDS`, `SWE_MAX_TIME_MINUTES`, `SWE_MAX_TOOL_CALLS`,
@@ -116,15 +122,16 @@ Declared: `gemma-4-31b-it-qat-w4a16-ct`; tools `run_command`, `read_file`, `edit
 adapters, no skills. Checked against the live text:
 - Model: the 31B is still permitted, and it is the only model in both bundles.
 - Sampling: every value is inside the documented ranges. A positive budget with `include_thoughts: true` is the combination
-  the new text describes as thinking on, budget enforced by the logits processor, thought parts kept in context. This agrees
-  with the 10 Oct rule in `docs/GAPS_2026-10-06.md` that `include_thoughts: false` does not turn thinking off.
+  the new text describes as thinking on, budget forwarded to `ThinkingTokenBudgetLogitsProcessor`, thought parts kept in
+  context. This agrees with the 10 Oct rule in `docs/GAPS_2026-10-06.md` that `include_thoughts: false` does not turn
+  thinking off.
 - `eval_config.yaml`: all four keys are still the honoured ones. `timeout_seconds: 180` now applies to Phase 1 commands only;
   the scorer's Phase 2 is a fixed 300 s.
 - Protected files: the prompt rule "Never modify, create or delete test files or test configuration ..." matches the
   stripping and reset rules. Its path list is a subset of the harness list (it omits `test/` and `testing/` `.py` files,
   `.pytest.ini`, `sitecustomize.py`, `usercustomize.py`, `*.pth`), which does no harm. Full-population check: the gold
   `patch` of all 129 rows in `data/tasks.jsonl` (278 file paths) touches no protected path, so stripping cannot remove a
-  gold-shaped fix.
+  gold-shaped fix on the 129 local tasks (`data/heldout1k` and the other task sets were not checked).
 - Tools and prompt: all six declared tools exist; neither prompt mentions graph tools, so the filtered Code Intelligence
   block changes nothing. The wider workspace listing adds up to 50 lines to the first message; neither prompt depends on it.
   `v12b_ctx`'s `{problem_description?}` templating is unchanged in the new text.
@@ -163,7 +170,19 @@ Contradictions and gaps:
   live value is 15, so every pod run through it (`G4_COMPACTION=1` in `pod/chain_pair.sh`, `chain_race2.sh`,
   `chain_pallets.sh`) compacts three times as often as the scorer. `research/gap_4.md`, `research/competitors.md`,
   `research/time_model.md` and `research/harness_runtime.md` repeat the old 5 as the README's value (`time_model.md` also
-  the old 0.80).
+  the old 0.80). `tests/test_v10_runner.py` pins the same interval together with `scripts/run_eval.py`
+  (`test_run_eval_compaction_scale_noeditable` asserts `(5, 2, 14336, 5)`), so the two have to move together; both are
+  being moved to 15 on another branch, not in this tree.
+- `pod/serve.sh`, `pod/serve2.sh`, `pod/preflight.sh` and `aws/preflight.sh` start vLLM with
+  `--default-chat-template-kwargs '{"enable_thinking": true}'`, the default the live 3.1 list no longer has (see 1.2);
+  `scripts/make_eval_kernel.py` omits it. `pod/serve.sh` calls its flags "the scoring server's flags (HARNESS_README s3.1)"
+  and both preflights call them "exact competition server args". A request that carries no thinking setting gets thinking
+  on from these servers; on the scorer it gets the chat template's own default. Bundles with a `thinking_config` set
+  `enable_thinking` per request, so the effect on them is probably small; it was not measured.
+- `--generation-config`: the README does not mention it, and none of those four scripts (nor the kernel) sets it, so the
+  pod servers take vLLM's default `auto` (sampling defaults from the model's `generation_config.json` when a request omits
+  them; `docs/OPTIMISE_RANKING_2026-10-29.md` A6 and item 6 record the same). Whether the scorer's `setup_vllm_server` sets
+  it is not stated.
 - Bundles that set `include_thoughts: false` to mean "thinking off" (80 yaml files under `submissions/`, for example `v0`
   with a 4,096 budget, `v1_t05_low` and `v1_t10_high` with a `thinking_level`, `sub2` and `v1` with neither) match the old
   README line "use `0` or `include_thoughts: false` to disable thinking". The live text says a positive budget or an active
@@ -174,8 +193,9 @@ Contradictions and gaps:
 ## 3. Caveat on the scorer stack
 Every stack check above used `harness/wheels` (swegemma 0.2.11, adk_submission 0.2.13), the builds the runs up to 11 Oct
 used (sha256 `63f054a3...` and `69642a13...`). The live wheelhouse dataset `metric/gemma-4-developer-agent-wheelhouse`
-lists its files as created 2026-10-12 19:51 UTC, with swegemma at 119,670 bytes and adk_eval_core at 90,060, against 119,520
-and 89,306 for the saved copies; the 28 Oct kernel (`eval/kaggle/g4-l4-v12b-garble-p312/wheelhouse_sha256.txt`) records different
+lists its files as created 13 Oct 2026 01:21 IST (12 Oct 2026 19:51 UTC; this doc calls it the 12 Oct build, by the UTC
+date), with swegemma at 119,670 bytes and adk_eval_core at 90,060, against 119,520 and 89,306 for the saved copies; the
+28 Oct kernel (`eval/kaggle/g4-l4-v12b-garble-p312/wheelhouse_sha256.txt`) records different
 sha256 values for swegemma, adk_submission, adk_eval_core and vllm than the 11 Oct runs. So the 14 Oct note in
 `docs/GAPS_2026-10-06.md` that the wheelhouse is "byte for byte" the v12 run's does not hold for the build the 28 Oct run
 used, and the "nothing we measured is invalidated" conclusion rests on the older build. Reading the 12 Oct wheels needs a
