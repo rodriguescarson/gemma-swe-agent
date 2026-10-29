@@ -16,11 +16,40 @@ Faithfulness switches (SPEC section 10.1, R115); every default leaves other call
                   subprocess sandbox, so it lands in <sandbox>/tmp/swe), so v10 helper footers fire at L4-equivalent times.
   G4_NO_EDITABLE  1: skip the `pip install -e /workspace` step (Kaggle installs nothing into /workspace, F9d).
   G4_FAITHFUL_ENV default 1: the pod environment install below. 0 keeps the stock harness environment (the offline
-                  Mac flow tests use it; /root/buildenv does not exist there).
+                  Mac flow tests use it; /root/buildenv does not exist there). Replay mode defaults it to 0.
 Importing this module changes nothing; only main() patches the harness.
+
+Replay mode (the scorer-faithful grader):
+  python scripts/run_eval.py --patches FILE eval --tasks T --snapshots-dir S --results-dir R [--timeout-seconds 300] ...
+  FILE is a JSON list (or JSONL) of {"task": id, "cfg": any label, "patch": unified diff, "agent_error": optional text};
+  "id" is accepted for "task". The agent phase is replaced, like --oracle, by the listed patch (and agent_error) of that
+  entry. A run that errored AND left an empty patch is unresolved without any test run (swegemma evaluate_task returns early),
+  so a "free" task (one whose hidden tests pass on the unpatched base) is resolved with an empty patch only when the run
+  had no agent_error; pass the error text to replay that. The verification phase is swegemma's
+  own verify_task (protected-file stripping, git apply pipeline, test_patch, pytest with -p no:anyio, JUnit checks), run on
+  the subprocess sandbox. Output: R/replay_results.jsonl, one row per entry in entry order: idx, cfg, task, resolved,
+  test_exit_code, phase (tests | patch_apply | agent_error | infra), error, secs, patch_sha1, patch_len, agent_error, timed_out,
+  test_summary,
+  failed (up to 40 node ids), test_tail (last 3,000 characters), dedup_of when the row repeats an earlier identical
+  (task, patch) and was not re-run. resolved is null for phase infra (no verdict: the tests never ran).
+  Phase 2 uses --timeout-seconds (the scorer fixes it at 300; it is the default here). G4_L4_SCALE is ignored.
+  The host python's site-packages are the test environment (SubprocessManager links them into every sandbox), so run it
+  with the interpreter of a scorer-faithful venv. --concurrency N grades N entries at once.
+  G4_WS_CACHE=DIR   clone DIR/<task>/base (an extracted, harness-prepared workspace) into the sandbox instead of
+                    extracting <snapshots-dir>/<task>.tgz; a missing <task>.tgz is created empty so the task is found.
+                    cp -c makes it an APFS clone (no disk, no gzip). Tasks without DIR/<task>/base use the tarball.
+  G4_REPLAY_DEDUPE  default 1: grade each distinct (task, patch) once. 0 grades every entry (flake checks).
+  G4_REPLAY_RESUME  1: keep rows already in R/replay_results.jsonl (same cfg, task and patch) and run only the rest;
+                    rows with phase infra are run again.
+  G4_REPLAY_LOGS    1: also write each entry's full test output to R/replay_logs/<idx>_<task>.log.
+  G4_REPLAY_KEEP_RESULTS  1: also write swegemma's own task_results.jsonl/summary.json/patches/test_outputs for the graded rows
+                    (they are keyed by task only, so a repeated task keeps the last one).
 """
+import hashlib
+import json
 import logging
 import os
+import re
 import shlex
 import sys
 
@@ -224,11 +253,286 @@ def log_compactions(path):
     return orig
 
 
+# ---------------------------------------------------------------------------------------------------------------------
+# Replay mode: grade given patches with the scorer's own verification
+# ---------------------------------------------------------------------------------------------------------------------
+TEST_TAIL_CHARS = 3000
+MAX_FAILED_IDS = 40
+SUMMARY_RE = re.compile(r"^[= ]*(\d+ (?:passed|failed|skipped|errors?|deselected|xfailed|xpassed|warnings?)[^\n]*?) in [0-9.]+s",
+                        re.M)
+FAILED_RE = re.compile(r"^(?:FAILED|ERROR) (\S+)", re.M)
+
+
+def pop_option(argv, name):
+    """Remove `--name VALUE` or `--name=VALUE` from argv (in place); the value, or None when absent."""
+    for i, a in enumerate(argv):
+        if a == name and i + 1 < len(argv):
+            v = argv[i + 1]
+            del argv[i:i + 2]
+            return v
+        if a.startswith(name + "="):
+            del argv[i]
+            return a.split("=", 1)[1]
+    return None
+
+
+def has_option(argv, name):
+    return any(a == name or a.startswith(name + "=") for a in argv)
+
+
+def patch_sha1(patch):
+    return hashlib.sha1(patch.encode("utf-8", "surrogateescape")).hexdigest()
+
+
+def entry_key(e):
+    """Two entries with the same key get the same verdict: task, patch and agent error (cfg is only a label)."""
+    return (e["task"], patch_sha1(e["patch"]), e.get("agent_error"))
+
+
+def load_patches(path):
+    """[{task, cfg, patch}] from a JSON list or JSONL file; "id" stands in for "task", a missing patch is empty."""
+    with open(path, encoding="utf-8") as f:
+        text = f.read()
+    try:
+        data = json.loads(text) if text.lstrip().startswith("[") else [json.loads(x) for x in text.splitlines() if x.strip()]
+    except ValueError as e:
+        raise SystemExit(f"run_eval: --patches {path} is not valid JSON/JSONL: {e}")
+    if not isinstance(data, list) or not data:
+        raise SystemExit(f"run_eval: --patches {path} holds no entries (expected a non-empty JSON list)")
+    out = []
+    for n, e in enumerate(data):
+        if not isinstance(e, dict):
+            raise SystemExit(f"run_eval: --patches entry {n} is not an object")
+        task = e.get("task", e.get("id"))
+        patch = e.get("patch")
+        patch = "" if patch is None else patch
+        if not isinstance(task, str) or not task.strip():
+            raise SystemExit(f"run_eval: --patches entry {n} has no task id")
+        if not isinstance(patch, str):
+            raise SystemExit(f"run_eval: --patches entry {n} ({task}): patch must be a string")
+        agent_error = e.get("agent_error")
+        if agent_error is not None and not isinstance(agent_error, str):
+            raise SystemExit(f"run_eval: --patches entry {n} ({task}): agent_error must be a string")
+        out.append({"task": task.strip(), "cfg": e.get("cfg"), "patch": patch, "agent_error": agent_error or None})
+    return out
+
+
+def replay_row(idx, entry, res, wall):
+    """One result row from a swegemma TaskResult (or None when grading itself raised)."""
+    patch = entry["patch"]
+    out = (getattr(res, "test_output", "") or "") if res is not None else ""
+    code = getattr(res, "test_exit_code", -1) if res is not None else -1
+    err = (str(res.error) if res is not None and res.error else None)
+    if res is None:
+        phase = "infra"
+    elif entry.get("agent_error") and not patch.strip():
+        phase = "agent_error"                     # unresolved without a test run: the scorer's early return
+    elif err and err.startswith("Failed to apply agent patch"):
+        phase = "patch_apply"
+    elif code == -1:
+        phase = "infra"
+    else:
+        phase = "tests"
+    sums = SUMMARY_RE.findall(out)
+    failed = list(dict.fromkeys(FAILED_RE.findall(out)))
+    return {"idx": idx, "cfg": entry["cfg"], "task": entry["task"],
+            "resolved": None if phase == "infra" else bool(res.resolved),
+            "test_exit_code": code, "phase": phase, "error": (err or "")[:500] or None, "secs": round(wall, 1),
+            "patch_sha1": patch_sha1(patch), "patch_len": len(patch), "agent_error": entry.get("agent_error"),
+            "timed_out": code == 124,
+            "test_summary": sums[-1] if sums else None, "failed": failed[:MAX_FAILED_IDS], "test_tail": out[-TEST_TAIL_CHARS:]}
+
+
+def make_ws_cache_extractor(manager, cache_dir):
+    """The harness's own extension point (extract_snapshot calls docker.extract_archive_to_container when it exists):
+    clone <cache_dir>/<task>/base into the sandbox workspace. False -> the harness falls back to extracting the tarball."""
+    import subprocess
+    from pathlib import Path
+    cache = Path(cache_dir)
+
+    def extract_archive_to_container(container_id, archive_path, dst_dir="/workspace"):
+        tid = Path(archive_path).name.split(".")[0]
+        src = cache / tid / "base"
+        if not src.is_dir():
+            return False
+        ws = manager.sandboxes[container_id]["workspace"]
+        for flags in (["-c", "-R"], ["-R"]):         # APFS clone first, plain copy when the volumes differ
+            r = subprocess.run(["cp", *flags, f"{src}/.", str(ws)], capture_output=True, text=True)
+            if r.returncode == 0:
+                return True
+        raise RuntimeError(f"ws cache copy of {src} failed: {r.stderr[-300:]}")
+
+    return extract_archive_to_container
+
+
+def make_replay_evaluator(entries):
+    """A swegemma Evaluator whose run() grades `entries` (the --patches list) instead of running an agent."""
+    import asyncio
+    import contextvars
+    import time
+    from pathlib import Path
+
+    from adk_eval_core.tracing import SessionTrace
+    import swegemma.evaluate as ev
+    from swegemma.models import EvaluationResult, TaskResult, load_tasks
+
+    current = contextvars.ContextVar("g4_replay_entry", default=("", None))
+
+    class ReplayEvaluator(ev.Evaluator):
+        replay_entries = entries
+
+        def __init__(self, config):
+            super().__init__(config)
+            self.rows = []
+            cache = os.environ.get("G4_WS_CACHE", "").strip()
+            self.ws_cache = cache or None
+            if self.ws_cache and config.sandbox == "subprocess":
+                self.sandbox.extract_archive_to_container = make_ws_cache_extractor(self.sandbox, self.ws_cache)
+
+        async def _run_agent_sandbox(self, task, snapshot_path, task_index, total_tasks, **kw):
+            patch, agent_error = current.get()
+            return patch, agent_error, SessionTrace()       # the listed patch and error; no agent
+
+        def _placeholder_snapshots(self, ids):
+            """With a ws cache, a task whose tarball is absent still has to be found by evaluate_task."""
+            from swegemma.deduplication import resolve_task_snapshot_paths
+            for tid, repo in ids:
+                if not (Path(self.ws_cache) / tid / "base").is_dir():
+                    continue
+                if not resolve_task_snapshot_paths(self.config.snapshots_dir, tid, repo)[0].exists():
+                    Path(self.config.snapshots_dir).mkdir(parents=True, exist_ok=True)
+                    (Path(self.config.snapshots_dir) / f"{tid}.tgz").touch()
+
+        async def run(self):
+            cfg = self.config
+            tasks = {t.instance_id: self._hydrate_task_from_secret(t) for t in load_tasks(cfg.tasks_path)}
+            want = set(cfg.task_ids) if cfg.task_ids else None
+            todo = [(i, e) for i, e in enumerate(self.replay_entries) if want is None or e["task"] in want]
+            res_dir = Path(cfg.results_dir)
+            res_dir.mkdir(parents=True, exist_ok=True)
+            out_path = res_dir / "replay_results.jsonl"
+            logs = res_dir / "replay_logs" if env_flag("G4_REPLAY_LOGS") else None
+            if logs:
+                logs.mkdir(exist_ok=True)
+            if self.ws_cache:
+                self._placeholder_snapshots([(e["task"], tasks[e["task"]].repo) for _, e in todo if e["task"] in tasks])
+
+            keep = {}                                    # (cfg, task, sha1) -> a row from an earlier run (resume)
+            if env_flag("G4_REPLAY_RESUME") and out_path.is_file():
+                for line in out_path.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        r = json.loads(line)
+                        if r.get("phase") != "infra":
+                            keep[(json.dumps(r["cfg"]), r["task"], r["patch_sha1"], r.get("agent_error"))] = r
+            dedupe = env_flag("G4_REPLAY_DEDUPE", "1")
+            sem = asyncio.Semaphore(max(1, cfg.concurrency or 1))
+            lock = asyncio.Lock()
+            first = {}                                   # (task, sha1) -> asyncio.Future of the first entry's row
+            rows, results = {}, []
+
+            async def emit(row):
+                async with lock:
+                    rows[row["idx"]] = row
+                    with open(out_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(row) + "\n")
+
+            async def grade(idx, e):
+                task = tasks.get(e["task"])
+                if task is None:
+                    return replay_row(idx, e, None, 0.0) | {"error": f"task {e['task']} is not in {cfg.tasks_path}"}
+                tok = current.set((e["patch"], e.get("agent_error")))
+                t0 = time.perf_counter()
+                try:
+                    res = await self.evaluate_task(task, task_index=idx + 1, total_tasks=len(self.replay_entries))
+                except Exception as ex:                  # never lose the other entries to one failure
+                    logging.getLogger("run_eval").exception("replay entry %d (%s) raised", idx, e["task"])
+                    return replay_row(idx, e, None, time.perf_counter() - t0) | {"error": f"grader exception: {ex!r}"[:500]}
+                finally:
+                    current.reset(tok)
+                if logs and res.test_output:
+                    (logs / f"{idx}_{e['task']}.log").write_text(res.test_output, encoding="utf-8")
+                results.append(res)
+                return replay_row(idx, e, res, time.perf_counter() - t0)
+
+            async def one(idx, e):
+                key = entry_key(e)
+                if dedupe and key in first:              # an earlier entry (or a resumed row) already owns this key
+                    src = await first[key]
+                    await emit(dict(src, idx=idx, cfg=e["cfg"], dedup_of=src.get("dedup_of", src["idx"])))
+                    return
+                fut = asyncio.get_running_loop().create_future()
+                if dedupe:
+                    first[key] = fut
+                prior = keep.get((json.dumps(e["cfg"]), *key))
+                if prior is not None:
+                    row = {k: v for k, v in prior.items() if k != "dedup_of"} | {"idx": idx, "resumed": True}
+                else:
+                    async with sem:
+                        row = await grade(idx, e)
+                fut.set_result(row)
+                await emit(row)
+
+            out_path.unlink(missing_ok=True)             # rewritten row by row from here (resumed rows included)
+            try:
+                await asyncio.gather(*(one(i, e) for i, e in todo))
+            finally:
+                if hasattr(self.docker, "cleanup_all"):
+                    try:
+                        self.docker.cleanup_all()
+                    except Exception as cleanup_err:     # noqa: BLE001
+                        logging.getLogger("run_eval").debug("cleanup_all notice: %s", cleanup_err)
+            ordered = [rows[i] for i in sorted(rows)]
+            tmp = out_path.with_suffix(".jsonl.tmp")
+            tmp.write_text("".join(json.dumps(r) + "\n" for r in ordered), encoding="utf-8")
+            tmp.replace(out_path)                        # final file: one row per entry, entry order
+            self.rows = ordered
+            if env_flag("G4_REPLAY_KEEP_RESULTS"):       # swegemma's own task_results.jsonl/summary for the unique runs
+                ev.save_results(EvaluationResult(task_results=results), res_dir)
+            n_ok = sum(1 for r in ordered if r["resolved"] is True)
+            n_infra = sum(1 for r in ordered if r["phase"] == "infra")
+            log.info("replay: %d entries, %d resolved, %d infra (no verdict) -> %s", len(ordered), n_ok, n_infra, out_path)
+            return EvaluationResult(task_results=[
+                TaskResult(instance_id=r["task"], repo="", resolved=bool(r["resolved"]), agent_patch="", test_output="",
+                           test_exit_code=r["test_exit_code"], duration_seconds=r["secs"], error=r["error"]) for r in ordered])
+
+    return ReplayEvaluator
+
+
+def replay_main(argv, patches_file):
+    """--patches: the scorer's verification on the listed patches (see the module docstring). No agent, no model."""
+    entries = load_patches(patches_file)
+    if not has_option(argv, "--timeout-seconds"):
+        argv += ["--timeout-seconds", "300"]             # the scorer's fixed Phase 2 limit (HARNESS_README 7.1)
+    if not has_option(argv, "--submission-dir"):         # the cli wants one to build a model registry nobody calls
+        argv += ["--submission-dir", results_dir_option(argv) or "."]
+    if not has_option(argv, "--sandbox"):
+        argv += ["--sandbox", "subprocess"]
+    install_patches(faithful=env_flag("G4_FAITHFUL_ENV", "0"), scale=None)   # the stock harness environment by default
+    import swegemma.cli as cli
+    cli.Evaluator = make_replay_evaluator(entries)
+    log.info("run_eval: replay of %d entries from %s", len(entries), patches_file)
+    return cli.main(argv)
+
+
+def results_dir_option(argv):
+    for i, a in enumerate(argv):
+        if a == "--results-dir" and i + 1 < len(argv):
+            return argv[i + 1]
+        if a.startswith("--results-dir="):
+            return a.split("=", 1)[1]
+    return None
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     oracle = "--oracle" in argv
     if oracle:
         argv.remove("--oracle")
+    patches_file = pop_option(argv, "--patches")
+    if patches_file is not None:
+        if oracle:
+            raise SystemExit("run_eval: --patches and --oracle both replace the agent; pick one")
+        return replay_main(argv, patches_file)
     scale = l4_scale()
     if scale:
         argv = scale_argv(argv, scale)

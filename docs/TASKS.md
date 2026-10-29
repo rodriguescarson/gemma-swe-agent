@@ -67,6 +67,13 @@ resolves about one task.
   full runs, check that the flips still fall inside the 32; until then it screens, it never gates.
 - [ ] **V4 Decision rule.** Paired sign test on discordant tasks (the existing `scripts/a6000/p2_report.py`), a candidate
   adopted only if it wins on the screen, holds on the full 74, and its hidden read is not below its band.
+- [x] **V5 Clean labels (30 Oct).** `eval/analysis/labels.py` writes `eval/analysis/out/labels_clean.json`,
+  `task_reach_clean.json` and `data/screen32_clean_ids.txt` (19 ids); GAPS "Label cleanup". The grader is
+  `scripts/run_eval.py --patches` (swegemma's own verification, 300 s Phase 2) in a venv pinned to the Kaggle freeze: gold
+  74/74, 40/40 Kaggle labels agree. 1 of 2,442 labels changes (`p4_pub024` rich_3782, a Pygments 2.21 box artefact).
+  Comparable runs (5 min / 40 calls, no network, one config per draw) are 11 configs; on them the bands are 32 never,
+  8 rare, 11 contested, 20 always, with 3 base-passing tasks apart. Open: whether the clean files replace
+  `task_reach.json` and `screen32_ids.txt` (owner's call).
 
 ### 2. Observability (no GPU)
 
