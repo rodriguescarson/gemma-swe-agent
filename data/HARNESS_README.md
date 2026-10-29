@@ -106,7 +106,7 @@ submission/
 
 1. **`LlmAgent` (default)**:
    - `name` (`str`, required): Agent identifier string.
-   - `model` (`str`, required unless a default model is set): Model alias from the registry (`gemma-4-31b-it-qat-w4a16-ct` for competition submissions).
+   - `model` (`str`, required unless a default model is set): Model alias from the registry (`gemma-4-31b-it-qat-w4a16-ct`, `gemma-4-12b-it-qat-w4a16-ct`, `gemma-4-e4b-it-qat-w4a16-ct`, or `gemma-4-e2b-it-qat-w4a16-ct` for competition submissions).
    - `adapter` (`str | None`): Optional adapter name matching a subdirectory or weight file under `adapters/`.
    - `description` (`str`, up to `1,000,000` chars): Used by parent agents when delegating to this agent.
    - `instruction` (`str`, up to `1,000,000` chars): System prompt for the agent. Supports ADK session state templating (`{problem_description}`, `{hints}`, or custom `output_key` variables).
@@ -145,10 +145,10 @@ All other structural limits are set to generous safety ceilings solely to guard 
 | | `adapter_extensions` | `.safetensors` only (`adapters/<name>/adapter_model.safetensors`) |
 | **Generation Config (`GenerationConstraints`)** | `allowed_fields` | **All schema fields permitted**: `temperature`, `top_p`, `top_k`, `max_output_tokens`, `presence_penalty`, `frequency_penalty`, `stop_sequences`, `response_mime_type`, `seed`, `thinking_config` |
 | | `max_output_tokens` | `1` to `32,768` (default `16,384`; bounded by 4x L4 vLLM `max_model_len=32768`) |
-| | `thinking_config.thinking_budget` | `0` to `32,768` (default `4,096`; bounded by 4x L4 vLLM `max_model_len=32768`; use `0` or `include_thoughts: false` to disable thinking) |
+| | `thinking_config.thinking_budget` | `0` to `32,768` (default `4,096`; bounded by 4x L4 vLLM `max_model_len=32768`; positive values set `enable_thinking: true` and forward `extra_body.thinking_token_budget` to vLLM's `ThinkingTokenBudgetLogitsProcessor`, while `0` sets `enable_thinking: false`) |
 | | `thinking_config.thinking_level` | `"MINIMAL"`, `"LOW"`, `"MEDIUM"`, `"HIGH"`, or `"NONE"` (case-insensitive). *Note*: When serving via vLLM's OpenAI-compatible `/v1` endpoint (especially with LoRA adapters), omit `thinking_level` and configure `include_thoughts: true` + `thinking_budget: 4096` instead, because `thinking_level` maps to OpenAI's `reasoning_effort` parameter (`swegemma` also sets `litellm.drop_params = True`). |
-| | `thinking_config.include_thoughts` | `true` or `false` |
-| | `temperature` / `top_p` / `top_k` / penalties / `seed` / `stop_sequences` | Unrestricted (any valid schema value; `temperature >= 0.0`, `0.0 <= top_p <= 1.0`, `top_k >= 1`) |
+| | `thinking_config.include_thoughts` | `true` or `false`. When `thinking_budget > 0` (or `thinking_level` is active), `include_thoughts: true` retains `Part(thought=True)` in `LlmResponse` and subsequent tool-call context (`<\|channel>thought...<channel\|>`), whereas `include_thoughts: false` still enables reasoning on the current turn (`enable_thinking: true`) while stripping `Part(thought=True)` from `LlmResponse` and outgoing message history. When neither `thinking_budget` nor `thinking_level` is set, `include_thoughts` acts as a fallback toggle for `enable_thinking`. |
+| | `temperature` / `top_p` / `top_k` / penalties / `seed` / `stop_sequences` | Unrestricted (any valid schema value; `temperature >= 0.0`, `0.0 <= top_p <= 1.0`, `top_k >= 1`; `seed` is forwarded in the outgoing request body to LiteLLM/vLLM) |
 
 > [!WARNING]
 > Execution-altering ADK fields that bypass the sandbox (`tools`, `system_instruction`, `http_options`, `safety_settings`, or `response_schema` inside `generate_content_config`) are excluded from `GenerateContentConfig` by schema design and will raise a validation error if set.
@@ -162,31 +162,35 @@ The competition evaluation environment runs on a dedicated machine equipped with
 - **Per-GPU Memory**: `24 GB GDDR6` (`96 GB` total VRAM across 4 GPUs).
 - **vLLM Serving Configuration (`setup_vllm_server` in `scripts/inference.py`)**:
   - `tensor_parallel_size = 4` (shards model weights and KV cache across all 4 L4 GPUs)
-  - `gpu_memory_utilization = 0.80` (`~19.2 GB` usable per GPU / `~76.8 GB` usable across 4 GPUs)
+  - `gpu_memory_utilization = 0.90` (`~21.6 GB` usable per GPU / `~86.4 GB` usable across 4 GPUs)
   - `max_model_len = 32768` (`32,768` tokens maximum combined prompt + reasoning + output context length)
-  - `enable_auto_tool_choice = True`, `tool_call_parser = "gemma4"`, `reasoning_parser = "gemma4"`
-  - `default_chat_template_kwargs = {"enable_thinking": True}`
-  - `enable_lora = True`, `max_loras = 8`, `max_lora_rank = 128`
+  - `scheduler_reserve_full_isl = False`
+  - `enable_auto_tool_choice = True`, `tool_call_parser = "gemma4"`, `reasoning_parser = "gemma4"`, `reasoning_config = {"reasoning_start_str": "<|channel>", "reasoning_end_str": "<channel|>"}`
+  - Dynamic LoRA right-sizing from discovered adapters: `enable_lora = bool(adapter_map)`, `max_loras = max(1, len(adapter_map))`, `max_lora_rank = max(detected_ranks) if detected_ranks else 128`
+  - Model-specific CLI flags (`MODEL_VLLM_EXTRA_ARGS`): for `gemma-4-12b-it-qat-w4a16-ct`, passes `--hf-overrides '{"architectures": ["Gemma4ForCausalLM"], "model_type": "gemma4"}'`
 
 | Base Model Variant | Weight Precision | Approximate Weight Footprint (4 GPUs) | Competition Status |
 | :--- | :--- | :--- | :--- |
-| **`gemma-4-31b-it-qat-w4a16-ct`** *(Competition Model)* | W4A16 (INT4 Quantized) | `~16–18 GB` (`~4.5 GB / GPU`) | **Required for Kaggle competition submissions** (`ALLOWED_MODEL_NAMES`) |
-| **`gemma-4-31b-it` / `gemma-4-27b-it` / `gemma-4-26b-a4b-it` / `gemma-4-12b-it` / `gemma-4-9b-it` / `gemma-4-e4b-it` / `gemma-4-e2b-it`** | `bfloat16` | `~4–62 GB` | Registered in `setup_gemma_model_registry()` for local CLI evaluation only |
+| **`gemma-4-31b-it-qat-w4a16-ct`** *(Starter Kit Default)* | W4A16 (INT4 Quantized) | `~16–18 GB` (`~4.5 GB / GPU`) | **Permitted in Kaggle competition submissions** (`ALLOWED_MODEL_NAMES`) |
+| **`gemma-4-12b-it-qat-w4a16-ct`** | W4A16 (INT4 Quantized) | `~6–8 GB` (`~1.8 GB / GPU`) | **Permitted in Kaggle competition submissions** (`ALLOWED_MODEL_NAMES`) |
+| **`gemma-4-e4b-it-qat-w4a16-ct`** | W4A16 (INT4 Quantized) | `~3–4 GB` (`~1.0 GB / GPU`) | **Permitted in Kaggle competition submissions** (`ALLOWED_MODEL_NAMES`) |
+| **`gemma-4-e2b-it-qat-w4a16-ct`** | W4A16 (INT4 Quantized) | `~2–3 GB` (`~0.7 GB / GPU`) | **Permitted in Kaggle competition submissions** (`ALLOWED_MODEL_NAMES`) |
+| **`gemma-4-31b-it` / `gemma-4-27b-it` / `gemma-4-26b-a4b-it` / `gemma-4-12b-it` / `gemma-4-9b-it` / `gemma-4-e4b-it` / `gemma-4-e2b-it`** | `bfloat16` | `~4–62 GB` | Registered in `models.yaml` / `_build_cli_model_registry()` for local CLI evaluation only |
 
 This 4x L4 hardware budget directly governs four operational rules:
-1. **Single Base Model Per Submission (`gemma-4-31b-it-qat-w4a16-ct`)**: All agents in a competition submission must share the single competition base model (`gemma-4-31b-it-qat-w4a16-ct`).
+1. **Single Base Model Per Submission (`ALLOWED_MODEL_NAMES`)**: All agents in a competition submission must share a single declared base model from the four official quantized models (`gemma-4-31b-it-qat-w4a16-ct`, `gemma-4-12b-it-qat-w4a16-ct`, `gemma-4-e4b-it-qat-w4a16-ct`, or `gemma-4-e2b-it-qat-w4a16-ct`).
 2. **Context Window Ceiling (`32,768` tokens)**: `max_output_tokens` and `thinking_budget` cannot exceed `32,768` tokens, matching vLLM's `max_model_len=32768`.
-3. **Total Unpacked Submission Size (`< 3 GiB` including `adapters/`)**: Ensures rapid extraction into `/kaggle/working/submission` and guarantees that submitted LoRA adapters fit within host disk and GPU LoRA buffers (`max_loras=8`, `max_lora_rank=128`).
+3. **Total Unpacked Submission Size (`< 3 GiB` including `adapters/`)**: Ensures rapid extraction into `/kaggle/working/submission` and guarantees that submitted LoRA adapters fit within host disk and GPU LoRA buffers (`max_lora_rank <= 128`).
 4. **Host Container Sandboxing (`4 GiB` RAM / `2 vCPUs` per container)**: Prevents repository test suites inside `Container A` and `Container B` from starving the host CPU or system RAM needed by the vLLM engine.
 
 ### 3.2. The Single Base Model Rule
-Before launching the inference server, `validate_single_declared_model(agent_dir)` traverses the root `agent.yaml`, every referenced `sub_agents[*].config_path`, every `tools[*].agent_tool.config_path`, and any standalone agent YAML files in the submission directory.
+Before launching the inference server, `validate_single_declared_model(agent_dir)` (`scripts/inference.py`, wrapping `adk_submission.discovery.discover_declared_models`) traverses the root `agent.yaml`, every referenced `sub_agents[*].config_path`, every `tools[*].agent_tool.config_path`, and any standalone agent YAML files in the submission directory.
 - Provider prefixes (`openai/`, `google/`, `hosted_vllm/`, `custom/`) are stripped (`normalize_model_name`).
-- **All agents in a submission must declare at most ONE unique base model** (`len(models) == 1`), and in Kaggle competition scoring (`scripts/inference.py`) that model must be `gemma-4-31b-it-qat-w4a16-ct` (`ALLOWED_MODEL_NAMES = frozenset({'gemma-4-31b-it-qat-w4a16-ct'})`). Declaring multiple base models or an unpermitted model raises `ParticipantVisibleError`.
+- **All agents in a submission must declare at most ONE unique base model** (`len(models) == 1`), and in Kaggle competition scoring (`scripts/inference.py`) that model must be in `ALLOWED_MODEL_NAMES` (`gemma-4-31b-it-qat-w4a16-ct`, `gemma-4-12b-it-qat-w4a16-ct`, `gemma-4-e4b-it-qat-w4a16-ct`, or `gemma-4-e2b-it-qat-w4a16-ct`). Declaring multiple base models or an unpermitted model raises `ParticipantVisibleError`.
 
 ### 3.3. Pre-Registered Model Aliases & Routing
-`setup_gemma_model_registry()` registers the following Gemma 4 aliases in `ModelRegistry`:
-- `gemma-4-31b-it-qat-w4a16-ct` (Competition model & Starter Kit default)
+`models.yaml` and `_build_cli_model_registry()` (`src/swegemma/cli.py`) register the following Gemma 4 aliases in `ModelRegistry`:
+- `gemma-4-31b-it-qat-w4a16-ct`, `gemma-4-12b-it-qat-w4a16-ct`, `gemma-4-e4b-it-qat-w4a16-ct`, `gemma-4-e2b-it-qat-w4a16-ct` (Official quantized competition models)
 - `gemma-4-31b-it`, `gemma-4-31b`
 - `gemma-4-27b-it`, `gemma-4-27b`
 - `gemma-4-26b-a4b-it`, `gemma-4-26b-a4b`, `diffusiongemma-26b-a4b-it`
@@ -195,19 +199,20 @@ Before launching the inference server, `validate_single_declared_model(agent_dir
 - `gemma-4-e4b-it`, `gemma-4-e4b`
 - `gemma-4-e2b-it`, `gemma-4-e2b`
 
-When the scoring harness starts the local inference server (`VllmServer` by default on `127.0.0.1:8000` with `tool_call_parser='gemma4'`, `reasoning_parser='gemma4'`, `default_chat_template_kwargs={'enable_thinking': True}`, `max_model_len=32768`), `setup_gemma_model_registry` binds the declared model alias to `LiteLlm(model=f"openai/{served_model}", api_base="http://127.0.0.1:8000/v1", num_retries=5)`.
+When the scoring harness starts the local inference server (`setup_vllm_server` in `scripts/inference.py`, running `VllmServer` on `127.0.0.1:8000` with `tool_call_parser='gemma4'`, `reasoning_parser='gemma4'`, `max_model_len=32768`), it binds the declared model alias (and any discovered adapter names) to `LiteLlm(model=f"openai/{served_model}", api_base="http://127.0.0.1:8000/v1")` via `server_instance.create_model_registry(...)` (or fallback `LiteLlm(..., num_retries=3)` when attaching to an already-active endpoint) and installs the LiteLLM reasoning patch (`install_litellm_reasoning_patch()`).
 
 ### 3.4. Multi-LoRA Serving (`adapters/`) & Sizing Guidelines
 Even though a submission is restricted to a single base model, **different agents in your hierarchy can use different fine-tuned LoRA adapters**:
-1. Place PEFT LoRA directories (containing `adapter_config.json` and `adapter_model.safetensors`) inside `adapters/<adapter_name>/`.
+1. Place PEFT LoRA directories (containing `adapter_config.json` and `adapter_model.safetensors`) inside `adapters/<adapter_name>/`. Adapter names must match `[A-Za-z0-9][A-Za-z0-9._-]*`.
 2. Reference `adapter: <adapter_name>` on any `LlmAgent` in `agent.yaml` or `sub_agents/*.yaml` (for example, `adapter: main_lora` on the root coder agent and `adapter: tool_lora` on a read-only analyzer `AgentTool`).
-3. `discover_adapters()` automatically registers all discovered adapters with the vLLM server (`enable_lora=True`, `max_loras=8`, `max_lora_rank=128`, passed together under `--lora-modules name1=path1 name2=path2 ...`), and `resolve_swegemma_adapter` routes requests from each agent to its respective `openai/<adapter_name>` model identifier.
+3. `discover_adapters()` automatically registers all discovered adapters with the vLLM server, right-sizing `enable_lora = bool(adapter_map)`, `max_loras = max(1, len(adapter_map))`, and `max_lora_rank = max(detected_ranks) if detected_ranks else 128` (passed under `--lora-modules name1=path1 name2=path2 ...`), and `resolve_swegemma_adapter` (`src/swegemma/harness/agent_runner.py`) routes requests from each agent to its respective `openai/<adapter_name>` model identifier.
 4. **Adapter Size Planning (`< 3 GiB` total budget)**:
    - For a 31B model in `bfloat16` targeting all linear projections (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`):
      - **Rank `r = 16`**: `~110–220 MB` per adapter (easily fits 8 specialized adapters within `< 3 GiB`).
      - **Rank `r = 32`**: `~220–450 MB` per adapter (fits 6–8 adapters within `< 3 GiB`).
      - **Rank `r = 64`**: `~450–900 MB` per adapter (fits 3–6 adapters within `< 3 GiB`).
      - **Rank `r = 128` (`max_lora_rank`)**: `~0.9–1.8 GB` per adapter (fits 1–3 high-rank adapters within `< 3 GiB`).
+
 
 ---
 
@@ -250,7 +255,7 @@ sequenceDiagram
   - Memory Limit: **`4g`** (`4 GiB`; processes exceeding this are killed with exit code `137` / `SIGKILL`)
   - CPU Quota: **2 vCPUs** (`cpu_period=100_000`, `cpu_quota=200_000`)
   - Working Directory: `/workspace` (`TEST_TMPDIR=/tmp`)
-  - Warm Pooling (`reuse_containers=True`): When a phase finishes, `/workspace` is completely wiped (`find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +`), temporary patches/stubs in `/tmp` and `/var/tmp` are removed, and the container is returned to an idle pool.
+  - Container Reuse (`reuse_containers=False` default): By default, each phase creates and destroys a fresh container for strict isolation. If warm pooling (`reuse_containers=True`) is explicitly enabled, `/workspace` is completely wiped (`find /workspace -mindepth 1 -maxdepth 1 -exec rm -rf {} +`), temporary patches/stubs in `/tmp` and `/var/tmp` are removed, and the container is returned to an idle pool.
 - **Subprocess Backend (`--sandbox subprocess`, used in environments without a Docker daemon)**:
   - Creates an isolated temporary directory `swegemma_sandbox_<id>_` with `workspace/`, `tmp/`, `wheels/`, and an isolated virtual environment `venv/`.
   - Rewrites shell references to `/workspace`, `/tmp`, `/wheels`, and `/usr/local/bin` to the sandbox directory paths and executes commands in a new process group (`start_new_session=True`), terminating the full process group (`os.killpg(..., signal.SIGKILL)`) on command timeout.
@@ -296,7 +301,7 @@ When `run_agent_sandbox` creates the ADK session (`app_name='swegemma_eval'`, `u
 Because Google ADK automatically interpolates `{variable_name}` placeholders in `LlmAgent.instruction` from `session.state`, your `agent.yaml` or sub-agent instructions can reference `{problem_description}` Directly.
 
 ### 5.2. Initial User Prompt (`build_agent_prompt`)
-The harness sends a structured initial user message to the root agent containing up to 7 sections:
+The harness sends a structured initial user message to the root agent containing up to 7 sections (automatically filtering tool-specific rules and sections against `_extract_declared_tools(agent)` so undeclared tools are never advertised):
 
 1. **Task Header & Problem Statement**:
    ```markdown
@@ -318,7 +323,7 @@ The harness sends a structured initial user message to the root agent containing
    - Max loop iterations: <N> turns
    - Cost budget: $<X.XX> USD
    ```
-4. **Execution Environment Rules**:
+4. **Execution Environment Rules** *(the `read_file` line/character limits are omitted if `read_file` is not declared in the agent hierarchy)*:
    ```markdown
    ## Execution Environment Rules
    - Single command timeout: 300 seconds (commands exceeding this fail without ending the session)
@@ -329,20 +334,23 @@ The harness sends a structured initial user message to the root agent containing
    ```
 5. **Standard Instructions (`0`–`5`)**:
    - Directs the agent to work strictly under `/workspace`, inspect existing conventions, verify its implementation using targeted tests or inline assertions before submitting, call `submit_patch` once complete, and return a final text completion response.
-   - *Note on in-sandbox testing*: By default, `enable_sandbox_testing = True` is active in `EvalConfig` and `agent_runner.py` (line 306), so `pytest` and `unittest` are available inside Container A and Instruction `3` reads: `"3. Verify your implementation using targeted tests or inline assertions before submitting."` (If `enable_sandbox_testing` is explicitly set to `False`, the harness masks `pytest` and `unittest` inside Container A and adjusts Instruction `3` to advise inline `python3 -c "..."` assertions).
-6. **Code Intelligence Tools** *(conditionally appended when pre-computed graph `.json` and embedding `.npz` files >100 bytes exist for `task.repo`)*:
+   - *Note on in-sandbox testing*: By default, `enable_sandbox_testing = True` is active in `EvalConfig` and `agent_runner.py`, so `pytest` and `unittest` are available inside Container A and Instruction `3` reads: `"3. Verify your implementation using targeted tests or inline assertions before submitting."` (If `enable_sandbox_testing` is explicitly set to `False`, the harness masks `pytest` and `unittest` inside Container A and adjusts Instruction `3` to advise inline `python3 -c "..."` assertions).
+6. **Code Intelligence Tools** *(conditionally appended when pre-computed graph `.json` and embedding `.npz` files >100 bytes exist for `task.repo`, listing only the graph/embedding tools actually declared across the agent hierarchy)*:
    ```markdown
    ## Code Intelligence Tools
-   This repository has pre-built code graph and embedding data. Use these tools for fast, targeted navigation:
-   - `search_similar_code(query)`: Find semantically similar functions/classes by keyword.
-   - `get_code_neighbors(node)`: Find callers, callees, and definitions related to a symbol.
-   - `get_code_subgraph(nodes)`: Get the induced subgraph for a set of symbols.
+   This repository has pre-built code graph and embedding data indexed by dotted symbol path (e.g. `pkg.module.Class.method`). Use these tools for fast, targeted navigation:
+   - `search_similar_code(query)`: Find functions/classes with similar precomputed embeddings given a symbol name (e.g. `pkg.module.Class.method`, `Class.method`, or `func_name`).
+   - `get_code_neighbors(node)`: Find callers and callees of a symbol node (e.g. `pkg.module.Class.method` or `Class.method`).
+   - `get_code_subgraph(nodes)`: Get the induced call subgraph connecting a list of symbol nodes.
    ```
 7. **Workspace Layout**:
-   Captures the first 150 entries of `find . -maxdepth 3` inside `/workspace` (excluding `.git`, `__pycache__`, and `*.pyc`).
+   Captures up to 200 breadth-first-selected, hierarchically sorted entries of `find . -mindepth 1 -maxdepth 3` inside `/workspace` (excluding hidden files/directories, `__pycache__`, `*.pyc`, `*.egg-info`, and pruning non-package bulk directories such as `docs`, `docs_src`, `tests`, `examples`, and `benchmarks` below depth 1).
 
-### 5.3. Multi-Turn Loop, Continuation Nudges & Termination
-The harness drives the root agent in an outer `while True:` loop (`agent_runner.py`, lines 503–740):
+### 5.3. Multi-Turn Loop, Tool Error Recovery, Continuation Nudges & Termination
+The harness drives the root agent in an outer `while True:` loop (`agent_runner.py`):
+- **Tool Error Recovery (`ToolErrorPlugin` & Skill Argument Coercion)**:
+  - `ToolErrorPlugin` registers `on_tool_error_callback` on the ADK `App` so that undeclared/hallucinated tool calls or runtime tool exceptions are caught and returned to the model as structured error dictionaries (`{"status": "error", "error_type": "<ExcName>", "error": "<Message>"}`) instead of aborting the task.
+  - Both `ToolErrorPlugin.before_tool_callback` and `_wrap_skill_toolset_tools` automatically coerce single-element list strings (`["name"]` $\to$ `"name"`) for `skill_name` and `file_path` on ADK `SkillToolset` tools (`load_skill`, `load_skill_resource`, `run_skill_script`).
 - **Immediate Termination on `submit_patch()`**:
   - During `runner.run_async(...)`, if the agent calls `submit_patch()`, `context.patch_submitted` becomes `True`.
   - As soon as the agent emits a final text response (`is_final_response()`) or finishes the current `run_async` turn with `context.patch_submitted == True`, **the harness immediately breaks out of the agent loop** and proceeds to patch extraction and Phase 2 verification.
@@ -428,7 +436,7 @@ Returns live budget consumption and patch status.
 
 ### 6.2. Workspace File Tools (`swegemma/tools/workspace.py`)
 
-All file paths are resolved relative to `/workspace` via `_resolve_workspace_path(filepath)`. Leading `/` or `/workspace/` prefixes are stripped automatically (`"/workspace/src/app.py"` and `"src/app.py"` both resolve to `/workspace/src/app.py`). Any path containing `..` traversal raises a `ValidationError`.
+All file paths are resolved relative to `/workspace` via `_resolve_workspace_path(filepath)`. Leading `/` or `/workspace/` prefixes are stripped automatically (`"/workspace/src/app.py"` and `"src/app.py"` both resolve to `/workspace/src/app.py`). Any path containing `..` traversal raises a `ValidationError`. String-encoded integer and boolean arguments emitted by LLMs (e.g., `"10"` for `start_line` or `"true"` for `allow_multiple`) are automatically coerced to their target Python types.
 
 #### 4. `read_file(filepath: str, start_line: int | None = None, end_line: int | None = None) -> str`
 Reads a file from `/workspace` with 1-indexed inclusive line slicing.
@@ -479,45 +487,51 @@ Creates or overwrites a file at `/workspace/<filepath>`, automatically creating 
 
 ### 6.3. Code Intelligence Graph Tools (`swegemma/tools/graph.py`)
 
-When pre-computed AST/dependency graphs (`data/graphs/<repo>.json`) and node embeddings (`data/embeddings/<repo>.npz`) are available for a repository, these three tools query the in-memory NetworkX `CustomMultiDiGraph`:
+When pre-computed AST/dependency graphs (`data/graphs/<repo>.json`) and node embeddings (`data/embeddings/<repo>.npz`) are available for a repository, these three tools query the in-memory NetworkX `CustomMultiDiGraph` (automatically coercing string-encoded integers for `max_neighbors`/`k` and JSON or comma-separated strings for `nodes`):
 
 #### 7. `get_code_neighbors(node: str, edge_type: str | None = None, max_neighbors: int = 50) -> str`
 Finds incoming and outgoing neighbors of a symbol (`node`) in the repository call/dependency graph.
 - **Counts toward `tool_calls` budget**: **Yes** (`@budget_gated`).
-- **Symbol Resolution**: `resolve_node_name` resolves short names (e.g., `"FastAPI.get"` or `"Request"`) via 4 tiers: exact match $\to$ `.` or `/` suffix match $\to$ case-insensitive match $\to$ substring match.
-- **`edge_type`**: Optional filter (e.g., `"CALLS"`, `"DEFINED_IN"`, `"IMPORTS"`).
+- **Symbol Resolution**: `resolve_node_name` resolves short names (e.g., `"FastAPI.get"` or `"Request"`) via 4 tiers: exact match $\to$ `.` / `;` / `/` suffix match $\to$ case-insensitive match $\to$ substring match.
+- **`edge_type`**: Optional case-insensitive filter (e.g., `"calls"`).
+- **Output Truncation**: Neighbor names are capped to `max_stdout_chars` (**`5,000` characters** default), setting `is_truncated: true` if truncated.
 - **Returns**:
   ```json
-  {"status": "ok", "node": "fastapi.applications.FastAPI", "neighbors": ["..."], "count": 18}
+  {"status": "ok", "node": "fastapi.applications.FastAPI", "neighbors": ["..."], "count": 18, "is_truncated": false}
   ```
 
 #### 8. `search_similar_code(query: str, k: int = 10) -> str`
 Finds top-`k` graph nodes with highest cosine similarity to `query` in the pre-computed `.npz` embedding archive.
 - **Counts toward `tool_calls` budget**: **Yes** (`@budget_gated`).
-- **Query Resolution Note**: Because the sandbox runs offline without a live neural embedding server, `embed(query)` resolves `query` against node keys/suffixes stored in the `.npz` dictionary and computes cosine similarity across all other nodes in the repository. Pass a class, function, or module symbol name (e.g., `"HTTPConnection"` or `"parse_header"`) rather than a free-form natural language sentence.
+- **Query Resolution Note**: Because the sandbox runs offline without a live neural embedding server, `search_similar_code` resolves `query` against node keys/suffixes stored in the graph and `.npz` dictionary and computes cosine similarity across all other nodes in the repository (with a lexical token-overlap fallback if `query` is a multi-word keyword string). Pass a dotted symbol path or short symbol name (e.g., `"pkg.module.Class.method"`, `"Class.method"`, or `"parse_header"`).
+- **Output Truncation**: Total `code` characters across all `k` returned nodes are capped at `max_stdout_chars` (**`5,000` characters** default), dividing the budget across the `k` results with unused characters from shorter snippets rolling over to larger nodes, and setting `is_truncated: true` when any snippet is truncated.
 - **Returns**:
   ```json
   {
     "status": "ok",
     "query": "HTTPConnection",
     "results": [{"node_name": "...", "code": "...", "similarity": 0.9412}],
-    "count": 10
+    "count": 10,
+    "is_truncated": false
   }
   ```
 
 #### 9. `get_code_subgraph(nodes: list[str]) -> str`
 Extracts the induced subgraph (all nodes and interconnecting edges) for a list of symbols.
 - **Counts toward `tool_calls` budget**: **Yes** (`@budget_gated`).
+- **Output Truncation**: Returned `nodes` and `edges` lists are capped to `max_stdout_chars` (**`5,000` characters** default), setting `is_truncated: true` if truncated.
 - **Returns**:
   ```json
   {
     "status": "ok",
     "nodes": ["node_a", "node_b"],
-    "edges": [{"from": "node_a", "to": "node_b", "type": "CALLS"}],
+    "edges": [{"from": "node_a", "to": "node_b", "type": "calls"}],
     "node_count": 2,
-    "edge_count": 1
+    "edge_count": 1,
+    "is_truncated": false
   }
   ```
+
 
 ---
 
@@ -542,8 +556,9 @@ evaluation:
 | **Max LLM Reasoning Turns** | `config.budget.turns` | `500` turns (`None` $\to$ `500`; `50` in sample submission) | `evaluation.max_turns` | `SWE_MAX_TURNS` / `SWE_MAX_LOOP_ITERATIONS` |
 | **Max Monetary Cost** | `config.budget.cost_usd` | `None` | — | — |
 | **Max Total Tokens** | `config.budget.total_tokens` | `None` | — | — |
-| **Single Command Timeout** | `config.harness.command_timeout_seconds` | `300` sec | `evaluation.timeout_seconds` | `SWE_TIMEOUT_SECONDS` |
-| **Max Command / Diff Output** | `config.harness.max_stdout_chars` | `5,000` chars | — | — |
+| **Single Command Timeout (Phase 1)** | `config.harness.command_timeout_seconds` | `300` sec | `evaluation.timeout_seconds` | `SWE_TIMEOUT_SECONDS` |
+| **Verification `pytest` Timeout (Phase 2)** | `config.harness.verification_timeout_seconds` | `300` sec | — *(fixed at `300` sec on scorer)* | `SWE_TIMEOUT_SECONDS` (`metric.py`) |
+| **Max Command / Diff / Graph Output** | `config.harness.max_stdout_chars` | `5,000` chars | — | — |
 | **Max Lines per `read_file`** | `config.harness.max_file_lines` | `150` lines | — | — |
 | **Max Chars per `read_file`** | `config.harness.max_file_chars` | `10,000` chars | — | — |
 
@@ -553,7 +568,7 @@ evaluation:
 ### 7.2. Automatic Context Window Compaction & Prefix Caching
 To prevent long debugging trajectories from overflowing the 32,768-token context window on vLLM, `swegemma` configures Google ADK's context management on the `App` instance (`scripts/inference.py`):
 - **Events Compaction (`EventsCompactionConfig`)**:
-  - `compaction_interval = 5`
+  - `compaction_interval = 15`
   - `overlap_size = 2`
   - `token_threshold = 14,336`
   - `event_retention_size = 5`
@@ -573,28 +588,31 @@ cd /workspace && git add -N .
 cd /workspace && (git diff --binary _swegemma_baseline 2>/dev/null || git diff --binary HEAD)
 ```
 1. **Why `git add -N .` Matters**: `--intent-to-add` registers any newly created untracked files in the git index with empty content so that **`git diff` includes both modifications to existing tracked files AND newly created files**, while still ignoring everything listed in `/workspace/.git/info/exclude` (`__pycache__/`, `*.pyc`, `.pytest_cache/`, `*.egg-info/`, `build/`, `dist/`, `.coverage`).
-2. **Automatic Unsubmitted Patch Recovery (`agent_runner.py`, lines 760–795)**:
-   If an agent finishes, hits `max_nudges`, exhausts `tool_calls` or `turns`, or times out **without ever calling `submit_patch()`**, the harness automatically runs `git add -N .` and `git diff --binary _swegemma_baseline` before tearing down Container A.
-   - If the working tree contains non-empty modifications (`agent_patch != ""`), `Evaluator.evaluate_task` (`evaluate.py`) and `scripts/inference.py` still record `agent_patch` in `submission.parquet` (`[id, prediction]`) so it is evaluated in Phase 2 verification!
+2. **Protected Test & Config File Stripping (`strip_protected_files_from_patch`)**: Both `submit_patch()` and the unsubmitted-diff fallback strip any diff hunks touching protected test files (`test_*.py`, `*_test.py`, or `.py` files under `tests/`, `test/`, `testing/`) or runner configuration files (`conftest.py`, `pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`, `.pytest.ini`, `sitecustomize.py`, `usercustomize.py`, `_swegemma_stubs.py`, `*.pth`) so temporary reproduction tests or runner config edits never pollute `agent_patch`.
+3. **Automatic Unsubmitted Patch Recovery (`agent_runner.py`, lines 760–805)**:
+   If an agent finishes, hits `max_nudges`, exhausts `tool_calls` or `turns`, or times out **without ever calling `submit_patch()`**, the harness automatically runs `git add -N .`, `git diff --binary _swegemma_baseline`, and `strip_protected_files_from_patch` before tearing down Container A.
+   - If the working tree contains non-empty modifications to non-protected files (`agent_patch != ""`), `Evaluator.evaluate_task` (`evaluate.py`) and `scripts/inference.py` still record `agent_patch` in `submission.parquet` (`[id, prediction]`) so it is evaluated in Phase 2 verification!
 
 ### 8.2. Phase 2 Verification in Container B (`harness/verification.py` & `scripts/metric.py`)
 During Stage 2 scoring (`score(solution, submission, row_id_column_name)` in `scripts/metric.py`), when `agent_patch` (`prediction`) is non-empty, `verify_task` executes in a fresh **Container B**:
 1. **Fresh Baseline Setup**: Extracts the original task snapshot at `base_commit`, configures synthetic hardware stubs and `.git/info/exclude`, installs `/workspace` in editable mode, installs cached test dependencies, writes `/workspace/pytest.ini` and `/workspace/conftest.py`, and creates the `eval_baseline` commit (`HEAD`).
-2. **4-Pass Resilient Patch Application (`apply_patch_in_container`)**:
-   Applies `agent_patch` using four fallback passes until one succeeds:
+2. **Protected File Stripping & 4-Pass Resilient Patch Application (`strip_protected_files_from_patch` & `apply_patch_in_container`)**:
+   Strips any diff sections targeting protected test or runner configuration files (`strip_protected_files_from_patch`) and applies the remaining `agent_patch` using four fallback passes until one succeeds:
    - **Pass 1**: `git apply --unsafe-paths` (`-p1`), then `-3` (three-way merge), then `--ignore-space-change --ignore-whitespace`, then `--recount`.
    - **Pass 2**: Symlink-normalized `git apply --unsafe-paths` (`-p1`) (resolving symlinked directory prefixes inside `/workspace`).
    - **Pass 3**: Prefixless `-p0` `git apply --unsafe-paths`.
    - **Pass 4**: Non-interactive GNU `patch -p1` / `patch -p0` (`--batch --forward` and `-l`), gated by `--dry-run`.
    - If all 4 passes fail (`exit_code != 0`), the task immediately fails with `resolved = False` (`error = "Failed to apply agent patch: ..."`).
 3. **Anti-Tampering Test & Config Reset (`_is_protected_test_or_config_path`)**:
-   The harness identifies all file paths referenced in `task.test_patch` **plus** any protected test files (`test_*.py`, `*_test.py`, or `.py` files under `tests/`, `test/`, `testing/`) and test runner configuration files (`conftest.py`, `pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`, `.pytest.ini`, `sitecustomize.py`, `usercustomize.py`, `_swegemma_stubs.py`, `*.pth`) touched by `agent_patch`, and forcefully resets them to `eval_baseline` (`HEAD`) before applying `task.test_patch`:
+   The harness identifies all file paths referenced in `task.test_patch` **plus** any protected test files (`test_*.py`, `*_test.py`, or `.py` files under `tests/`, `test/`, `testing/`) and test runner configuration files (`conftest.py`, `pytest.ini`, `pyproject.toml`, `tox.ini`, `setup.cfg`, `.pytest.ini`, `sitecustomize.py`, `usercustomize.py`, `_swegemma_stubs.py`, `*.pth`) touched by `agent_patch`, and forcefully resets them to `eval_baseline` (`HEAD`) before applying `task.test_patch` (filtering tracked pathspecs via `git ls-tree` so missing pathspecs do not abort `git checkout`):
    ```bash
-   cd /workspace && git checkout HEAD -- <files_to_reset> 2>/dev/null || true
+   cd /workspace && tracked=$(git ls-tree -r --name-only HEAD -- <files_to_reset> 2>/dev/null) \
+     && [ -n "$tracked" ] && git ls-tree -r -z --name-only HEAD -- <files_to_reset> \
+     | xargs -0 git checkout HEAD -- 2>/dev/null || true
    cd /workspace && git clean -f -- <files_to_reset> 2>/dev/null || true
    ```
    > [!CAUTION]
-   > Any modifications your agent makes to test files or runner configurations (`conftest.py`, `pytest.ini`, `pyproject.toml`, etc.) are **discarded** by `git checkout HEAD` and `git clean -f` before `task.test_patch` is applied. Your agent must fix the underlying library code under `/workspace`, not alter test files or test runner hooks.
+   > Any modifications your agent makes to test files or runner configurations (`conftest.py`, `pytest.ini`, `pyproject.toml`, etc.) are **stripped and discarded** before `task.test_patch` is applied. Your agent must fix the underlying library code under `/workspace`, not alter test files or test runner hooks.
 4. **Apply `task.test_patch` & Run Hermetic `pytest` with JUnit XML**:
    The harness applies `task.test_patch`, refreshes test dependencies and `pytest.ini`/`conftest.py`, and runs:
    ```bash
@@ -633,10 +651,13 @@ swegemma eval \
 Key CLI flags (`swegemma eval`):
 - `--task-id <id>` / `--task-ids <id1> <id2>`: Evaluate specific `instance_id`(s) for rapid debugging.
 - `--sandbox {docker,subprocess}`: Choose Docker containers (default) or local subprocess isolation.
+- `--timeout-seconds <sec>`: Per-command timeout in seconds for Phase 1 agent tool calls (default `300`).
+- `--verification-timeout-seconds <sec>`: Timeout in seconds for Phase 2 `pytest` verification runs (default `300`).
 - `--concurrency <N>`: Evaluate `N` tasks in parallel (automatically activates the multi-slot `dashboard` UI).
 - `--shard-index <k> --num-shards <M>`: Run deterministic shard `k` of `M` (`task_idx % M == k`).
 - `--models-yaml <path>`: Custom `models.yaml` file mapping model aliases and token pricing.
 - `--skip-agent-patch`: Bypass Phase 1 (`agent_patch = ""`) to verify baseline test failure behavior in Phase 2.
+
 
 ### 9.2. Results Directory Artifacts (`--results-dir`)
 Every evaluation run writes incremental, crash-safe outputs to `--results-dir`:
