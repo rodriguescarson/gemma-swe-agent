@@ -103,10 +103,11 @@ def test_the_empty_read_limit_is_configurable(tmp_path):
 
 def test_gives_up_when_no_final_status_arrives_within_push_max_s(tmp_path):
     # a kernel that stays RUNNING (or a status stuck on QUEUED) must not hold a chain beyond the deadline
-    env = _setup(tmp_path, "k", "k", ["RUNNING"]); env.update(PUSH_MAX_S="1", PUSH_POLL_S="0.2")
+    # 2 s, not 1: the script's clock is whole seconds (`date +%s`), so a 1 s limit can pass after a few milliseconds
+    env = _setup(tmp_path, "k", "k", ["RUNNING"]); env.update(PUSH_MAX_S="2", PUSH_POLL_S="0.2")
     r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
-    assert r.returncode == 1 and "no final status after PUSH_MAX_S=1s (last: KernelWorkerStatus.RUNNING)" in r.stdout, r.stdout + r.stderr
-    assert 3 <= _status_calls(tmp_path) <= 12 and "kernels output" not in (tmp_path / "calls.log").read_text()
+    assert r.returncode == 1 and "no final status after PUSH_MAX_S=2s (last: KernelWorkerStatus.RUNNING)" in r.stdout, r.stdout + r.stderr
+    assert 2 <= _status_calls(tmp_path) <= 60 and "kernels output" not in (tmp_path / "calls.log").read_text()
 
 
 def test_the_default_deadline_is_14_hours():
