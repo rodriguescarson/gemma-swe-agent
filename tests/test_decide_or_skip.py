@@ -26,7 +26,8 @@ def rows(n_solved, n_total=74, crash=False, secs=120.0):
 def harness(tmp_path, statuses, results, fail_outputs=0):
     """A scripts/ dir with decide_or_skip.sh, a stub submit_at.sh and a fake kaggle; statuses are consumed in order. The
     repository layout is mimicked: data/kaggle_valid_ids.txt (t0..t73, the ids rows() makes) sits next to scripts/, and
-    the first `fail_outputs` calls of 'kernels output' fail with exit 1 and no file (their count is in outputs.count)."""
+    the first `fail_outputs` calls of 'kernels output' fail with exit 1 and no file (their count is in outputs.count), or with
+    a truncated results.jsonl left behind when the test sets FAKE_PARTIAL in the script's environment."""
     sdir = tmp_path / "scripts"; sdir.mkdir()
     (tmp_path / "data").mkdir(); (tmp_path / "data" / "kaggle_valid_ids.txt").write_text("".join(f"t{i}\n" for i in range(74)))
     shutil.copy(SCRIPT, sdir / "decide_or_skip.sh")
@@ -46,8 +47,8 @@ if [ "$1 $2" = "kernels status" ]; then
 fi
 if [ "$1 $2" = "kernels output" ]; then
   n=$(cat {cnt} 2>/dev/null || echo 0); n=$((n+1)); echo $n > {cnt}
-  [ "$n" -le {fail_outputs} ] && {{ echo "fake kaggle: output download failed" >&2; exit 1; }}
   for ((i=1;i<=$#;i++)); do [ "${{!i}}" = "-p" ] && j=$((i+1)) && d=${{!j}}; done
+  [ "$n" -le {fail_outputs} ] && {{ [ -n "${{FAKE_PARTIAL:-}}" ] && {{ mkdir -p "$d"; printf '{{"id": "t0", "resol' > "$d/results.jsonl"; }}; echo "fake kaggle: output download failed" >&2; exit 1; }}
   mkdir -p "$d"; [ -f {res} ] && cp {res} "$d/results.jsonl"; exit 0
 fi
 echo "fake kaggle: unknown $*" >&2; exit 1
@@ -184,3 +185,43 @@ def test_three_failed_downloads_leave_the_slot_unused_after_exactly_three_tries(
 def test_a_clean_download_is_tried_once(tmp_path):
     rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], rows(31))
     assert rc == 0 and output_calls(tmp_path) == 1 and "output download" not in log, log
+
+
+# ------------------------------------------------- no verdict from a partial download, and the last row per id wins (2026-10-29)
+CRASH_T3 = {"id": "t3", "resolved": False, "err": "Tool 'view.py' not found.", "secs": 120.0}
+
+
+def test_a_truncated_file_left_by_failed_downloads_is_no_results_not_judged(tmp_path):
+    """A download that dies half way can leave a truncated results.jsonl while kaggle exits non-zero. After three failed tries
+    that file must not reach the judge (it used to: a JSONDecodeError traceback gave an empty verdict)."""
+    rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], rows(31), fail_outputs=9, env={"FAKE_PARTIAL": "1"})
+    left = tmp_path / "out" / "results.jsonl"
+    assert left.read_text().startswith('{"id": "t0", "resol'), "the fake did not leave a truncated file behind"
+    assert rc == 3 and "decision: NO_RESULTS 0 0 0 0 74" in log and "SKIPPED: slot left unused (NO_RESULTS" in log and "SUBMIT" not in log, log
+    assert output_calls(tmp_path) == 3 and "Traceback" not in log, log
+
+
+@pytest.mark.parametrize("body", [
+    pytest.param(lambda: "".join(json.dumps(r) + "\n" for r in rows(35)).encode() + b'{"id": "t73", "resol', id="truncated-last-line"),
+    pytest.param(lambda: b"[1, 2]\n" + "".join(json.dumps(r) + "\n" for r in rows(35)).encode(), id="a-row-that-is-not-an-object"),
+    pytest.param(lambda: b'\xff\xfe{"id": "t0"}\n', id="not-utf-8"),
+])
+def test_a_results_file_that_is_not_valid_json_lines_is_no_results(tmp_path, body):
+    """The download itself succeeded (one try), but the file cannot be read as JSON lines: NO_RESULTS, never a crash of the judge."""
+    (tmp_path / "results.jsonl").write_bytes(body())                # harness() copies it when it is given no rows
+    rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], None)
+    assert rc == 3 and "decision: NO_RESULTS 0 0 0 0 74" in log and "SUBMIT" not in log and "Traceback" not in log, log
+    assert output_calls(tmp_path) == 1, log
+
+
+def test_the_last_row_for_an_id_wins_so_a_superseded_crash_row_does_not_count(tmp_path):
+    """t3 appears twice: a crash row first, then its real (solved) row. One row per id is judged and the later one wins."""
+    rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], [CRASH_T3] + rows(31))
+    assert rc == 0 and "decision: PASS 31 74 0 8880 0" in log and "SUBMIT g4agent-v5h2-think" in log, log
+
+
+def test_the_last_row_for_an_id_wins_also_when_it_is_the_crash(tmp_path):
+    """The other order: t3 solved first, then a crash row. The later row wins, so the crash counts and the slot is skipped
+    even though 30 of 74 solved is above the minimum of 29."""
+    rc, log = run(tmp_path, ["KernelWorkerStatus.COMPLETE"], rows(31) + [CRASH_T3])
+    assert rc == 3 and "decision: FAIL 30 74 1 8880 0" in log and "SUBMIT" not in log, log
