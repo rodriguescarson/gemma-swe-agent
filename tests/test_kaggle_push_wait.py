@@ -16,7 +16,8 @@ def _setup(tmp, slug, kid, statuses):
                     'case "$1 $2" in\n'
                     '  "kernels push") echo "Kernel version 7 successfully pushed";;\n'
                     '  "kernels status") n=$(cat "$FAKE_COUNT" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$FAKE_COUNT";'
-                    ' s=$(sed -n "${n}p" "$FAKE_STATUSES"); [ -z "$s" ] && s=$(tail -1 "$FAKE_STATUSES"); echo "$3 has status \\"KernelWorkerStatus.$s\\"";;\n'
+                    ' s=$(sed -n "${n}p" "$FAKE_STATUSES"); [ -z "$s" ] && s=$(tail -1 "$FAKE_STATUSES");'
+                    ' if [ "$s" = EMPTY ]; then echo ConnectionError >&2; else echo "$3 has status \\"KernelWorkerStatus.$s\\""; fi;;\n'
                     '  "kernels output") mkdir -p "$5"; echo "{}" > "$5/lora_probe.json";;\n'
                     'esac\n')
     fake.chmod(0o755)
@@ -73,3 +74,46 @@ def test_gpu_kernel_refuses_a_1x_cli_and_cpu_kernel_gets_no_accelerator(tmp_path
     meta.write_text(json.dumps({"id": "carsonrodrigues/c", "code_file": "c.ipynb", "enable_gpu": False}))
     r2 = subprocess.run(["bash", str(SCRIPT), "c"], cwd=tmp_path / "cpu", env=env2, capture_output=True, text=True, timeout=60)
     assert r2.returncode == 0 and "--accelerator" not in (tmp_path / "cpu" / "calls.log").read_text()
+
+
+def _status_calls(tmp):
+    return (tmp / "calls.log").read_text().count("kernels status")
+
+
+def test_gives_up_after_ten_empty_status_reads_in_a_row(tmp_path):
+    # a dead CLI or network used to loop here forever: every read returned nothing and nothing was "COMPLETE"
+    env = _setup(tmp_path, "k", "k", ["RUNNING", "EMPTY"])          # one real status, then nothing for ever
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and "10 status reads in a row returned nothing" in r.stdout, r.stdout + r.stderr
+    assert _status_calls(tmp_path) == 11 and "kernels output" not in (tmp_path / "calls.log").read_text()
+
+
+def test_a_real_status_resets_the_empty_read_count(tmp_path):
+    env = _setup(tmp_path, "k", "k", ["EMPTY"] * 9 + ["RUNNING"] + ["EMPTY"] * 9 + ["COMPLETE"])
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and "COMPLETE" in r.stdout, r.stdout + r.stderr
+    assert _status_calls(tmp_path) == 20
+
+
+def test_the_empty_read_limit_is_configurable(tmp_path):
+    env = _setup(tmp_path, "k", "k", ["EMPTY"]); env["PUSH_EMPTY_MAX"] = "3"
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and "3 status reads in a row returned nothing" in r.stdout and _status_calls(tmp_path) == 3
+
+
+def test_gives_up_when_no_final_status_arrives_within_push_max_s(tmp_path):
+    # a kernel that stays RUNNING (or a status stuck on QUEUED) must not hold a chain beyond the deadline
+    env = _setup(tmp_path, "k", "k", ["RUNNING"]); env.update(PUSH_MAX_S="1", PUSH_POLL_S="0.2")
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1 and "no final status after PUSH_MAX_S=1s (last: KernelWorkerStatus.RUNNING)" in r.stdout, r.stdout + r.stderr
+    assert 3 <= _status_calls(tmp_path) <= 12 and "kernels output" not in (tmp_path / "calls.log").read_text()
+
+
+def test_the_default_deadline_is_14_hours():
+    assert "MAX_S=${PUSH_MAX_S:-50400}" in SCRIPT.read_text() and 14 * 3600 == 50400
+
+
+def test_a_final_status_inside_the_deadline_still_wins(tmp_path):
+    env = _setup(tmp_path, "k", "k", ["QUEUED", "RUNNING", "COMPLETE"]); env["PUSH_MAX_S"] = "30"
+    r = subprocess.run(["bash", str(SCRIPT), "k"], cwd=tmp_path, env=env, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0 and "COMPLETE" in r.stdout and "kernels output" in (tmp_path / "calls.log").read_text()
