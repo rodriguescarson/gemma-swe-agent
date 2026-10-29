@@ -141,6 +141,8 @@ Agrees with the live file (these are the items where the 25 Sep copy disagreed w
 the old copy was stale): `gpu_memory_utilization=0.90`, compaction 15 / 2 / 14,336 / 5, `ContextCacheConfig`
 2,048 / 1,800 / 10, no `default_chat_template_kwargs`, TP 4, `max_model_len=32768`, parsers `gemma4`, budget defaults
 (300 s / 100 calls / 60.0 min), sequential tasks, subprocess sandbox.
+`tests/test_harness_readme_sync.py` now checks `gpu_memory_utilization` and the four compaction values against the README
+text, so a later README refresh or kernel edit that breaks the match fails there.
 
 Contradictions and gaps:
 1. **Phase 2 timeout (possible, depends on the wheelhouse build).** The kernel passes the bundle's `timeout_seconds` (180 for
