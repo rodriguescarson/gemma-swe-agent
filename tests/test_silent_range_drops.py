@@ -260,6 +260,7 @@ def test_collect_reports_unreadable_traces_instead_of_skipping_them(tmp_path):
 @pytest.mark.parametrize("body", [
     "null", "[]", "[1, 2]", '"a string"', "42", "true",              # valid JSON, not an object
     '{"steps": [null]}', '{"steps": "abc"}', '{"steps": [{"source": "agent", "tool_calls": [null]}]}',   # not step objects
+    '{"steps": 5}', '{"steps": [{"source": "agent", "tool_calls": 5}]}',                               # not iterable
 ])
 def test_a_trace_that_is_valid_json_but_not_a_trace_object_is_unreadable_not_a_crash(tmp_path, body):
     r = make_run(tmp_path, "run", {"a": TRACE_A})

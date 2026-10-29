@@ -111,10 +111,10 @@ def collect(run_dir):
         try:
             with open(p) as f:
                 d = json.load(f)
-            row = scan_trace(d) if isinstance(d, dict) else None      # valid JSON that is not an object is not a trace
-        except (ValueError, OSError, AttributeError, TypeError):      # not JSON, unreadable, or steps that are not objects
-            row = None
-        if row is None:
+            row = scan_trace(d)
+        except (ValueError, OSError, AttributeError, TypeError):
+            # not JSON, not readable, valid JSON that is not an object (null, [], a string: no .get), or steps that are
+            # not objects: an unreadable trace, counted and reported, never a crash
             bad += 1
             continue
         rows.append(dict(run=os.path.basename(p)[len('trace_'):-len('.json')], **row))
