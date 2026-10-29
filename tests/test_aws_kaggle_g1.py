@@ -6,6 +6,7 @@ the Mistral flags reach vLLM, the capture holds the 30 task calls and not the pr
 a disk shortfall stops cleanly before any download, and every failure ends in status.json. Plus the kernels' metadata."""
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -68,9 +69,20 @@ res.mkdir(parents=True, exist_ok=True)
 '''
 
 
+def free_ports(n):
+    """n distinct free ports, all held open while they are chosen (back-to-back free_port() calls can hand out one port twice)."""
+    socks = [socket.socket() for _ in range(n)]
+    try:
+        for s in socks:
+            s.bind(("127.0.0.1", 0))
+        return [s.getsockname()[1] for s in socks]
+    finally:
+        for s in socks:
+            s.close()
+
+
 def free_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0)); return s.getsockname()[1]
+    return free_ports(1)[0]
 
 
 def make_world(tmp_path):
@@ -87,10 +99,11 @@ def make_world(tmp_path):
         (h / "snapshots" / f"{i}.tgz").write_bytes(b"x")
     (h / "wheels" / "a-1.0-py3-none-any.whl").write_bytes(b"x")
     vllm = tmp_path / "fake_vllm"; vllm.write_text(FAKE_VLLM); vllm.chmod(0o755)
+    vport, pport, sport = free_ports(3)   # every port the driver binds: its defaults (8101, 8102, 8201) collide with whatever else is on the host
     env = {**os.environ, "G1_W": str(tmp_path / "working"), "G1_ROOT": str(root), "G1_H": str(tmp_path / "h"), "G1_INPUT": str(tmp_path / "input"),
            "G1_SCRATCH": str(tmp_path / "scratch"), "G1_MODELS": str(tmp_path / "models"), "G1_PY312": sys.executable, "G1_TV_VLLM": str(vllm),
-           "G1_SKIP_DOWNLOAD": "1", "G1_ALLOW_FEWER_GPUS": "1", "G1_WEIGHTS_GB": "0.1", "G1_CONC": "4", "G1_VPORT": str(free_port()),
-           "G1_PPORT": str(free_port()), "FAKE_LOG": str(tmp_path / "runner.jsonl"), "PYTHONDONTWRITEBYTECODE": "1"}
+           "G1_SKIP_DOWNLOAD": "1", "G1_ALLOW_FEWER_GPUS": "1", "G1_WEIGHTS_GB": "0.1", "G1_CONC": "4", "G1_VPORT": str(vport),
+           "G1_PPORT": str(pport), "G1_SPORT": str(sport), "FAKE_LOG": str(tmp_path / "runner.jsonl"), "PYTHONDONTWRITEBYTECODE": "1"}
     return env, tmp_path / "working", root
 
 
@@ -463,3 +476,32 @@ def test_the_harness_probe_carries_every_field_the_harness_adds():
     assert "temperature: 0.2" in sampling and "top_p: 0.95" in sampling and "thinking_budget: 4096" in sampling
     import strip_proxy
     assert set(strip_proxy.STRIP) >= {"chat_template_kwargs", "thinking_token_budget"}
+
+
+def test_make_world_pins_every_port_the_driver_binds(tmp_path):
+    """The driver's strip proxy listens on G1_SPORT (default 8102); make_world pinned only G1_VPORT and G1_PPORT, so a run
+    failed whenever something else held 8102 (a second test run, a local vLLM). Every G1_*PORT variable the driver reads must be
+    set to its own free port, none of them a default."""
+    names = set(re.findall(r'E\("(G1_[A-Z]*PORT)"\)', DRIVER.read_text()))
+    assert names >= {"G1_VPORT", "G1_PPORT", "G1_SPORT"}
+    env, _, _ = make_world(tmp_path)
+    ports = [env[n] for n in sorted(names)]
+    assert len(set(ports)) == len(ports) and not {"8101", "8102", "8201"} & set(ports), ports
+
+
+def test_a_busy_default_port_does_not_break_a_run(tmp_path):
+    """Host state: with the driver's default strip-proxy port taken by another process the whole teacher run still goes through."""
+    held = []
+    for port in (8101, 8102, 8201):
+        s = socket.socket()
+        try:
+            s.bind(("127.0.0.1", port)); s.listen(1); held.append(s)
+        except OSError:
+            s.close()                       # already taken by someone else: that is the situation under test anyway
+    try:
+        env, w, _ = make_world(tmp_path)
+        run(env, "teacher")
+        assert json.loads((w / "status.json").read_text())["ok"] is True
+    finally:
+        for s in held:
+            s.close()
