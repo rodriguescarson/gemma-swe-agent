@@ -2,7 +2,7 @@
 Kaggle (status, output), a stub submit_at.sh records what would have been submitted. PASS submits the candidate with the
 message; FAIL (too few solved, a crash row, too many seconds) and a non-COMPLETE eval leave the slot unused with exit 3 and a
 SKIPPED line; a missing results file is NO_RESULTS; the eval wait loop polls until COMPLETE. Written before the script was armed."""
-import json, os, shutil, stat, subprocess
+import datetime, json, os, shutil, stat, subprocess
 from pathlib import Path
 
 import pytest
@@ -46,11 +46,24 @@ echo "fake kaggle: unknown $*" >&2; exit 1
     return sdir, kaggle
 
 
-def run(tmp_path, statuses, results, min_solved=29, env=None):
+NOON = int(datetime.datetime(2026, 10, 29, 12, 0, tzinfo=datetime.timezone.utc).timestamp())
+
+
+def fake_clock(tmp_path, now_epoch=NOON):
+    """PATH for a fixed clock: `date -u +%s` reports now_epoch, every other form of date is the real one. The script waits for
+    the eval kernel only until 15 minutes before the end of the UTC day, so with the wall clock the wait-loop test failed from
+    23:45 to 00:00 UTC (the loop saw the day as over and skipped at the first RUNNING status)."""
+    b = tmp_path / "fakebin"; b.mkdir(exist_ok=True)
+    (b / "date").write_text(f'#!/bin/bash\n[ "$1 $2" = "-u +%s" ] && {{ echo {now_epoch}; exit 0; }}\nexec /bin/date "$@"\n')
+    (b / "date").chmod(0o755)
+    return {"PATH": f"{b}:{os.environ['PATH']}"}
+
+
+def run(tmp_path, statuses, results, min_solved=29, env=None, now_epoch=NOON):
     sdir, kaggle = harness(tmp_path, statuses, results)
     log = tmp_path / "log.txt"
     e = dict(os.environ, KAGGLE_BIN=str(kaggle), SUBMIT_LOG=str(log), DECIDE_OUT=str(tmp_path / "out"), SUBMIT_TARGET_EPOCH="0",
-             DECIDE_POLL_S="0", KERNEL_VERSION="1", **(env or {}))
+             DECIDE_POLL_S="0", KERNEL_VERSION="1", **fake_clock(tmp_path, now_epoch), **(env or {}))
     p = subprocess.run(["bash", str(sdir / "decide_or_skip.sh"), "g4-eval74-v4", "g4agent-v5h2-think", "0001", str(min_solved), "sub13: test"],
                        capture_output=True, text=True, env=e, timeout=60)
     return p.returncode, log.read_text() if log.exists() else ""
@@ -98,3 +111,10 @@ def test_missing_kaggle_binary_aborts_at_arm_time(tmp_path):
     e = dict(os.environ, KAGGLE_BIN=str(tmp_path / "nope"), SUBMIT_LOG=str(log), SUBMIT_TARGET_EPOCH="0")
     p = subprocess.run(["bash", str(sdir / "decide_or_skip.sh"), "e", "c", "0001", "29", "m"], capture_output=True, text=True, env=e, timeout=30)
     assert p.returncode == 2 and "ABORT: kaggle binary not found" in log.read_text()
+
+
+def test_a_still_running_eval_at_the_end_of_the_utc_day_skips_the_slot(tmp_path):
+    # the other side of the wait loop, on a fixed clock at 23:50 UTC (inside the last 15 minutes): no further wait, no submission
+    late = int(datetime.datetime(2026, 10, 29, 23, 50, tzinfo=datetime.timezone.utc).timestamp())
+    rc, log = run(tmp_path, ["KernelWorkerStatus.RUNNING"], rows(40), now_epoch=late)
+    assert rc == 3 and "waiting for eval kernel" not in log and "decision: NO_EVAL status=KernelWorkerStatus.RUNNING" in log and "SUBMIT" not in log, log
