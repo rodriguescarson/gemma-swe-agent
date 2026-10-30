@@ -17,8 +17,10 @@ this file only orders the work.
   single-read bands are noise; our line's mean (0.14-0.15) equals the field's bulk; the best public lineages lead by 1-2
   tasks and differ from us mainly in the budget (8 min). Records corrected (v12b has one read; pub024_6m never ran; capped
   solves were mislabelled; Phase 2 is 300 s on the live wheelhouse).
-- [ ] **sub28 withdrawn** (a v12b repeat cannot separate v12b from v12: SE about 1.1 tasks). Next slot, owner's choice:
-  v12b at 5.5 min (breach about 0-1.5%, about +0.5 task), 6 min (breach 6-17%), or an 8-minute public lineage.
+- [~] **sub28 = v12b_55** (v12b, max_time_minutes 5.5; owner's choice 31 Oct, replacing the v12b repeat): chain
+  `eval/arm_sub28_v12b55.sh` (log `eval/arm_sub28_v12b55.out`) ships both kernels, runs the 74-task 4x L4 gate after the
+  weekly quota reset (PASS: 74 rows, 0 crashes, solved >= 26, secs <= 21,500), then submits with tag sub28:. GAPS "sub28
+  re-registered".
 - [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1: the scored 31B bundle with the
   best expected private score, judged on the pooled line and its mechanism (budget), not on a single read. Pick 2: v12b_e4b_card (0.08), the small-model
   entry for the $10k bonus (owner, 30 Oct).
