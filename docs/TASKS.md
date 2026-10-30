@@ -1,17 +1,19 @@
 # Gemma 4 Developer Agent: task list and experiment plan
 
-Living list, updated 2026-10-29 IST. Goal: more hidden tasks solved under the scorer's 5-minute cap, with changes we can
+Living list, updated 2026-10-30 IST. Goal: more hidden tasks solved under the scorer's 5-minute cap, with changes we can
 actually show are better. Every experiment gets its own pre-registration in `docs/GAPS_2026-10-06.md` before any row exists;
 this file only orders the work.
 
 ## Now
 
-- [ ] **sub27 = v12b_ctx** (context rules against compaction): chain `eval/arm_sub27_ctx.sh`, log `eval/arm_sub27_ctx.out`.
-  Scores about 19 h after it lands. Bands (GAPS "sub27 pre-registration"): 0.19+ candidate for final pick 1, 0.15-0.18
-  neutral, 0.14 or less dropped.
-- [ ] **v12b_ctx on all 74 public tasks, Kaggle 4x L4**, after the weekly GPU quota resets and no submission is scoring
-  (`scripts/ship.sh submissions/v12b_ctx g4-l4-v12b-ctx-p312 eval --ids data/kaggle_valid_ids.txt --pin original --kernel-id g4-eval74-v3`,
-  then `KAGGLE_BIN=.venv/bin/kaggle bash scripts/kaggle_push_wait.sh g4-l4-v12b-ctx-p312`).
+- [x] **sub27 = v12b_ctx read 0.13 (30 Oct): dropped by its rule** (GAPS "sub27 result"). Its L4 full-74 run is no longer
+  needed. v12b stays final pick 1.
+- [ ] **Where the main track stands (30 Oct).** Eight hidden reads of the v12 single-agent line at 5 min average 0.13
+  (v12 0.15/0.13, v12b 0.17, v13 0.13, v12b_edit6 0.13, v12b_ctx 0.13, b1024 0.10, v15b 0.10); on the clean labels the
+  same configs solve 21-30 of 71 locally, an A/A repeat moves a config by up to 3, and local order has never matched hidden
+  order. No candidate in the backlog is expected to move the mean by one task. Open owner decisions: what the remaining
+  daily slots are for (repeat reads of v12b so finals are chosen on a mean, per PATH_TO_020; or the small-model track), and
+  final pick 2 (R2).
 - [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1 is v12b (0.17) until a candidate
   beats it by its rule.
 - [ ] **Paper track**: writeup editable until 13 Nov 05:29 IST; the compaction mechanism and the run audit are new material.
@@ -63,8 +65,10 @@ resolves about one task.
 - [ ] **V2 Grow the benchmark.** The competition's task file has 129 tasks; our kernel graded the 55 new ones 0/55. Run the
   gold-patch oracle on all 129 in a CPU kernel (no GPU quota). Gradable new tasks become the validation set: no config
   was ever tuned on them.
-- [ ] **V3 Validate the 32-task screen out of sample** (`data/screen32_ids.txt`: 22 contested + 10 rare). On the next two
-  full runs, check that the flips still fall inside the 32; until then it screens, it never gates.
+- [ ] **V3 Validate the screen out of sample.** Since 30 Oct the screen is `data/screen32_clean_ids.txt` (19 ids: rare plus
+  contested on the 11 comparable configs, V5); `data/screen32_ids.txt` (32, raw labels) is kept as the earlier in-sample
+  record and `eval/analysis/out/task_reach.json` stays run_audit's raw output. On the next two full runs, check that the
+  flips fall inside the 19; until then it screens, it never gates.
 - [ ] **V4 Decision rule.** Paired sign test on discordant tasks (the existing `scripts/a6000/p2_report.py`), a candidate
   adopted only if it wins on the screen, holds on the full 74, and its hidden read is not below its band.
 - [x] **V5 Clean labels (30 Oct).** `eval/analysis/labels.py` writes `eval/analysis/out/labels_clean.json`,
@@ -73,7 +77,7 @@ resolves about one task.
   74/74, 40/40 Kaggle labels agree. 1 of 2,442 labels changes (`p4_pub024` rich_3782, a Pygments 2.21 box artefact).
   Comparable runs (5 min / 40 calls, no network, one config per draw) are 11 configs; on them the bands are 32 never,
   8 rare, 11 contested, 20 always, with 3 base-passing tasks apart. Open: whether the clean files replace
-  `task_reach.json` and `screen32_ids.txt` (owner's call).
+  `task_reach.json` and `screen32_ids.txt`: the clean screen is used from 30 Oct (V3); the raw files stay as records.
 
 ### 2. Observability (no GPU)
 
@@ -98,8 +102,7 @@ resolves about one task.
 
 ### 4. Context (running)
 
-- [~] **E-C1 v12b_ctx** (sub27): ranged reads of at most 80 lines, trimmed output, the edit plan in the reasoning, the issue
-  pinned in the system instruction.
+- [x] **E-C1 v12b_ctx** (sub27): read 0.13, dropped (GAPS "sub27 result").
 - [ ] **E-C2 Read what the summaries keep** (O1 on a local run of compaction-heavy tasks) before any further context rule.
 
 ### 5. Fix quality
@@ -185,16 +188,18 @@ slot, judged on mechanism counts decided before the run, never on one solve tota
   invocations like the scorer (was 5). Known gap, documented in the kernel: our kernel grades with the bundle's 180 s
   command timeout where the scorer uses 300 s, so kernel grades can only err low.
 
-**Submission candidates (one per slot, after sub27 reads; base = v12b_ctx if it reads 0.15 or more, else v12b):**
+**Submission candidates (one per slot; base = v12b since sub27 read 0.13):**
 - [x] B1 `v12b_ctx_sed` built and tested (bundle, flow and leakage tests; eval/analysis/silent_range_drops.py): read code with `sed -n` through run_command, never a ranged read_file. 2.5% of ranged reads
   lose their range to a parser garble (key `start_line"`) and silently return lines 1-150; v12b_ctx made ranges mandatory.
-  Corrected gain +0.05 to +0.15 per 74. Building now; no slot without the owner's OK.
+  Corrected gain +0.05 to +0.15 per 74. Built on v12b_ctx, which sub27 dropped; on the L4 traces garbled-range runs solve
+  4/12 against 60/136, so even a full fix is under one task in 74. Not worth a slot alone; rebuild on v12b only if paired
+  with another change.
 - [ ] B2 literal-change rule: do what the issue says, keep values raw, delegate like the sibling, and an old-behaviour test
   going red is expected (19 failing patches over 4 tasks coerce or invent behaviour; about +0.1 hidden).
 - [ ] B3 when the first check passes on unmodified code, derive the failing variant from the function's branch conditions
   (9425, 11194, 15589; about +0.1).
-- [ ] B4 `timeout_seconds` 180 -> 60 (51 command timeouts in 39 runs, mostly on never-solved hang tasks; 0 to +0.3; check
-  first that no successful command takes 60-180 s).
+- [x] B4 dropped (30 Oct): on the L4 traces only 3-4 commands per 74-task run reach 180 s, all on tasks no run solves,
+  and every successful command finishes under 10 s; expected gain about 0 (GAPS "sub27 result").
 - Not worth a slot: thinking 2,048, a "LOW thinking" line, lint guard, repetition guard, plan step, read-tests-first,
   localization prompts, deleting "Think briefly".
 
