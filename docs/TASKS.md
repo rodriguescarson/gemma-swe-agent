@@ -11,11 +11,14 @@ this file only orders the work.
 - [ ] **Where the main track stands (30 Oct).** Eight hidden reads of the v12 single-agent line at 5 min average 0.13
   (v12 0.15/0.13, v12b 0.17, v13 0.13, v12b_edit6 0.13, v12b_ctx 0.13, b1024 0.10, v15b 0.10); on the clean labels the
   same configs solve 21-30 of 71 locally, an A/A repeat moves a config by up to 3, and local order has never matched hidden
-  order. No candidate in the backlog is expected to move the mean by one task. Open owner decisions: what the remaining
-  daily slots are for (repeat reads of v12b so finals are chosen on a mean, per PATH_TO_020; or the small-model track), and
-  final pick 2 (R2).
-- [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1 is v12b (0.17) until a candidate
-  beats it by its rule.
+  order. No candidate in the backlog is expected to move the mean by one task. Owner, 30 Oct: the slots go to repeat reads
+  of v12b; no further 31B prompt edits are queued.
+- [ ] **sub28 = v12b again** (Kaggle kernel g4agent-v12b v1, the sub20 zip; GAPS "Owner decisions; sub28
+  pre-registration"): `CARSON_APPROVED_SUB28=yes bash eval/arm_sub28_aa.sh` on the owner's OK, then sub29 the same way.
+  After 3 reads, final pick 1 is the 31B bundle with the highest mean over at least 2 reads.
+- [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1: the 31B bundle with the highest
+  mean over at least 2 reads (v12b unless its repeats fall below v12's 0.14). Pick 2: v12b_e4b_card (0.08), the small-model
+  entry for the $10k bonus (owner, 30 Oct).
 - [ ] **Paper track**: writeup editable until 13 Nov 05:29 IST; the compaction mechanism and the run audit are new material.
 
 ## What limits the score (our data)
@@ -158,7 +161,8 @@ From the online scan (29 Oct, about 60 forum threads, public notebooks, papers; 
   pruning, verification; Gemma 4 and vLLM news.
 - [ ] **R2 Small-model bonus ($10k, E2B or E4B, must be one of the two finals)**: our E4B entry reads 0.08, level with the
   small-model board on 22 Oct. Thread 753277 reports a training-free one-tensor fix for E4B's copying bug (copy test: the
-  unmodified model failed 15 of 18 inputs, the fixed one 1). Parked by the owner on 28 Oct; a decision for the final picks.
+  unmodified model failed 15 of 18 inputs, the fixed one 1). Decided 30 Oct: v12b_e4b_card is final pick 2; no E4B slots
+  are queued (the slots go to v12b repeats).
 
 ## Verified optimisation backlog (29 Oct)
 
