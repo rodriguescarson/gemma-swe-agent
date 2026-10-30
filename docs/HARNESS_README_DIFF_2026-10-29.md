@@ -152,6 +152,10 @@ Contradictions and gaps:
    300 s. A test run that takes 180 to 300 s counts as unresolved in the kernel and resolved on the scorer, so kernel scores
    can only err low. The 11 Oct build has no `verification_timeout_seconds` field; whether the 12 Oct build has it (the live
    text says it does) is not known, and the kernel does not set it.
+   **Resolved 31 Oct: the 12 Oct build has it, default 300.** The host's getting-started notebook passes
+   `verification_timeout_seconds` (default 300) to `EvalConfig`, and in `g4-l4-v12b-garble-p312` (12 Oct wheelhouse,
+   swegemma sha256 9ad87658) rich_3772's Phase 2 ran about 300 s with `timeout_seconds` 180. Only kernels on the 11 Oct
+   wheelhouse (63f054a3, e.g. `g4-l4-v12-p312`) graded at 180 s; current kernels grade like the scorer.
 2. **Single hard-coded model.** `MODEL_PATH` and `model_sources` are the 31B, and
    `create_model_registry(aliases=[declared, '...31b...'])` maps every alias to the served model (`adk_submission/server.py`
    397-414), so a bundle that declares the 12B, E4B or E2B is evaluated with 31B weights under that name. The live text makes

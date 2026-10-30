@@ -13,11 +13,14 @@ this file only orders the work.
   same configs solve 21-30 of 71 locally, an A/A repeat moves a config by up to 3, and local order has never matched hidden
   order. No candidate in the backlog is expected to move the mean by one task. Owner, 30 Oct: the slots go to repeat reads
   of v12b; no further 31B prompt edits are queued.
-- [ ] **sub28 = v12b again** (Kaggle kernel g4agent-v12b v1, the sub20 zip; GAPS "Owner decisions; sub28
-  pre-registration"): `CARSON_APPROVED_SUB28=yes bash eval/arm_sub28_aa.sh` on the owner's OK, then sub29 the same way.
-  After 3 reads, final pick 1 is the 31B bundle with the highest mean over at least 2 reads.
-- [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1: the 31B bundle with the highest
-  mean over at least 2 reads (v12b unless its repeats fall below v12's 0.14). Pick 2: v12b_e4b_card (0.08), the small-model
+- [x] **Assumption audit (31 Oct)**, `research/assumptions_2026-10-31/README.md`: one read has an SD of 1.5 tasks, so the
+  single-read bands are noise; our line's mean (0.14-0.15) equals the field's bulk; the best public lineages lead by 1-2
+  tasks and differ from us mainly in the budget (8 min). Records corrected (v12b has one read; pub024_6m never ran; capped
+  solves were mislabelled; Phase 2 is 300 s on the live wheelhouse).
+- [ ] **sub28 withdrawn** (a v12b repeat cannot separate v12b from v12: SE about 1.1 tasks). Next slot, owner's choice:
+  v12b at 5.5 min (breach about 0-1.5%, about +0.5 task), 6 min (breach 6-17%), or an 8-minute public lineage.
+- [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1: the scored 31B bundle with the
+  best expected private score, judged on the pooled line and its mechanism (budget), not on a single read. Pick 2: v12b_e4b_card (0.08), the small-model
   entry for the $10k bonus (owner, 30 Oct).
 - [ ] **Paper track**: writeup editable until 13 Nov 05:29 IST; the compaction mechanism and the run audit are new material.
 

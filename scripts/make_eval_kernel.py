@@ -20,10 +20,11 @@ that model, unless --allow-model-mismatch says the 31B run is what is wanted (it
 no model or several is refused regardless, as the kernel's own check would stop it). Oracle builds serve no model and are not
 checked.
 
-Timeout (2026-10-29): the installed swegemma 0.2.11 copies timeout_seconds into harness.command_timeout_seconds, which its
-Phase 2 verification also uses as the pytest timeout; it has no separate field. The scorer fixes Phase 2 at 300 s (live
-HARNESS_README 7.1). With timeout_seconds below 300 a test that takes longer fails here and passes there, so kernel grades
-can only err low; the build prints a note when timeout_seconds is not 300.
+Timeout (corrected 2026-10-31): the Phase 2 pytest timeout depends on the wheelhouse build. The 11 Oct build of swegemma
+0.2.11 (sha256 63f054a3, the copy in harness/wheels) reuses timeout_seconds; the build Kaggle serves since 12 Oct (9ad87658)
+gives EvalConfig a separate verification_timeout_seconds that defaults to the scorer's 300 s, as the host's getting-started
+notebook passes it (g4-l4-v12b-garble-p312: rich_3772 spent about 300 s in Phase 2 with timeout_seconds 180). Kernels built
+now grade Phase 2 like the scorer, so the build no longer prints a note.
 
 Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> [--ids ids.txt | --all-tasks] [--oracle | --patches labels.json]
        [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir] [--allow-model-mismatch]"""
@@ -33,7 +34,6 @@ BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_secon
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 VALID_IDS = os.path.join(REPO_ROOT, "data", "kaggle_valid_ids.txt")        # the 74 graded tasks, the default --ids
 KERNEL_MODEL = "gemma-4-31b-it-qat-w4a16-ct"      # the only weights the notebook serves: CELL_VLLM (MODEL_PATH, the aliases), model_sources
-SCORER_VERIFY_TIMEOUT = 300                       # the scorer's fixed Phase 2 pytest timeout (live HARNESS_README 7.1)
 MODEL_KEY = re.compile(r"^\s*(?:-\s+)?model\s*:\s*(.*)$")
 # The host notebook's defaults when a key is absent (cell 10 of the 2026-09-27 run; HARNESS_README 7.1 agrees).
 HOST_DEFAULTS = {"timeout_seconds": 300, "max_tool_calls": 100, "max_time_minutes": 60.0, "max_turns": None}
@@ -166,19 +166,6 @@ def check_kernel_model(bundle, allow_mismatch=False):
     if not allow_mismatch:
         raise SystemExit("make_eval_kernel: " + msg + " Pass --allow-model-mismatch if a 31B run of this bundle is what you want.")
     print("make_eval_kernel: WARNING: " + msg, file=sys.stderr)
-
-
-def verification_timeout_note(timeout_seconds):
-    """A one-line build note when the kernel's Phase 2 pytest timeout (swegemma 0.2.11 reuses timeout_seconds, no separate
-    field) differs from the scorer's fixed 300 s, else None."""
-    if timeout_seconds == SCORER_VERIFY_TIMEOUT:
-        return None
-    lower = timeout_seconds < SCORER_VERIFY_TIMEOUT
-    return ("note: Phase 2 verification here uses timeout_seconds=%d as its pytest timeout (swegemma 0.2.11 has no separate field); "
-            "the scorer fixes it at %d s, so a test that takes %d-%d s %s here and %s there: kernel grades can only err %s."
-            % (timeout_seconds, SCORER_VERIFY_TIMEOUT, min(timeout_seconds, SCORER_VERIFY_TIMEOUT),
-               max(timeout_seconds, SCORER_VERIFY_TIMEOUT), "fails" if lower else "passes", "passes" if lower else "fails",
-               "low" if lower else "high"))
 
 
 def bundle_files(bundle):
@@ -336,10 +323,8 @@ def run_sync(fn):
         with concurrent.futures.ThreadPoolExecutor(1) as pool: return pool.submit(lambda: asyncio.run(fn())).result()
     return asyncio.run(fn())
 limits, gen = build_submission_limits()
-# Phase 2 (swegemma verification.py) runs pytest with config.harness.command_timeout_seconds, which EvalConfig copies from
-# timeout_seconds (**BUDGET below); swegemma 0.2.11 has no separate verification timeout. The scorer fixes Phase 2 at 300 s
-# (HARNESS_README 7.1), so with timeout_seconds < 300 this kernel fails a test that runs longer than timeout_seconds but under
-# 300 s, which the scorer passes: kernel grades can only err low on those.
+# Phase 2's pytest timeout: the wheelhouse Kaggle serves since 12 Oct gives EvalConfig a verification_timeout_seconds that
+# defaults to the scorer's 300 s (the host notebook passes it); only the 11 Oct build reused timeout_seconds (**BUDGET below).
 ec = EvalConfig(tasks_path=DATA_DIR / 'tasks.jsonl', snapshots_dir=DATA_DIR / 'snapshots', results_dir=W / 'results',
     submission_dir=AGENT_DIR, models=models or _fallback_registry(), sandbox='subprocess', limits=limits,
     generation_constraints=gen, adapter_manifest=adapters,
@@ -615,9 +600,6 @@ def main(argv=None):
     with open(os.path.join(kd, "kernel-metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)
     print(kd, len(files), "files", len(ids) or "all", "tasks", "budget", json.dumps(budget, sort_keys=True), "from", src)
-    note = verification_timeout_note(budget["timeout_seconds"])
-    if note:
-        print(note)
     return 0
 
 

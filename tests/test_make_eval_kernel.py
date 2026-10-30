@@ -11,8 +11,9 @@ Regressions this pins:
   the tail of their test output (2026-10-29).
 - The notebook serves the 31B weights whatever the bundle declares, so a bundle declaring the 12B, E4B or E2B was graded with
   31B weights under the small model's name; a non-oracle build now refuses it unless --allow-model-mismatch is given.
-- Kernel grading uses timeout_seconds as the Phase 2 pytest timeout (swegemma 0.2.11 has no separate field) while the
-  scorer fixes it at 300 s: the run cell says so and the build prints a note when timeout_seconds is not 300.
+- The Phase 2 pytest timeout: the 29 Oct note said kernel grades can only err low (180 s against the scorer's 300 s). That was
+  true only of the 11 Oct wheelhouse; the build served since 12 Oct defaults verification_timeout_seconds to 300, so the run
+  cell says so and the build prints no note (corrected 31 Oct).
 """
 import ast, importlib.util, json, pathlib, subprocess, sys, time, types
 import pytest
@@ -577,34 +578,13 @@ def test_the_served_model_name_is_one_constant_across_the_notebook(tmp_path):
 
 
 # --------------------------------------------------------------------------------------- the Phase 2 pytest timeout
-def test_the_run_cell_says_verification_shares_the_command_timeout(tmp_path):
-    """swegemma 0.2.11 has no separate verification timeout: its Phase 2 pytest uses timeout_seconds (180 for v12b), the
-    scorer's is a fixed 300 s, so kernel grades can only err low on tests that take 180-300 s. A comment, no hack."""
-    build(tmp_path, ROOT / "submissions" / "v10", "t-vt")
+def test_the_run_cell_says_the_live_wheelhouse_grades_phase_2_at_300_s(tmp_path):
+    """The live wheelhouse (since 12 Oct) gives EvalConfig verification_timeout_seconds with the scorer's 300 s default, as the
+    host notebook passes it; only the 11 Oct build reused timeout_seconds. A comment, no override, and no build note."""
+    out = build(tmp_path, ROOT / "submissions" / "v12b", "t-vt")                  # timeout_seconds 180
     run_cell = next(c for c in cells(tmp_path, "t-vt") if "evaluate_task(" in c)
-    assert "no separate verification timeout" in run_cell and "can only err low" in run_cell and "300 s" in run_cell
-    ev_cfg = run_cell[run_cell.index("# Phase 2"):run_cell.index("ec = EvalConfig(")]
-    assert "command_timeout_seconds" in ev_cfg and "**BUDGET" in ev_cfg
+    comment = run_cell[run_cell.index("# Phase 2"):run_cell.index("ec = EvalConfig(")]
+    assert "verification_timeout_seconds" in comment and "300 s" in comment and "11 Oct build" in comment
+    assert "can only err low" not in run_cell and "note:" not in out.stdout
+    assert not hasattr(_mod(), "verification_timeout_note")
     compile(run_cell, "cell", "exec")
-
-
-def test_build_prints_a_note_when_the_kernel_timeout_is_not_the_scorers_300(tmp_path):
-    low = build(tmp_path, ROOT / "submissions" / "v12b", "t-vlow")                  # timeout_seconds 180
-    assert "timeout_seconds=180" in low.stdout and "takes 180-300 s fails here and passes there" in low.stdout
-    assert "kernel grades can only err low" in low.stdout and low.stdout.count("note:") == 1
-    exact = build(tmp_path, bundle_dir(tmp_path, "evaluation:\n  timeout_seconds: 300\n", "b300"), "t-v300")
-    assert "note:" not in exact.stdout
-    high = build(tmp_path, bundle_dir(tmp_path, "evaluation:\n  timeout_seconds: 600\n", "b600"), "t-v600")
-    assert "takes 300-600 s passes here and fails there" in high.stdout and "can only err high" in high.stdout
-    assert _mod().verification_timeout_note(300) is None
-
-
-def test_the_installed_swegemma_still_has_no_separate_verification_timeout():
-    """The assumption behind the note: swegemma 0.2.11 runs the Phase 2 pytest with harness.command_timeout_seconds. The live
-    HARNESS_README (7.1) names config.harness.verification_timeout_seconds for the scorer's newer build. If the wheelhouse
-    ever has it, set it to 300 in the run cell (HarnessLimits(verification_timeout_seconds=300)) and drop the note."""
-    swegemma = pytest.importorskip("swegemma")
-    hits = [str(f) for f in pathlib.Path(swegemma.__file__).parent.rglob("*.py") if "verification_timeout" in f.read_text(errors="replace")]
-    assert not hits, "swegemma has a verification timeout now: set it to 300 in CELL_RUN (%s)" % hits
-    text = (pathlib.Path(swegemma.__file__).parent / "harness" / "verification.py").read_text()
-    assert "timeout=config.harness.command_timeout_seconds" in text

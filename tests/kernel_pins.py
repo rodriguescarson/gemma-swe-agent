@@ -3,7 +3,7 @@ scripts/make_eval_kernel.py must give the notebook that ran. Builder changes mad
 undone on the rebuilt notebook before the comparison, so any other drift still fails.
 
 29 Oct 2026 (impl/eval-tooling): the id filter asserts that every requested id was found and prints the count; a comment on
-the Phase 2 verification timeout; result rows keep test_tail."""
+the Phase 2 verification timeout (reworded 31 Oct); result rows keep test_tail."""
 import json
 from pathlib import Path
 
@@ -12,10 +12,9 @@ LATER = [   # (what the builder writes now, what it wrote when the pinned kernel
      "    assert len(tasks) == len(set(IDS)), ('requested ids missing from tasks.jsonl', sorted(set(IDS) - {t.instance_id for t in tasks})[:10])\n"
      "print(len(tasks), 'tasks', ('of %d requested ids' % len(set(IDS))) if IDS else '(no id filter)', 'ORACLE' if ORACLE else 'AGENT', BUDGET)",
      "if IDS: tasks = [t for t in tasks if t.instance_id in set(IDS)]\nprint(len(tasks), 'tasks', 'ORACLE' if ORACLE else 'AGENT', BUDGET)"),
-    ("# Phase 2 (swegemma verification.py) runs pytest with config.harness.command_timeout_seconds, which EvalConfig copies from\n"
-     "# timeout_seconds (**BUDGET below); swegemma 0.2.11 has no separate verification timeout. The scorer fixes Phase 2 at 300 s\n"
-     "# (HARNESS_README 7.1), so with timeout_seconds < 300 this kernel fails a test that runs longer than timeout_seconds but under\n"
-     "# 300 s, which the scorer passes: kernel grades can only err low on those.\n", ""),
+    ("# Phase 2's pytest timeout: the wheelhouse Kaggle serves since 12 Oct gives EvalConfig a verification_timeout_seconds that\n"
+     "# defaults to the scorer's 300 s (the host notebook passes it); only the 11 Oct build reused timeout_seconds (**BUDGET below).\n",
+     ""),
     (", test_tail=(r.test_output or '')[-2500:])", ")"),
 ]
 
