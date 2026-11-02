@@ -19,7 +19,9 @@ case "$PY" in
 esac
 # Free-disk guard (2026-10-15: the Docker VM grew 11 GB in 5 min and took the Mac to 0 GB free twice in one afternoon). The
 # container needs ~10 GB (pip cache, torch site-packages, the 1.7 GB staged copy, per-test workspace copies). MIN_FREE_GB=0 disables.
-MIN_FREE_GB=${MIN_FREE_GB:-12}
+# 2026-11-02: raised from 12 to 16. On 1 Nov the guard saw 13 GB free, the container then used about 12.7 GB, and the Mac reached
+# 0.4 GB free ("No space left on device" in the container); a minute-by-minute free-disk log showed the fall.
+MIN_FREE_GB=${MIN_FREE_GB:-16}
 free_gb=$(python3 -c 'import shutil; print(shutil.disk_usage(".").free // 2**30)')
 if [ "$free_gb" -lt "$MIN_FREE_GB" ]; then
   echo "linux_test.sh: only ${free_gb} GB free on this disk (MIN_FREE_GB=${MIN_FREE_GB}); not starting the container" >&2; exit 3
