@@ -10,6 +10,8 @@
 #  5. Push the submission kernel once and submit that version with tag sub28:.
 # Every step is idempotent (ship rebuilds; push_wait skips output already present; submit_at skips a tag already on Kaggle).
 #   CARSON_APPROVED_SUB28=yes nohup bash eval/arm_sub28_v12b55.sh >/dev/null 2>&1 &
+# With the Linux gate on a RunPod CPU pod (3 Nov; ship.sh SHIP_LINUX=runpod, scripts/runpod/):
+#   CARSON_APPROVED_SUB28=yes SHIP_LINUX=runpod G4_POD=<id> G4_POD_SSH=<ip>:<port> nohup nice -n 10 bash eval/arm_sub28_v12b55.sh ...
 [ "${CARSON_APPROVED_SUB28:-}" = yes ] || { echo "sub28 not approved: Carson approves each Kaggle submission (CARSON_APPROVED_SUB28=yes)" >&2; exit 2; }
 cd /Users/carson/Projects/gemma-swe-agent || exit 1
 B=v12b_55; EVAL=g4-l4-v12b55-p312; SLUG=g4agent-v12b-55; TAG="sub28:"
@@ -28,6 +30,7 @@ push_version() {   # push once, wait for COMPLETE, print the pushed version numb
 [ -f "submissions/$B/eval_config.yaml" ] && [ -f tests/test_v12b_55_bundle.py ] || { say "submissions/$B or its test missing; stop"; exit 1; }
 grep -q "^### sub28 re-registered: v12b_55" docs/GAPS_2026-10-06.md || { say "GAPS has no sub28 re-registration; stop"; exit 1; }
 # ---- 1-2. package both kernels (tests run inside ship.sh)
+KEEP=""; if [ "${SHIP_LINUX:-docker}" = runpod ]; then bash scripts/runpod/keepalive.sh $$ > /dev/null 2>&1 & KEEP=$!; fi
 say "ship $B eval"
 bash scripts/ship.sh "submissions/$B" "$EVAL" eval --ids data/kaggle_valid_ids.txt --pin original --kernel-id g4-eval74-v3 > "$SP/ship_${B}_eval.log" 2>&1
 grep -q "SHIP OK: kernels/$EVAL" "$SP/ship_${B}_eval.log" || { say "$B eval ship FAILED (see $SP/ship_${B}_eval.log); stop"; exit 1; }
@@ -35,6 +38,8 @@ say "ship $B submit"
 bash scripts/ship.sh "submissions/$B" "$SLUG" submit > "$SP/ship_${B}_submit.log" 2>&1
 grep -q "SHIP OK: kernels/$SLUG" "$SP/ship_${B}_submit.log" || { say "$B submit ship FAILED (see $SP/ship_${B}_submit.log); stop"; exit 1; }
 say "$B SHIP OK (eval and submit)"
+# The RunPod Linux gate is done after the second ship: retire its pod now rather than at the idle limit.
+if [ "${SHIP_LINUX:-docker}" = runpod ]; then kill "$KEEP" 2>/dev/null; bash scripts/runpod/retire.sh >> "$LOG" 2>&1; fi
 # ---- 3. the L4 run, after the quota reset and with nothing scoring
 until [ "$(date -u +%s)" -ge "$RESET_AT" ]; do sleep 300; done
 until nothing_pending; do say "waiting: a submission is PENDING (no Kaggle runs while one scores)"; sleep 600; done

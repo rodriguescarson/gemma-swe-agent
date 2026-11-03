@@ -100,3 +100,36 @@ def test_a_failing_eval_builder_still_fails_the_ship(tmp_path):
 def test_submit_mode_is_not_subject_to_the_all_tasks_rule(tmp_path):
     r, built, _ = _ship(tmp_path, GREEN, STUB_IDS="all")
     assert r.returncode == 0 and built.read_text() == "submissions/b slug-x" and not (tmp_path / "built_eval.txt").exists()
+
+
+def _ship_runpod(tmp, **env_extra):
+    """SHIP_LINUX=runpod: the stub Mac python records its argv; the stub Linux gate records the PATH head and MIN_FREE_GB."""
+    env = {**_world(tmp, 'echo "PATH0=${PATH%%:*} MIN_FREE_GB=${MIN_FREE_GB-unset}" > linux_env.txt\necho "812 passed in 61.2s"\n'),
+           "SHIP_LINUX": "runpod", **env_extra}
+    py = tmp / ".venv" / "bin" / "python"
+    py.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > mac_argv.txt\nexit 0\n')
+    r = subprocess.run(["bash", str(tmp / "scripts" / "ship.sh"), "submissions/b", "slug-x"], cwd=tmp, env=env,
+                       capture_output=True, text=True, timeout=60)
+    return r
+
+
+def test_runpod_mode_runs_the_linux_gate_through_the_shim_after_the_whole_mac_suite(tmp_path):
+    r = _ship_runpod(tmp_path, G4_POD="pod123", G4_POD_SSH="1.2.3.4:22")
+    assert r.returncode == 0 and r.stdout.rstrip().endswith("SHIP OK: kernels/slug-x"), r.stdout + r.stderr
+    assert (tmp_path / "mac_argv.txt").read_text().splitlines()[-1] == "tests"      # the pod lacks the gitignored data
+    assert (tmp_path / "linux_env.txt").read_text().split() == [f"PATH0={tmp_path}/scripts/runpod/bin", "MIN_FREE_GB=0"]
+
+
+def test_runpod_mode_without_a_pod_is_refused_before_any_test(tmp_path):
+    r = _ship_runpod(tmp_path, G4_POD="")
+    assert r.returncode == 1 and "SHIP REFUSED: SHIP_LINUX=runpod needs G4_POD" in r.stdout
+    assert not (tmp_path / "mac_argv.txt").exists() and not (tmp_path / "built.txt").exists()
+
+
+def test_default_mode_still_runs_the_whole_mac_suite(tmp_path):
+    env = _world(tmp_path, GREEN)
+    (tmp_path / ".venv" / "bin" / "python").write_text('#!/bin/bash\nprintf "%s\\n" "$@" > mac_argv.txt\nexit 0\n')
+    r = subprocess.run(["bash", str(tmp_path / "scripts" / "ship.sh"), "submissions/b", "slug-x"], cwd=tmp_path,
+                       env={k: v for k, v in env.items() if k != "SHIP_LINUX"}, capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert (tmp_path / "mac_argv.txt").read_text().splitlines()[-1] == "tests"

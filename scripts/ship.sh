@@ -5,11 +5,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 B=$1; SLUG=$2; MODE=${3:-submit}; shift 3 2>/dev/null || shift $#
 find submissions -name "__pycache__" -prune -exec rm -rf {} +
+# SHIP_LINUX=runpod (2026-11-03, the owner: "can you use runpod instead?"): the Linux gate runs on a RunPod CPU pod through
+# scripts/runpod/bin/docker (G4_POD, G4_POD_SSH), x86_64 like Kaggle, instead of Docker Desktop (13 GB of the Mac's disk).
+# The pod has the repo but not the 12 GB of gitignored data, so the whole Mac suite still runs here first.
+LINUX=(bash scripts/linux_test.sh)
+if [ "${SHIP_LINUX:-docker}" = runpod ]; then
+  [ -n "${G4_POD:-}" ] || { echo "SHIP REFUSED: SHIP_LINUX=runpod needs G4_POD (the pod id) and G4_POD_SSH"; exit 1; }
+  LINUX=(env PATH="$PWD/scripts/runpod/bin:$PATH" MIN_FREE_GB=0 bash scripts/linux_test.sh)
+fi
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m pytest -q -p no:cacheprovider tests || { echo "SHIP REFUSED: tests failed"; exit 1; }
 # The Linux gate's own exit status counts, not only the log text: under set -e a bare `| tee` died silently (no refusal line,
 # nothing for the log reader to find), and a shared /tmp/linux_test.out let two concurrent ships read each other's result.
 LT=$(mktemp "${TMPDIR:-/tmp}/linux_test.XXXXXX")
-lt_rc=0; bash scripts/linux_test.sh 2>&1 | tee "$LT" || lt_rc=${PIPESTATUS[0]}
+lt_rc=0; "${LINUX[@]}" 2>&1 | tee "$LT" || lt_rc=${PIPESTATUS[0]}
 if [ "$lt_rc" -ne 0 ] || ! grep -qE "[0-9]+ passed" "$LT" || grep -qE "[0-9]+ failed" "$LT"; then
   echo "SHIP REFUSED: Linux tests failed (linux_test.sh exit $lt_rc; log $LT)"; exit 1
 fi

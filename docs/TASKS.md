@@ -20,7 +20,8 @@ this file only orders the work.
 - [~] **sub28 = v12b_55** (v12b, max_time_minutes 5.5; owner's choice 31 Oct, replacing the v12b repeat): chain
   `eval/arm_sub28_v12b55.sh` (log `eval/arm_sub28_v12b55.out`) ships both kernels, runs the 74-task 4x L4 gate after the
   weekly quota reset (PASS: 74 rows, 0 crashes, solved >= 26, secs <= 21,500), then submits with tag sub28:. GAPS "sub28
-  re-registered".
+  re-registered". Since 3 Nov its Linux gate runs on a RunPod CPU pod (`SHIP_LINUX=runpod`, `scripts/runpod/`; GAPS
+  "sub28's Linux gate moves to a RunPod CPU pod"), not Docker on the Mac.
 - [ ] **Final picks**: two, by hand, before 3 Dec 05:29 IST (merger cutoff 25 Nov). Pick 1: the scored 31B bundle with the
   best expected private score, judged on the pooled line and its mechanism (budget), not on a single read. Pick 2: v12b_e4b_card (0.08), the small-model
   entry for the $10k bonus (owner, 30 Oct).

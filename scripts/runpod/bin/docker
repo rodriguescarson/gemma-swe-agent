@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# `docker run` stand-in that runs scripts/linux_test.sh's container command on a RunPod CPU pod instead of Docker Desktop.
+# 2026-11-03: the Mac had 14 GB free with other sessions running and Docker Desktop off, and the owner asked for RunPod.
+#   G4_POD=<pod id> PATH="$PWD/scripts/runpod/bin:$PATH" MIN_FREE_GB=0 bash scripts/linux_test.sh
+# (ship.sh does this when SHIP_LINUX=runpod). linux_test.sh is unchanged: this script receives its exact `docker run` argv.
+#  - The pod runs the requested image (scripts/runpod/pod_body.py; refused if the pod's G4_POD_IMAGE differs), as x86_64
+#    like Kaggle; Docker on the Mac ran arm64.
+#  - Each host-path mount gets a store on the pod, /root/g4m/store/<dst>, copied to its container path as a real directory
+#    before every run (data/ as a symlink broke path relativisation; see tests/test_linux_test_script.py).
+#  - The Mac's link to the pod is slow (3 Nov, Mac to EUR-IS-1: 0.3 MB/s per stream, 1.3 MB/s over 8 streams), so the repo
+#    travels through GitHub. The pod clones the public origin at the Mac's HEAD (refused until HEAD is pushed) and seeds the
+#    stores from it. From the Mac, the repo mount then gets every modified, untracked or ignored file up to G4_POD_MAX_BYTES
+#    (default 1 MiB: about 120 MB), and the nested mounts (data/, eval/golden, eval/kaggle, eval/collect: 12 GB on the Mac)
+#    get their modified tracked files and the files listed in scripts/runpod/data_manifest.txt. Files deleted on the Mac are
+#    deleted on the pod. Tests that need the rest skip on the pod; ship.sh still runs the whole Mac suite, which has it all.
+#    A mount outside the repo is sent whole. Everything travels as one gzip'd tar stream per mount: macOS's openrsync paid a
+#    round trip per file (about 0.7 s on this link), which made 34,000 unchanged files take hours.
+#  - A mount nested inside another mount's source is excluded from the outer upload, and so is G4_POD_SKIP (default: what the
+#    suite's staging never copies, /.venv /backups __pycache__ *.pyc).
+#  - Named volumes (g4-pip-cache) persist under /root/g4m/vol/<name> for the life of the pod. /out comes back to its host path.
+#  - G4_POD_EMPTY mounts (default the task-workspace cache, 24 GB on the Mac) start empty instead of being uploaded: every test
+#    that reads it calls require_snapshot() first and skips, because data/raw/snapshots was deleted on 15 Oct.
+#  - /tmp is emptied and every container path recreated before each run, as a fresh --rm container has them.
+#  - Not emulated: --cpus/--memory (only the V10_ONLY branch sets them) and read-only mounts (root on the pod can write).
+#  - The run is detached on the pod (setsid nohup) and polled, so a dropped ssh connection does not kill the suite; the pod's
+#    watchdog sees /root/g4m/busy for the whole run and a heartbeat on every poll.
+# G4_POD_DRY=1 prints the plan and the pod-side script without connecting (tests/test_runpod_shim.py).
+# Exit status: the container command's, or 125 when the shim itself fails (docker's code for "could not run it").
+set -o pipefail      # no -u: macOS /bin/bash 3.2 treats "${empty_array[@]}" as unbound
+die() { echo "runpod docker shim: $*" >&2; exit 125; }
+[ "${1:-}" = run ] || die "only 'docker run' is supported (got: ${1:-nothing})"
+shift
+mounts=(); envs=(); workdir=/; image=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --rm) shift ;;
+    --cpus|--memory) echo "runpod docker shim: $1 $2 is not emulated on the pod" >&2; shift 2 ;;
+    -e) envs+=("$2"); shift 2 ;;
+    -v) mounts+=("$2"); shift 2 ;;
+    -w) workdir=$2; shift 2 ;;
+    -*) die "unsupported docker option $1" ;;
+    *) image=$1; shift; break ;;
+  esac
+done
+cmd=("$@")
+{ [ -n "$image" ] && [ ${#cmd[@]} -gt 0 ]; } || die "no image or no command"
+
+key_of() { printf '%s' "$1" | sed 's#^/##; s#/#__#g'; }
+read -r -a skip <<< "${G4_POD_SKIP-/.venv /backups __pycache__ *.pyc}"
+read -r -a empty <<< "${G4_POD_EMPTY-/root/.cache/g4/ws}"
+up_src=(); up_dst=(); vol_name=(); vol_dst=(); empty_dst=(); out_src=""; out_dst=""
+for m in "${mounts[@]}"; do
+  IFS=: read -r src dst _ <<< "$m"
+  if [[ "$src" != /* ]]; then vol_name+=("$src"); vol_dst+=("$dst")
+  elif [ "$dst" = /out ]; then out_src=$src; out_dst=$dst
+  elif [[ " ${empty[*]} " == *" $dst "* ]]; then empty_dst+=("$dst")
+  else up_src+=("$src"); up_dst+=("$dst"); fi
+done
+
+# The pod-side script: a fresh container's filesystem, then the command exactly as docker would exec it.
+S=/root/g4m
+wrapper() {
+  echo 'set -u'
+  echo 'find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf {} + 2>/dev/null'
+  local i d
+  for i in "${!up_dst[@]}"; do d=${up_dst[$i]}
+    printf 'rm -rf %q && mkdir -p %q && cp -a %s/store/%s/. %q/ || exit 125\n' "$d" "$d" "$S" "$(key_of "$d")" "$d"; done
+  for i in "${!vol_dst[@]}"; do d=${vol_dst[$i]}
+    printf 'mkdir -p %s/vol/%s "$(dirname %q)" && rm -rf %q && ln -s %s/vol/%s %q || exit 125\n' \
+      "$S" "${vol_name[$i]}" "$d" "$d" "$S" "${vol_name[$i]}" "$d"; done
+  for d in "${empty_dst[@]}" ${out_dst:+"$out_dst"}; do printf 'rm -rf %q && mkdir -p %q || exit 125\n' "$d" "$d"; done
+  # The image's own environment (PID 1's: LANG, PATH, PYTHON_VERSION) plus the -e values, as docker gives a container; never
+  # the pod's RunPod key, its ssh key list or this login's SSH_* variables.
+  # shellcheck disable=SC2016
+  echo 'img=(); while IFS= read -r -d "" kv; do case "$kv" in RUNPOD_*|PUBLIC_KEY=*|G4_POD_*|JUPYTER_*|HOME=*) ;; *) img+=("$kv") ;; esac; done < /proc/1/environ'
+  printf 'cd %q || exit 125\n' "$workdir"
+  # shellcheck disable=SC2016
+  printf 'exec env -i "${img[@]}" HOME=/root'
+  for d in "${envs[@]}" "${cmd[@]}"; do printf ' %q' "$d"; done; echo
+}
+# The repo (the first mount source inside a git work tree) and each mount's place in it: root, nested <rel>, or plain.
+top=""; for s in "${up_src[@]}"; do top=$(git -C "$s" rev-parse --show-toplevel 2>/dev/null) && break; top=""; done
+up_kind=(); up_rel=()
+for i in "${!up_src[@]}"; do s=${up_src[$i]}
+  if [ -n "$top" ] && [ "$s" = "$top" ]; then up_kind+=(root); up_rel+=("")
+  elif [ -n "$top" ] && [[ "$s" == "$top"/* ]]; then up_kind+=(nested); up_rel+=("${s#"$top"/}")
+  else up_kind+=(plain); up_rel+=(""); fi
+done
+MAXB=${G4_POD_MAX_BYTES-1048576}
+nested_rels=(); for i in "${!up_kind[@]}"; do [ "${up_kind[$i]}" = nested ] && nested_rels+=("${up_rel[$i]}"); done
+MANIFEST=${G4_POD_MANIFEST:-$(cd "$(dirname "$0")/.." && pwd)/data_manifest.txt}
+manifest_for() {     # $1 = a nested mount's path in the repo: its manifest entries, relative to the mount
+  [ -f "$MANIFEST" ] || return 0
+  sed -e 's/#.*//' -e 's/[[:space:]]*$//' "$MANIFEST" | awk -v p="$1/" 'index($0, p) == 1 {print substr($0, length(p) + 1)}'
+}
+# NUL-separated paths (relative to the repo dir $1, "" = the whole repo) that differ from HEAD and fit MAXB bytes: modified
+# tracked files, plus untracked and ignored ones when $2 = 1, minus .git, the nested mounts (other than $1) and the skips.
+# $2 = del lists the tracked files deleted on the Mac instead.
+changed_list() {
+  local others=() n
+  for n in "${nested_rels[@]}"; do [ "$n" != "$1" ] && others+=("$n"); done
+  python3 - "$top" "$1" "$2" "$MAXB" "${skip[@]}" -- ${others[@]+"${others[@]}"} <<'PY'
+import fnmatch, os, subprocess, sys
+top, rel, mode, maxb = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+rest = sys.argv[5:]; cut = rest.index("--"); skip, nested = rest[:cut], rest[cut + 1:]
+flags = {"1": ["-m", "-o"], "0": ["-m"], "del": ["-d"]}[mode]
+out = subprocess.run(["git", "-C", top, "ls-files", "-z", *flags, "--", rel or "."], capture_output=True, check=True).stdout
+names = sorted(set(os.fsdecode(n) for n in out.split(b"\0") if n))
+def skipped(p):
+    parts = p.split("/")
+    if parts[0] == ".git" or any(p == n or p.startswith(n + "/") for n in nested):
+        return True
+    for s in skip:
+        if s.startswith("/") and (p == s[1:] or p.startswith(s[1:] + "/")):
+            return True
+        if not s.startswith("/") and any(fnmatch.fnmatch(x, s) for x in parts):
+            return True
+    return False
+keep = []
+for p in names:
+    full = os.path.join(top, p)
+    if skipped(p):
+        continue
+    if mode == "del" or os.path.islink(full) or (os.path.isfile(full) and os.path.getsize(full) <= maxb):
+        keep.append(p[len(rel) + 1:] if rel else p)
+sys.stdout.buffer.write(b"".join(os.fsencode(k) + b"\0" for k in keep))
+PY
+}
+list_bytes() { python3 -c 'import os, sys; d, f = sys.argv[1:]; n = [x for x in open(f, "rb").read().split(b"\0") if x]
+print(len(n), round(sum(os.lstat(os.path.join(d, os.fsdecode(x))).st_size for x in n) / 2**20, 1))' "$1" "$2"; }
+excludes_for() {     # $1 = an upload source: the other mounts inside it, then the skip patterns
+  local src=$1 m o p
+  for m in "${mounts[@]}"; do o=${m%%:*}; [[ "$o" == "$src"/* ]] && printf -- '--exclude=/%s\n' "${o#"$src"/}"; done
+  for p in "${skip[@]}"; do printf -- '--exclude=%s\n' "$p"; done
+}
+
+if [ "${G4_POD_DRY:-0}" = 1 ]; then
+  echo "image $image"; echo "workdir $workdir"
+  [ -n "$top" ] && echo "git $top at $(git -C "$top" rev-parse HEAD)"
+  for i in "${!up_src[@]}"; do
+    case ${up_kind[$i]} in
+      root) L=$(mktemp "${TMPDIR:-/tmp}/g4pod_list.XXXXXX"); changed_list "" 1 > "$L"
+            how="git seed + $(list_bytes "${up_src[$i]}" "$L" | awk '{print $1 " files, " $2 " MB"}') up to $MAXB B"; rm -f "$L";;
+      nested) how="git seed ${up_rel[$i]} + manifest $(manifest_for "${up_rel[$i]}" | wc -l | tr -d ' ') files";;
+      *) how="whole";;
+    esac
+    echo "upload ${up_src[$i]} -> ${up_dst[$i]} [$how] $(excludes_for "${up_src[$i]}" | tr '\n' ' ')"
+  done
+  for i in "${!vol_dst[@]}"; do echo "volume ${vol_name[$i]} -> ${vol_dst[$i]}"; done
+  for d in "${empty_dst[@]}"; do echo "empty $d"; done
+  [ -n "$out_dst" ] && echo "out $out_dst -> $out_src"
+  echo "--- pod-side script"; wrapper; exit 0
+fi
+
+# ---- the pod
+# G4_POD_SSH=<ip>:<port> is the pod's direct SSH (the MCP get-pod ssh.direct block). This Mac has no RunPod API key for
+# runpodctl (~/.runpod/config.toml's apikey is empty; the MCP connection authenticates on its own), so runpodctl ssh info
+# is only the fallback when RUNPOD_API_KEY is set.
+[ -n "${G4_POD:-}" ] || die "G4_POD (the Linux-gate pod id; python3 scripts/runpod/pod_body.py has the create body) is not set"
+if [ -n "${G4_POD_SSH:-}" ]; then info="root@${G4_POD_SSH%:*} -p ${G4_POD_SSH##*:}"
+else info=$("${RUNPODCTL:-runpodctl}" ssh info "$G4_POD" 2>&1) || die "runpodctl ssh info $G4_POD failed: $info"; fi
+read -r ip port < <(printf '%s' "$info" | python3 -c '
+import json, re, sys
+t = sys.stdin.read()
+try:
+    d = json.loads(t)
+except ValueError:
+    d = {}
+ip, port = d.get("ip") or d.get("publicIp"), d.get("port") or d.get("sshPort")
+m = re.search(r"root@([0-9.]+) -p (\d+)", t)
+if (not ip or not port) and m:
+    ip, port = m.group(1), m.group(2)
+print(ip or "", port or "")')
+{ [ -n "$ip" ] && [ -n "$port" ]; } || die "no direct SSH (ip and port) for pod $G4_POD yet: $info"
+KEY=${G4_POD_KEY:-$HOME/.ssh/id_ed25519}; KH=${G4_POD_KNOWN_HOSTS:-$HOME/.ssh/known_hosts_runpod}
+O=(-p "$port" -i "$KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$KH"
+   -o ConnectTimeout=20 -o ServerAliveInterval=30 -o ServerAliveCountMax=6)
+SSH=(ssh "${O[@]}" "root@$ip")
+retry() { local n; for n in 1 2 3 4 5; do "$@" && return 0; sleep $((n * 15)); done; return 1; }
+
+pod_image=$(retry "${SSH[@]}" "tr '\\0' '\\n' < /proc/1/environ | sed -n 's/^G4_POD_IMAGE=//p'") || die "cannot reach pod $G4_POD over ssh"
+[ "$pod_image" = "$image" ] || die "pod $G4_POD runs ${pod_image:-an unrecorded image}, linux_test.sh asked for $image"
+retry "${SSH[@]}" "mkdir -p $S/store $S/vol $S/run && touch $S/busy $S/heartbeat" || die "pod setup failed"
+trap '"${SSH[@]}" "rm -f $S/busy; touch $S/heartbeat" > /dev/null 2>&1' EXIT
+free=$("${SSH[@]}" "df -Pk $S | awk 'NR==2 {print int(\$4 / 1048576)}'")
+[ "${free:-0}" -ge "${G4_POD_MIN_FREE_GB:-30}" ] || die "only ${free:-?} GB free on the pod (G4_POD_MIN_FREE_GB=${G4_POD_MIN_FREE_GB:-30})"
+
+if [ -n "$top" ]; then
+  sha=$(git -C "$top" rev-parse HEAD); branch=$(git -C "$top" rev-parse --abbrev-ref HEAD)
+  url=${G4_POD_GIT_URL:-$(git -C "$top" remote get-url origin | sed -E 's#^git@github\.com:#https://github.com/#')}
+  [ -n "$(git -C "$top" branch -r --contains "$sha" 2>/dev/null)" ] || die "HEAD $sha is not on a remote branch: push it first (the pod clones it)"
+  echo "runpod docker shim: pod checks out $sha from $url" >&2
+  retry "${SSH[@]}" "set -e; c=$S/clone; [ -d \$c/.git ] || git clone -q --no-checkout $(printf %q "$url") \$c; cd \$c
+    git cat-file -e $sha^{commit} 2>/dev/null || git fetch -q origin; git checkout -q -f -B $(printf %q "$branch") $sha; git clean -qfdx" \
+    || die "the pod could not check out $sha from $url"
+fi
+send_files() {       # $1 = local dir, $2 = NUL list relative to it, $3 = store dir on the pod: one gzip'd tar stream
+  [ -s "$2" ] || return 0
+  COPYFILE_DISABLE=1 tar -c -f - --no-mac-metadata --no-xattrs --no-fflags -C "$1" --null -T "$2" | gzip -1 \
+    | "${SSH[@]}" "mkdir -p $3 && gzip -d | tar -x -f - --no-same-owner -C $3"
+}
+delete_files() {     # $1 = NUL list, $2 = store dir on the pod
+  [ -s "$1" ] || return 0
+  "${SSH[@]}" "cd $2 && xargs -0 rm -f --" < "$1"
+}
+for i in "${!up_src[@]}"; do
+  src=${up_src[$i]}; k=$(key_of "${up_dst[$i]}"); rel=${up_rel[$i]}; d=$S/store/$k; ex=()
+  while IFS= read -r e; do ex+=("$e"); done < <(excludes_for "$src")
+  L=$(mktemp "${TMPDIR:-/tmp}/g4pod_list.XXXXXX"); D=$(mktemp "${TMPDIR:-/tmp}/g4pod_del.XXXXXX")
+  case ${up_kind[$i]} in
+    root)       # the clone at HEAD (with its .git), then what differs on the Mac
+      retry "${SSH[@]}" "mkdir -p $d && rsync -a --delete $(printf '%q ' "${ex[@]}") $S/clone/ $d/" || die "seeding $k failed"
+      changed_list "" 1 > "$L"; changed_list "" del > "$D" ;;
+    nested)     # the clone's tracked files, the Mac's modified ones, and the manifest
+      retry "${SSH[@]}" "mkdir -p $d && if [ -d $S/clone/$rel ]; then rsync -a --delete $S/clone/$rel/ $d/; fi" || die "seeding $k failed"
+      { changed_list "$rel" 0; manifest_for "$rel" | tr '\n' '\0'; } > "$L"; changed_list "$rel" del > "$D" ;;
+    *)          # outside the repo: all of it
+      retry "${SSH[@]}" "rm -rf $d && mkdir -p $d" || die "clearing $k failed"
+      (cd "$src" && find . -type f -print0) > "$L" ;;
+  esac
+  echo "runpod docker shim: sending $src: $(list_bytes "$src" "$L" | awk '{print $1 " files, " $2 " MB"}') -> pod:$d" >&2
+  retry send_files "$src" "$L" "$d" || die "upload of $src failed"
+  retry delete_files "$D" "$d" || die "deleting the Mac's deleted files under $src failed"
+  rm -f "$L" "$D"
+done
+
+W=$(mktemp "${TMPDIR:-/tmp}/g4pod_wrapper.XXXXXX"); wrapper > "$W"
+retry "${SSH[@]}" "rm -f $S/run/rc $S/run/out.log; cat > $S/run/wrapper.sh" < "$W" || die "could not send the run script"
+rm -f "$W"
+"${SSH[@]}" "setsid nohup bash -c 'bash $S/run/wrapper.sh > $S/run/out.log 2>&1; echo \$? > $S/run/rc.tmp; mv $S/run/rc.tmp $S/run/rc' \
+  > /dev/null 2>&1 < /dev/null &" || die "could not start the run"
+echo "runpod docker shim: running on pod $G4_POD ($image)" >&2
+lost=0; rc=""
+while :; do
+  sleep "${G4_POD_POLL:-20}"
+  if r=$("${SSH[@]}" "touch $S/heartbeat; cat $S/run/rc 2>/dev/null || echo RUNNING"); then
+    lost=0; [ "$r" = RUNNING ] && continue; rc=$r; break
+  fi
+  lost=$((lost + 1)); [ "$lost" -ge "${G4_POD_MAX_LOST:-30}" ] && die "lost pod $G4_POD for $lost polls in a row"
+done
+retry "${SSH[@]}" "cat $S/run/out.log" || die "could not read the run's output"
+if [ -n "$out_src" ]; then
+  mkdir -p "$out_src"
+  retry bash -c '"$@" | tar -x -f - -C "$0"' "$out_src" "${SSH[@]}" "tar -c -f - -C $out_dst ." \
+    || echo "runpod docker shim: $out_dst not copied back" >&2
+fi
+[[ "$rc" =~ ^[0-9]+$ ]] || die "the run ended without an exit status ($rc)"
+exit "$rc"
