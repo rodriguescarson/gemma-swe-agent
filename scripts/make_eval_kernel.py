@@ -27,7 +27,8 @@ notebook passes it (g4-l4-v12b-garble-p312: rich_3772 spent about 300 s in Phase
 now grade Phase 2 like the scorer, so the build no longer prints a note.
 
 Usage: python scripts/make_eval_kernel.py <bundle_dir> <slug> [--ids ids.txt | --all-tasks] [--oracle | --patches labels.json]
-       [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir] [--allow-model-mismatch]"""
+       [--min M] [--calls N] [--turns N] [--timeout S] [--helper-check scripts_dir] [--allow-model-mismatch]
+       [--snapshot-hook scripts/ladder/snapshot_hook.py]"""
 import argparse, inspect, base64, json, os, re, sys
 
 BUDGET_KEYS = ("max_time_minutes", "max_tool_calls", "max_turns", "timeout_seconds")
@@ -496,13 +497,48 @@ if ADAPTERS_DATASET:
 '''
 
 
-def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None, probe=None, names=(), adapters_dataset=None):
+# Budget ladder (2026-11-07, scripts/ladder/): one run at a long cap records the working tree at the start of every counted
+# tool call (scripts/ladder/snapshot_hook.py), so the trees a 5, 5.5 or 6 minute run would have been graded on can be
+# rescored on CPU afterwards. The scorer grades the unsubmitted tree at the clock (swegemma/harness/agent_runner.py, the
+# fallback diff after a TimeoutError), so the tree at T is what a T-minute cap is graded on. The hook is installed right
+# after the Evaluator is built and the run stops after its first task if the hook wrote no rows or logged an error, so a
+# hook that does not work on the served wheel costs one task of GPU time, not the whole run.
+HOOK_ANCHOR = "ev = Evaluator(ec)\n"
+HOOK_CHECK_ANCHOR = "        print(cfg, i, row['id'], row['resolved'], row.get('calls'), row['secs'], (row.get('err') or '')[:80], flush=True)\n"
+HOOK_INSTALL = r'''LADDER_NS = {}
+exec(compile(base64.b64decode(LADDER_HOOK_B64).decode(), 'snapshot_hook.py', 'exec'), LADDER_NS)
+LADDER_NS['install'](str(W / 'snapshots.jsonl'))
+print('LADDER_HOOK installed', flush=True)
+'''
+HOOK_CHECK = r'''        if i == 1:
+            _snap, _err = W / 'snapshots.jsonl', W / 'snapshots.jsonl.err'
+            _n = sum(1 for _ in open(_snap)) if _snap.exists() else 0
+            _e = _err.read_text()[:500] if _err.exists() else ''
+            print('LADDER_CHECK rows', _n, 'err', repr(_e), flush=True)
+            if _n == 0 or _e:
+                out.close()
+                raise SystemExit('LADDER_ABORT: the snapshot hook wrote no rows or logged an error on the first task')
+'''
+
+
+def add_snapshot_hook(run, hook_b64):
+    for anchor in (HOOK_ANCHOR, HOOK_CHECK_ANCHOR):
+        if run.count(anchor) != 1:
+            raise SystemExit("make_eval_kernel: the run cell changed; snapshot hook anchor not found once: %r" % anchor[:60])
+    run = run.replace(HOOK_ANCHOR, HOOK_ANCHOR + "LADDER_HOOK_B64 = " + json.dumps(hook_b64) + "\n" + HOOK_INSTALL)
+    return run.replace(HOOK_CHECK_ANCHOR, HOOK_CHECK_ANCHOR + HOOK_CHECK)
+
+
+def build_cells(files, ids, patches, oracle, budget, override, helper_b64=None, probe=None, names=(), adapters_dataset=None,
+                snapshot_hook_b64=None):
     run = CELL_RUN
     for k, v in (("@MIN_TOKENS@", CONTEXT_CACHE["min_tokens"]), ("@TTL@", CONTEXT_CACHE["ttl_seconds"]),
                  ("@CACHE_INTERVALS@", CONTEXT_CACHE["cache_intervals"]), ("@INTERVAL@", COMPACTION["compaction_interval"]),
                  ("@OVERLAP@", COMPACTION["overlap_size"]), ("@THRESHOLD@", COMPACTION["token_threshold"]),
                  ("@RETENTION@", COMPACTION["event_retention_size"])):
         run = run.replace(k, repr(v))
+    if snapshot_hook_b64 is not None:
+        run = add_snapshot_hook(run, snapshot_hook_b64)
     data = ("FILES = " + json.dumps(files) + "\nIDS = " + json.dumps(ids) + "\nPATCHES = " + json.dumps(patches) +
             "\nORACLE = %s\nBUDGET_OVERRIDE = %s\nEXPECTED_BUDGET = %s\n" % (oracle, repr(override), repr(budget)) + r'''
 DATA_DIR = Path('/kaggle/input/competitions/gemma-4-developer-agent')
@@ -544,6 +580,9 @@ def main(argv=None):
                     help="take adapter weights from this Kaggle dataset (scripts/adapters_dataset.py) instead of embedding them")
     ap.add_argument("--kernel-id", default=None,
                     help="push as a new version of this existing slug (id/title/code_file) while writing under kernels/<slug>/")
+    ap.add_argument("--snapshot-hook", default=None, metavar="PY",
+                    help="budget ladder: record the working tree at every counted tool call with this hook "
+                         "(scripts/ladder/snapshot_hook.py) and stop after task 1 if it wrote nothing")
     a = ap.parse_args(argv)
     override = {k: v for k, v in (("max_time_minutes", a.min), ("max_tool_calls", a.calls), ("max_turns", a.turns),
                                    ("timeout_seconds", a.timeout)) if v is not None}
@@ -579,8 +618,14 @@ def main(argv=None):
             if f.endswith(".py"):
                 with open(os.path.join(a.helper_check, f), "rb") as fh:
                     hb[f] = base64.b64encode(fh.read()).decode()
+    hook = None
+    if a.snapshot_hook:
+        if a.oracle:
+            raise SystemExit("make_eval_kernel: --snapshot-hook records agent runs; an oracle or --patches build runs no agent")
+        with open(a.snapshot_hook, "rb") as fh:
+            hook = base64.b64encode(fh.read()).decode()
     cells = build_cells(files, ids, patches, a.oracle, budget, override, hb, probe=a.probe, names=adapter_names(a.bundle),
-                        adapters_dataset=a.adapters_dataset)
+                        adapters_dataset=a.adapters_dataset, snapshot_hook_b64=hook)
     nb = {"cells": [{"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": c} for c in cells],
           "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}}, "nbformat": 4, "nbformat_minor": 5}
     kd = os.path.join("kernels", a.slug)

@@ -588,3 +588,40 @@ def test_the_run_cell_says_the_live_wheelhouse_grades_phase_2_at_300_s(tmp_path)
     assert "can only err low" not in run_cell and "note:" not in out.stdout
     assert not hasattr(_mod(), "verification_timeout_note")
     compile(run_cell, "cell", "exec")
+
+
+# ---- budget ladder (2026-11-07): scripts/ladder/snapshot_hook.py records the tree at every counted tool call
+HOOK = ROOT / "scripts" / "ladder" / "snapshot_hook.py"
+
+
+def test_default_build_has_no_snapshot_hook(tmp_path):
+    b = bundle_dir(tmp_path, "max_time_minutes: 5\nmax_tool_calls: 40\nmax_turns: 150\ntimeout_seconds: 180\n")
+    build(tmp_path, b, "k")
+    assert not any("LADDER" in c for c in cells(tmp_path, "k"))
+
+
+def test_snapshot_hook_is_installed_after_the_evaluator_and_checked_after_task_one(tmp_path):
+    import base64
+    b = bundle_dir(tmp_path, "max_time_minutes: 5\nmax_tool_calls: 40\nmax_turns: 150\ntimeout_seconds: 180\n")
+    build(tmp_path, b, "k", "--snapshot-hook", str(HOOK), "--min", "8")
+    run = next(c for c in cells(tmp_path, "k") if "ev = Evaluator(ec)" in c)
+    assert run.index("ev = Evaluator(ec)") < run.index("LADDER_NS['install']") < run.index("for i, t in enumerate(run_tasks, 1):")
+    assert run.index("print(cfg, i, row['id']") < run.index("LADDER_CHECK") < run.index("out.close()\nprint('TOTAL'")
+    assert "raise SystemExit('LADDER_ABORT" in run
+    assert base64.b64decode(ns_value(run, "LADDER_HOOK_B64")) == HOOK.read_bytes()
+    compile(run, "run", "exec")
+    data = next(c for c in cells(tmp_path, "k") if "EXPECTED_BUDGET" in c)
+    assert ns_value(data, "BUDGET_OVERRIDE") == {"max_time_minutes": 8.0}
+
+
+def test_snapshot_hook_refuses_builds_that_run_no_agent(tmp_path):
+    b = bundle_dir(tmp_path, "max_time_minutes: 5\nmax_tool_calls: 40\nmax_turns: 150\ntimeout_seconds: 180\n")
+    r = build(tmp_path, b, "k", "--oracle", "--snapshot-hook", str(HOOK), check=False)
+    assert r.returncode != 0 and "runs no agent" in (r.stderr + r.stdout)
+
+
+def test_snapshot_hook_anchors_must_match_once():
+    m = _mod()
+    with pytest.raises(SystemExit):
+        m.add_snapshot_hook("no anchors here", "eA==")
+    assert m.CELL_RUN.count(m.HOOK_ANCHOR) == 1 and m.CELL_RUN.count(m.HOOK_CHECK_ANCHOR) == 1
