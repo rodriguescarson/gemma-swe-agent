@@ -4,7 +4,8 @@ These scripts make every number in the six-page conference version of *A 74-Task
 Gemma 4 31B Agent Configurations, and Hidden-Read Noise Is Only Bracketed* (Carson Rodrigues, Celabe Research).
 The longer version is the Zenodo preprint, doi:10.5281/zenodo.23592037.
 
-They read this repository and write nothing outside this folder.
+They read this repository and write nothing outside this folder. `analysis/tables/` holds the two tables of the
+extended version that `calibration_robustness.py` reads.
 
 ## Run
 
@@ -31,6 +32,9 @@ git diff --stat paper/iatmsi-2027
 On a fresh clone the outputs match the committed ones except:
 
 - the lines that record the repository HEAD and tags, which change with every commit;
+- formatting only: key order in two JSON files, and pairs printed as JSON lists;
+- the duplicate v5h2-think run is listed under its Kaggle folder, because `eval/decide_out/` is not in the repository
+  (same per-task results, counted once either way);
 - `nChecksums` in `decision_macros.tex` and the matching lines of `checksums.sha256`: 49 input files on the author's
   machine, 37 on a clone. The other 12 are the trace archives of the Kaggle L4 runs (`eval/kaggle/*/traces.tar.gz`),
   which are not in the repository, so the trace search (`tracesRead`) cannot be rerun from a clone.

@@ -31,6 +31,8 @@ from scipy.stats import kendalltau, rankdata, spearmanr
 
 HERE = Path(__file__).resolve().parent
 TABLES = HERE.parent / "draft-emse" / "source" / "tables"
+if not TABLES.exists():  # public repository layout: copies of the two tables sit next to this script
+    TABLES = HERE / "tables"
 OUT = HERE / "results"
 SEED = 20261030
 N_BOOT = 20000

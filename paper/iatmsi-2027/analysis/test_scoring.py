@@ -54,11 +54,14 @@ class Scoring(unittest.TestCase):
         self.assertEqual(lo, 0.0)
         self.assertAlmostEqual(hi, 1 - 0.025 ** 0.2, places=6)
 
-    def test_hidden_scores_are_k_over_60(self):
-        # the printed scores and the task counts the paper uses: 0.05=3, 0.08=5, 0.10=6, 0.13=8, 0.15=9, 0.17=10
+    def test_hidden_scores_are_k_over_58_truncated(self):
+        # the printed scores and the task counts the paper uses: 0.05=3, 0.08=5, 0.10=6, 0.13=8, 0.15=9, 0.17=10,
+        # out of 58 private tasks, truncated (not rounded) to two decimals
         for k, s in [(3, 0.05), (5, 0.08), (6, 0.10), (8, 0.13), (9, 0.15), (10, 0.17)]:
-            self.assertEqual(round(k / 60, 2), s)
-        self.assertEqual(cr.denominator_check([0.05, 0.08, 0.1, 0.13, 0.15, 0.17])["denominators_55_to_63_consistent_with_every_score"], [60])
+            self.assertEqual((100 * k) // 58, round(s * 100))
+        chk = cr.denominator_check([0.05, 0.08, 0.1, 0.13, 0.15, 0.17])
+        self.assertEqual(chk["truncation_denominators_55_to_63"], [58])
+        self.assertTrue(chk["n58_consistent"])
 
     def test_added_lines_filter(self):
         diff = "+++ b/x.py\n+short\n+    assert response.status_code == 200, response.text\n+# a long comment line that is more than forty chars long\n-removed line that is long enough to count but is removed\n"
